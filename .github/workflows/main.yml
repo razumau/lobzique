@@ -31,5 +31,7 @@ jobs:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
           cargo-cache: true
+      - name: Verify test fixtures
+        run: script/fetch_fixtures --verify
       - name: Run the default task
         run: bundle exec rake

@@ -1,0 +1,362 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Fetches third-party HTML/DOM/selector/sanitizer test fixtures declared in
+# test/fixtures/sources.yml into test/fixtures/<source>/, pinned by commit.
+#
+#   script/fetch_fixtures                    fetch what sources.lock.yml pins
+#   script/fetch_fixtures --update           re-resolve every ref, then fetch
+#   script/fetch_fixtures --update dompurify re-resolve only the named sources
+#   script/fetch_fixtures --only nokogiri    restrict a run to named sources
+#   script/fetch_fixtures --verify           offline: check files against
+#                                            MANIFEST.json (for CI)
+#
+# Ruby stdlib + git only. Nothing fetched is ever executed: files are listed
+# from git trees, copied as bytes, and the one transform is a data parser.
+
+require "digest"
+require "fileutils"
+require "json"
+require "open3"
+require "optparse"
+require "tmpdir"
+require "yaml"
+
+Encoding.default_external = Encoding::UTF_8 # don't depend on the caller's locale
+
+module FetchFixtures
+  ROOT = File.expand_path("..", __dir__)
+  FIXTURES = File.join(ROOT, "test", "fixtures")
+  SOURCES = File.join(FIXTURES, "sources.yml")
+  LOCK = File.join(FIXTURES, "sources.lock.yml")
+  MANIFEST = File.join(FIXTURES, "MANIFEST.json")
+  NOTICE = File.join(FIXTURES, "NOTICE.md")
+  SHA_RE = /\A[0-9a-f]{40}\z/
+
+  class Error < StandardError; end
+
+  Source = Struct.new(:name, :repo, :ref, :license, :license_files,
+    :purpose, :files, :transform) do
+    def url = "https://github.com/#{repo}"
+    def dest = File.join(FIXTURES, name)
+    def rel_dest = dest.delete_prefix("#{FIXTURES}/")
+  end
+
+  module_function
+
+  # ------------------------------------------------------------------ config
+
+  def load_sources
+    raw = YAML.safe_load_file(SOURCES).fetch("sources")
+    raw.map do |name, h|
+      raise Error, "#{name}: bad name" unless name.match?(/\A[a-z0-9][a-z0-9_-]*\z/)
+      files = Array(h.fetch("files")).map do |f|
+        {include: Array(f.fetch("include")), exclude: Array(f["exclude"]),
+         to: f.fetch("to", "."), strip: f["strip"]}
+      end
+      Source.new(name: name, repo: h.fetch("repo"), ref: h.fetch("ref", "HEAD"),
+        license: h.fetch("license"), license_files: Array(h["license_files"]),
+        purpose: h["purpose"].to_s.strip, files: files, transform: h["transform"])
+    end
+  end
+
+  def load_lock = File.exist?(LOCK) ? (YAML.safe_load_file(LOCK) || {}).fetch("sources", {}) : {}
+  def load_manifest = File.exist?(MANIFEST) ? JSON.parse(File.read(MANIFEST)) : {}
+
+  # --------------------------------------------------------------------- git
+
+  GIT_SAFETY = %w[-c core.hooksPath=/dev/null -c protocol.file.allow=never
+    -c core.symlinks=false -c advice.detachedHead=false
+    -c gc.auto=0 -c maintenance.auto=false].freeze
+
+  def git(*args, dir: nil)
+    cmd = ["git", *GIT_SAFETY, *(dir ? ["-C", dir] : []), *args]
+    out, err, st = Open3.capture3({"GIT_TERMINAL_PROMPT" => "0"}, *cmd, binmode: true)
+    raise Error, "git #{args.first(3).join(" ")} failed: #{err.b.strip}" unless st.success?
+    out.force_encoding(Encoding::UTF_8)
+  end
+
+  def resolve(source)
+    return source.ref if source.ref.match?(SHA_RE)
+    refs = git("ls-remote", source.url, source.ref).lines.to_h { |l| l.split("\t").map(&:strip).reverse }
+    sha = refs[source.ref] || refs["refs/heads/#{source.ref}"] ||
+      refs["refs/tags/#{source.ref}^{}"] || refs["refs/tags/#{source.ref}"]
+    sha or raise Error, "#{source.name}: ref #{source.ref.inspect} not found in #{source.repo}"
+  end
+
+  def git_glob(glob) = glob.end_with?("/**") ? "#{glob}/*" : glob
+
+  def match?(globs, path)
+    flags = File::FNM_PATHNAME | File::FNM_EXTGLOB | File::FNM_DOTMATCH
+    globs.any? { |g| File.fnmatch?(git_glob(g), path, flags) }
+  end
+
+  # One sparse, blob-less, depth-1 checkout per (repo, commit), shared by all
+  # sources that point at it (the three wpt sources fetch wpt once).
+  def checkout(repo_url, commit, sources, workdir)
+    dir = File.join(workdir, Digest::SHA256.hexdigest("#{repo_url}@#{commit}")[0, 12])
+    FileUtils.mkdir_p(dir)
+    git("init", "-q", dir: dir)
+    git("remote", "add", "origin", repo_url, dir: dir)
+    git("config", "remote.origin.promisor", "true", dir: dir)
+    git("config", "remote.origin.partialclonefilter", "blob:none", dir: dir)
+    git("config", "core.sparseCheckout", "true", dir: dir)
+    patterns = sources.flat_map { |s| s.files.flat_map { _1[:include] } + s.license_files }.uniq
+    File.write(File.join(dir, ".git", "info", "sparse-checkout"), patterns.map { "/#{_1}\n" }.join)
+    git("fetch", "-q", "--depth", "1", "--filter=blob:none", "origin", commit, dir: dir)
+    git("checkout", "-q", "FETCH_HEAD", dir: dir)
+    got = git("rev-parse", "HEAD", dir: dir).strip
+    raise Error, "#{repo_url}: expected #{commit}, got #{got}" unless got == commit
+    # Paths are arbitrary bytes; ones that aren't valid UTF-8 can never match
+    # a pattern from sources.yml, so they are dropped rather than mangled.
+    tree = git("ls-tree", "-r", "-z", "HEAD", dir: dir).b.split("\0".b).filter_map do |line|
+      meta, path = line.split("\t".b, 2)
+      path = path.force_encoding(Encoding::UTF_8)
+      [path, meta.split(" ".b).first.force_encoding(Encoding::UTF_8)] if path.valid_encoding?
+    end.to_h
+    [dir, tree]
+  end
+
+  # ------------------------------------------------------------ file mapping
+
+  def plan_copies(source, tree)
+    copies = {}
+    add = lambda do |from, to|
+      raise Error, "#{source.name}: unsafe path #{from}" if from.start_with?("/") || from.split("/").include?("..")
+      raise Error, "#{source.name}: #{from} and #{copies[to]} both map to #{to}" if copies.key?(to)
+      copies[to] = from
+    end
+    source.files.each do |spec|
+      hits = tree.keys.select { |p| match?(spec[:include], p) && !match?(spec[:exclude], p) }
+      raise Error, "#{source.name}: #{spec[:include].join(", ")} matched nothing" if hits.empty?
+      hits.each do |path|
+        next unless %w[100644 100755].include?(tree[path]) # skip symlinks, submodules
+        rel = path
+        if spec[:strip]
+          prefix = "#{spec[:strip].chomp("/")}/"
+          raise Error, "#{source.name}: #{path} is outside strip #{spec[:strip]}" unless path.start_with?(prefix)
+          rel = path.delete_prefix(prefix)
+        end
+        add.call(path, File.join(spec[:to], rel).delete_prefix("./"))
+      end
+    end
+    source.license_files.each do |lf|
+      raise Error, "#{source.name}: license file #{lf} not in tree" unless tree[lf]
+      add.call(lf, File.basename(lf))
+    end
+    copies
+  end
+
+  def stage(source, checkout_dir, copies, staging)
+    out_root = File.join(staging, source.name)
+    copies.each do |to, from|
+      src = File.join(checkout_dir, from)
+      raise Error, "#{source.name}: #{from} missing after checkout (sparse pattern bug)" unless File.file?(src)
+      dst = File.expand_path(to, out_root)
+      raise Error, "#{source.name}: #{to} escapes destination" unless dst.start_with?("#{out_root}/")
+      FileUtils.mkdir_p(File.dirname(dst))
+      FileUtils.cp(src, dst)
+    end
+    TRANSFORMS.fetch(source.transform).call(out_root) if source.transform
+    out_root
+  end
+
+  # -------------------------------------------------------------- transforms
+
+  # DOMPurify ships its fixtures as `export default [ ...JSON... ];` with a
+  # trailing comma. Convert to strict JSON without evaluating any JavaScript:
+  # drop the wrapper, drop commas that precede ] or } outside strings, and
+  # refuse anything else that isn't JSON (quotes, comments, identifiers).
+  def js_literal_to_json(text)
+    body = text.sub(/\A\s*export\s+default\s*/, "").sub(/;\s*\z/, "")
+    chars = body.chars
+    out = +""
+    i = 0
+    in_str = false
+    while i < chars.size
+      c = chars[i]
+      if in_str
+        out << c
+        if c == "\\"
+          out << chars[i + 1].to_s
+          i += 1
+        elsif c == '"'
+          in_str = false
+        end
+      elsif c == '"'
+        in_str = true
+        out << c
+      elsif c == "'" || c == "`"
+        raise Error, "unsupported #{c} string literal at char #{i}"
+      elsif c == "/" && %w[/ *].include?(chars[i + 1])
+        raise Error, "unsupported comment at char #{i}"
+      elsif c == ","
+        j = i + 1
+        j += 1 while j < chars.size && chars[j].match?(/\s/)
+        out << c unless ["]", "}"].include?(chars[j])
+      else
+        out << c
+      end
+      i += 1
+    end
+    JSON.parse(out)
+  end
+
+  TRANSFORMS = {
+    "dompurify_json" => lambda do |root|
+      cases = js_literal_to_json(File.read(File.join(root, "expect.mjs"), encoding: "UTF-8"))
+      raise Error, "dompurify: expected an array" unless cases.is_a?(Array)
+      cases.each_with_index do |c, n|
+        ok = c.is_a?(Hash) && c["payload"].is_a?(String) &&
+          (c["expected"].is_a?(String) || (c["expected"].is_a?(Array) && c["expected"].all?(String)))
+        raise Error, "dompurify: case #{n} has unexpected shape" unless ok
+      end
+      normalized = cases.map do |c|
+        {"title" => c["title"].to_s, "payload" => c["payload"],
+         "expected" => Array(c["expected"])}
+      end
+      File.write(File.join(root, "expect.json"), JSON.pretty_generate(normalized) + "\n")
+    end
+  }.freeze
+
+  # ---------------------------------------------------------- manifest/notice
+
+  def checksums(dir)
+    Dir.glob("**/*", File::FNM_DOTMATCH, base: dir).sort.filter_map do |rel|
+      path = File.join(dir, rel)
+      [rel, Digest::SHA256.file(path).hexdigest] if File.file?(path)
+    end.to_h
+  end
+
+  def write_lock(lock)
+    header = "# Generated by script/fetch_fixtures. Commit this file.\n" \
+             "# Run `script/fetch_fixtures --update [NAME...]` to move pins.\n"
+    File.write(LOCK, header + {"sources" => lock.sort.to_h}.to_yaml.sub(/\A---\n/, ""))
+  end
+
+  def write_notice(sources, lock)
+    lines = ["# Third-party test fixtures", "",
+      "Generated by `script/fetch_fixtures`. Each directory below is an unmodified",
+      "excerpt of the named upstream repository at the pinned commit, except where a",
+      "derived file is noted. Upstream license texts are copied into each directory.", ""]
+    sources.each do |s|
+      commit = lock.dig(s.name, "commit") or next
+      lines << "## #{s.name}/" << ""
+      lines << "- Source: [#{s.repo}](#{s.url}/tree/#{commit}) at `#{commit}`"
+      lines << "- License: #{s.license} (#{s.license_files.map { "`#{File.basename(_1)}`" }.join(", ")})"
+      lines << "- Derived: `expect.json` is a JSON conversion of `expect.mjs`" if s.transform == "dompurify_json"
+      lines << "- Purpose: #{s.purpose}" unless s.purpose.empty?
+      lines << ""
+    end
+    File.write(NOTICE, lines.join("\n"))
+  end
+
+  # -------------------------------------------------------------------- run
+
+  def fetch(sources, lock, update:)
+    resolved = {}
+    sources.each do |s|
+      locked = lock[s.name]
+      fresh = update.nil? ? false : (update.empty? || update.include?(s.name))
+      if !fresh && locked && locked["repo"] == s.repo && locked["ref"] == s.ref && locked["commit"]&.match?(SHA_RE)
+        next
+      end
+      key = [s.repo, s.ref]
+      resolved[key] ||= resolve(s)
+      lock[s.name] = {"repo" => s.repo, "ref" => s.ref, "commit" => resolved[key]}
+    end
+
+    known = load_sources.map(&:name)
+    manifest = load_manifest.slice(*known)
+
+    # Stage everything first; only replace fixture directories once every
+    # source has been fetched, so a failed run leaves the old state intact.
+    Dir.mktmpdir("fixtures-") do |work|
+      staging = File.join(work, "staging")
+      staged = []
+      sources.group_by { |s| [s.url, lock.dig(s.name, "commit")] }.each do |(url, commit), group|
+        warn "fetch  #{url.delete_prefix("https://github.com/")} @ #{commit[0, 12]} (#{group.map(&:name).join(", ")})"
+        dir, tree = checkout(url, commit, group, work)
+        group.each do |s|
+          root = stage(s, dir, plan_copies(s, tree), staging)
+          staged << [s, root, commit]
+          FileUtils.rm_rf(dir) if s.equal?(group.last) # free disk before the next repo
+        end
+      end
+      staged.each do |s, root, commit|
+        FileUtils.rm_rf(s.dest)
+        FileUtils.mkdir_p(File.dirname(s.dest))
+        FileUtils.mv(root, s.dest)
+        entry = {"repo" => s.repo, "commit" => commit, "license" => s.license,
+                 "files" => checksums(s.dest)}
+        manifest[s.name] = entry
+        bytes = entry["files"].keys.sum { File.size(File.join(s.dest, _1)) }
+        warn format("  %-22s %5d files %8.1f KB -> %s", s.name, entry["files"].size, bytes / 1024.0, s.rel_dest)
+      end
+    end
+
+    write_lock(lock)
+    File.write(MANIFEST, JSON.pretty_generate(manifest.sort.to_h) + "\n")
+  end
+
+  def verify(sources, lock)
+    manifest = load_manifest
+    problems = []
+    sources.each do |s|
+      entry = manifest[s.name]
+      next problems << "#{s.name}: not in MANIFEST.json (run script/fetch_fixtures)" unless entry
+      if entry["commit"] != lock.dig(s.name, "commit")
+        problems << "#{s.name}: MANIFEST commit #{entry["commit"][0, 12]} != lock #{lock.dig(s.name, "commit").to_s[0, 12]}"
+      end
+      next problems << "#{s.name}: #{s.rel_dest}/ missing" unless Dir.exist?(s.dest)
+      actual = checksums(s.dest)
+      expected = entry["files"]
+      (expected.keys - actual.keys).each { problems << "#{s.name}: missing #{_1}" }
+      (actual.keys - expected.keys).each { problems << "#{s.name}: unexpected #{_1}" }
+      (expected.keys & actual.keys).each { |f| problems << "#{s.name}: modified #{f}" if expected[f] != actual[f] }
+    end
+    if problems.empty?
+      total = manifest.values.sum { _1["files"].size }
+      puts "ok: #{manifest.size} sources, #{total} files match MANIFEST.json"
+      true
+    else
+      puts problems.first(50)
+      puts "... #{problems.size - 50} more" if problems.size > 50
+      false
+    end
+  end
+
+  def main(argv)
+    opts = {update: nil, only: [], verify: false}
+    parser = OptionParser.new do |o|
+      o.banner = "usage: script/fetch_fixtures [--update [NAME,...]] [--only NAME,...] [--verify]"
+      o.on("--update [NAMES]", Array, "re-resolve refs (all, or the named sources)") { opts[:update] = _1 || [] }
+      o.on("--only NAMES", Array, "restrict to the named sources") { opts[:only] = _1 }
+      o.on("--verify", "offline check against MANIFEST.json") { opts[:verify] = true }
+    end
+    rest = parser.parse(argv)
+    raise Error, "unexpected arguments: #{rest.join(" ")}" if rest.any? && !opts[:update]
+    opts[:update] += rest if opts[:update] # allow `--update a b`
+    sources = load_sources
+    known = sources.map(&:name)
+    unknown = (opts[:only] + Array(opts[:update])) - known
+    raise Error, "unknown source(s): #{unknown.join(", ")}; known: #{known.join(", ")}" if unknown.any?
+
+    lock = load_lock.slice(*known) # drop pins for sources removed from sources.yml
+    return verify(sources, lock) ? 0 : 1 if opts[:verify]
+
+    selected = sources.select { |s| opts[:only].empty? || opts[:only].include?(s.name) }
+    fetch(selected, lock, update: opts[:update])
+    write_notice(sources, lock)
+    0
+  end
+end
+
+if $PROGRAM_NAME == __FILE__
+  begin
+    exit FetchFixtures.main(ARGV)
+  rescue FetchFixtures::Error, OptionParser::ParseError => e
+    warn "error: #{e.message}"
+    exit 2
+  end
+end

@@ -1,0 +1,168 @@
+# Third-party test fixtures for the HTML parser / DOM / selector / sanitizer gem.
+#
+# Fetched by script/fetch_fixtures. Resolved commits are pinned in
+# sources.lock.yml (commit that file); per-file checksums go to MANIFEST.json.
+#
+# Fields:
+#   repo:          GitHub owner/name
+#   ref:           branch, tag or HEAD; resolved to a commit SHA on --update
+#   license:       SPDX id, recorded in NOTICE.md
+#   license_files: copied verbatim next to the fixtures
+#   files:         list of { include: [globs], exclude: [globs], to: subdir,
+#                  strip: path prefix removed before copying }
+#   transform:     optional named, data-only post-processing step
+#
+# XML conformance sources are intentionally absent (out of scope for now).
+
+sources:
+
+  # ---------------------------------------------------------------- parsing
+  html5lib-tests:
+    repo: html5lib/html5lib-tests
+    ref: HEAD
+    license: MIT
+    license_files: [LICENSE]
+    purpose: >-
+      Tokenizer, serializer and encoding-sniffing conformance tests.
+      Tree-construction tests no longer live here; see wpt-parsing.
+    files:
+      - include: ["tokenizer/**", "serializer/**", "encoding/**"]
+        to: .
+
+  wpt-parsing:
+    repo: web-platform-tests/wpt
+    ref: HEAD
+    license: BSD-3-Clause
+    license_files: [LICENSE.md]
+    purpose: >-
+      html5lib-format tree-construction tests (the maintained copy), plus
+      fragment-serialization tests kept as reference.
+    files:
+      - include: ["html/syntax/parsing/resources/*.dat"]
+        strip: html/syntax/parsing/resources
+        to: tree-construction
+      - include: ["html/syntax/serializing-html-fragments/*.html"]
+        strip: html/syntax/serializing-html-fragments
+        to: serializing-reference
+
+  wpt-selectors:
+    repo: web-platform-tests/wpt
+    ref: HEAD
+    license: BSD-3-Clause
+    license_files: [LICENSE.md]
+    purpose: >-
+      Data tables behind querySelector/matches tests (JS object literals,
+      not executable fixtures) and the HTML document they run against.
+    files:
+      - include:
+          - "dom/nodes/selectors.js"
+          - "dom/nodes/ParentNode-querySelector-All-content.html"
+          - "dom/nodes/ParentNode-querySelector-All.js"
+          - "dom/nodes/Element-matches.js"
+          - "dom/nodes/Element-closest.html"
+        strip: dom/nodes
+        to: .
+
+  # ------------------------------------------------------------ sanitizing
+  wpt-sanitizer-api:
+    repo: web-platform-tests/wpt
+    ref: HEAD
+    license: BSD-3-Clause
+    license_files: [LICENSE.md]
+    purpose: >-
+      Sanitizer API tests. The .sub.dat files are html5lib tree-construction
+      format extended with a #config section; {{host}} must be substituted.
+    files:
+      - include: ["sanitizer-api/*.dat"]
+        strip: sanitizer-api
+        to: .
+      - include:
+          - "sanitizer-api/sanitizer-default-config.html"
+          - "sanitizer-api/sanitizer-javascript-url.html"
+          - "sanitizer-api/support/html5lib-testcase-support.js"
+        strip: sanitizer-api
+        to: reference
+
+  dompurify:
+    repo: cure53/DOMPurify
+    ref: HEAD
+    license: Apache-2.0 OR MPL-2.0
+    license_files: [LICENSE, LICENSE-MPL]
+    purpose: >-
+      Payload/expected pairs including SVG/MathML mXSS cases. Expectations are
+      browser-DOM-specific; use payloads as attack inputs, not as exact oracles.
+    files:
+      - include: ["test/fixtures/expect.mjs"]
+        strip: test/fixtures
+        to: .
+    transform: dompurify_json
+
+  # ---------------------------------------------------- compatibility oracles
+  nokogiri:
+    repo: sparklemotion/nokogiri
+    ref: HEAD
+    license: MIT
+    license_files: [LICENSE.md]
+    purpose: HTML5 (gumbo) parse/serialize and CSS selector behavior to match.
+    files:
+      - include: ["test/html5/**", "test/css/**"]
+        exclude: ["test/css/bench_*"]
+        strip: test
+        to: .
+
+  loofah:
+    repo: flavorjones/loofah
+    ref: HEAD
+    license: MIT
+    license_files: [MIT-LICENSE.txt]
+    purpose: >-
+      Scrubber API contract and sanitizer vectors. assets/testdata_sanitizer_tests1.dat
+      is JSON keyed by libxml2 version, showing where output already varies.
+    files:
+      - include: ["test/**"]
+        exclude: ["test/integration/test_xml.rb"]
+        strip: test
+        to: .
+
+  rails-html-sanitizer:
+    repo: rails/rails-html-sanitizer
+    ref: HEAD
+    license: MIT
+    license_files: [MIT-LICENSE]
+    purpose: Full/Link/SafeList sanitizer behavior; the primary acceptance suite.
+    files:
+      - include: ["test/**"]
+        strip: test
+        to: .
+
+  rails-dom-testing:
+    repo: rails/rails-dom-testing
+    ref: HEAD
+    license: MIT
+    license_files: [MIT-LICENSE]
+    purpose: assert_select / assert_dom semantics, including parser selection.
+    files:
+      - include: ["test/**"]
+        strip: test
+        to: .
+
+  rails:
+    repo: rails/rails
+    ref: HEAD
+    license: MIT
+    license_files: [MIT-LICENSE]
+    purpose: >-
+      Framework call sites. These need Rails' own test environment to run;
+      they are kept as a readable contract, not run standalone.
+    files:
+      - include:
+          - "actionview/test/template/sanitize_helper_test.rb"
+          - "actionview/test/template/text_helper_test.rb"
+          - "actiontext/test/unit/content_test.rb"
+          - "actiontext/test/unit/attachment_test.rb"
+          - "actiontext/test/unit/trix_attachment_test.rb"
+          - "actiontext/test/unit/plain_text_conversion_test.rb"
+          - "actiontext/test/unit/markdown_conversion_test.rb"
+          - "actiontext/test/fixtures/action_text/rich_texts.yml"
+          - "actionpack/test/dispatch/test_response_test.rb"
+        to: .
