@@ -20,6 +20,9 @@ RbSys::ExtensionTask.new("lobzique", GEMSPEC) do |ext|
   ext.lib_dir = "lib/lobzique"
 end
 
+# Rake's default CLEAN globs **/*~ and **/*.bak, which match upstream files kept as data
+CLEAN.exclude("test/fixtures/**/*", "inventory/raw/**/*")
+
 task default: %i[compile test standard]
 
 namespace :test do

@@ -1,5 +1,5 @@
 # For available configuration options, see:
 #   https://github.com/standardrb/standard
-ruby_version: 3.2
 ignore:
   - "test/fixtures/**/*" # third-party, byte-for-byte upstream (see test/fixtures/README.md)
+  - "inventory/raw/**/*" # gitignored download of third-party gems and apps (see inventory/README.md)
