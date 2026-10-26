@@ -1,0 +1,215 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+      - "cross-gem/*"
+
+  pull_request:
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # Ruby version comes from .ruby-version
+      - uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+      - name: Verify test fixtures
+        run: script/fetch_fixtures --verify
+      - name: Lint
+        run: bundle exec rake standard
+
+  test:
+    name: Ruby ${{ matrix.ruby }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby:
+          - '3.3'
+          - '3.4'
+          - '4.0'
+        # Oldest and newest Ruby in CI: GC internals differ between them
+        include:
+          - ruby: '3.3'
+            gc-stress: true
+          - ruby: '4.0'
+            gc-stress: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Ruby & Rust
+        uses: oxidize-rb/actions/setup-ruby-and-rust@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          cargo-cache: true
+      - name: Run the tests
+        run: bundle exec rake compile test
+      # A separate build: the gc-stress feature is compiled in, so the release build can't be reused
+      - name: Run the tests under GC.stress
+        if: matrix.gc-stress
+        run: bundle exec rake test:gc_stress
+
+  miri:
+    name: Miri
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+      # The extension crate calls into libruby, which Miri can't run
+      - name: Test the core crate under Miri
+        run: cargo miri test -p lobzique-core
+
+  asan:
+    name: ASan
+    # asan-release (latest stable Ruby built with ASan) is only built for ubuntu-24.04 x64
+    runs-on: ubuntu-24.04
+    env:
+      # An explicit target keeps ASan out of build scripts and proc macros
+      CARGO_BUILD_TARGET: x86_64-unknown-linux-gnu
+      RUSTFLAGS: -Zsanitizer=address
+      # Ruby doesn't free everything at exit
+      ASAN_OPTIONS: detect_leaks=0
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: asan-release
+          bundler-cache: true
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - name: Test the core crate
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+        run: cargo test -Zbuild-std -p lobzique-core
+      - name: Compile the extension
+        env:
+          RB_SYS_CARGO_PROFILE: dev
+          RB_SYS_EXTRA_CARGO_ARGS: -Zbuild-std
+        run: bundle exec rake compile
+      - name: Run the tests
+        run: bundle exec rake test
+      # A Ruby object freed while Rust still uses it is reported here, not left to crash later
+      - name: Run the tests under GC.stress
+        env:
+          LOBZIQUE_GC_STRESS: "1"
+        run: bundle exec rake test
+
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-latest
+    env:
+      FUZZ_SECONDS: 60
+      # The prebuilt cargo-fuzz is a musl binary and defaults to its own target, which ASan can't link
+      FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      # Each run starts from the corpus the previous run grew
+      - uses: actions/cache@v6
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: fuzz-corpus-
+      - name: Fuzz each target for ${{ env.FUZZ_SECONDS }}s
+        run: |
+          for target in $(cargo fuzz list); do
+            cargo fuzz run --target "$FUZZ_TARGET_TRIPLE" "$target" -- -max_total_time="$FUZZ_SECONDS"
+          done
+      - name: Minimize the corpus
+        run: |
+          for target in $(cargo fuzz list); do
+            cargo fuzz cmin --target "$FUZZ_TARGET_TRIPLE" "$target"
+          done
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+
+  ci-data:
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.fetch.outputs.result }}
+    steps:
+      - uses: oxidize-rb/actions/fetch-ci-data@v1
+        id: fetch
+        with:
+          supported-ruby-platforms: |
+            exclude: ["arm-linux", "x64-mingw32"]
+          stable-ruby-versions: |
+            exclude: ["head"]
+
+  source-gem:
+    name: Build source gem
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+      # Not `rake build`: it compiles the extension first, which a source gem doesn't ship
+      - name: Build gem
+        run: gem build lobzique.gemspec
+      - uses: actions/upload-artifact@v7
+        with:
+          name: source-gem
+          path: "*.gem"
+
+  cross-gem:
+    name: Compile native gem for ${{ matrix.platform }}
+    needs: [ci-data, lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        platform: ${{ fromJSON(needs.ci-data.outputs.result).supported-ruby-platforms }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+      - uses: oxidize-rb/actions/cross-gem@v1
+        id: cross-gem
+        with:
+          platform: ${{ matrix.platform }}
+          ruby-versions: ${{ join(fromJSON(needs.ci-data.outputs.result).stable-ruby-versions, ',') }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cross-gem-${{ matrix.platform }}
+          path: ${{ steps.cross-gem.outputs.gem-path }}

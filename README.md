@@ -8,7 +8,7 @@ This will be an implementation of a subset of Nokogiri that used by Rails and re
 
 Library code goes in `crates/lobzique-core`, which must not depend on Ruby, so the checks below can run it without a Ruby VM. `ext/lobzique` holds only the Ruby bindings.
 
-The Safety workflow runs these checks on every PR and daily. Locally they need nightly Rust (`rustup toolchain install nightly --component miri,rust-src`) and `cargo install cargo-fuzz`.
+The CI workflow runs these checks on every PR and daily. Locally they need nightly Rust (`rustup toolchain install nightly --component miri,rust-src`) and `cargo install cargo-fuzz`.
 
 | Check | Locally | Catches |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ The Safety workflow runs these checks on every PR and daily. Locally they need n
 
 `rake test:gc_stress` leaves a slow debug build in `lib/`; `rake compile` replaces it.
 
-Every entry point that takes untrusted input gets a fuzz target in `fuzz/fuzz_targets/`, plus a `[[bin]]` entry in `fuzz/Cargo.toml`. CI fuzzes each target for 60 seconds on PRs and for 30 minutes daily.
+Every entry point that takes untrusted input gets a fuzz target in `fuzz/fuzz_targets/`, plus a `[[bin]]` entry in `fuzz/Cargo.toml`. CI fuzzes each target for 60 seconds on PRs.
 
 ## License
 
