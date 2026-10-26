@@ -80,7 +80,7 @@ parsing targets.
    Tier 2 suites still have to run under the recorder.
 2. Core crate + gem: parse, DOM, select, serialize. Differential-test against
    Nokogiri::HTML5 on real HTML (output must match: apps have stored Action
-   Text content and snapshot tests).
+   Text content and snapshot tests; decision 6).
 3. Sanitizer vendor. Seam already exists: rails-html-sanitizer vendor classes,
    `best_supported_vendor`, `config.action_view.sanitizer_vendor` and
    `config.action_text.sanitizer_vendor`. It is native: Loofah subclasses
@@ -117,14 +117,32 @@ are in `inventory/raw/src`.
        `is_a?(Nokogiri::XML::NodeSet)`. Both need patches.
    - **Facade mode** (Lobsters, Fizzy, Campfire, DocuSeal). One Gemfile line,
      `gem "nokogiri", git:/path:`, with a version that satisfies `~> 1.x`.
-     Rails and Loofah run unpatched and libxml2 is gone. The facade stubs
-     `VERSION` (> 1.14.0) and `uses_gumbo?` (true), so Loofah,
-     rails-html-sanitizer, Action Text and rails-dom-testing all pick their
-     HTML5 paths.
-   - Still open for phase 2: are the `Nokogiri::*` and `Lobzique::*`
-     constants the same class objects, and which name does `Class#name`
-     report? The answer shows up in `inspect`, error messages and snapshot
-     tests.
+     Rails and Loofah run unpatched and libxml2 is gone.
+
+   Phases 2–4 build the core for seam mode only. The facade is a later,
+   separate gem; nothing in the core gem defines `Nokogiri` or behaves
+   differently because a facade might load it. Facade decisions are
+   collected here so the core keeps them possible, not to build them now:
+
+   - **Class names.** Decided: the facade defines `module Nokogiri` and
+     `Lobzique = Nokogiri` before requiring lobzique, so the same class
+     objects report `Nokogiri::…` in facade mode and `Lobzique::…` in seam
+     mode (`inspect`, error messages, exception names in error trackers).
+     What the core has to do: name the root only through the `Lobzique`
+     constant (`module Lobzique`, `define_module("Lobzique")` in the
+     extension, which returns an existing module), and build messages from
+     `self.class`/`rb_obj_classname`, never from a literal `"Lobzique::"`
+     or `"Nokogiri::"`.
+   - **Version and `uses_gumbo?`.** Open. The only runtime reader in the
+     inventory is `Loofah.html5_support?`, which needs
+     `Nokogiri::VERSION > 1.14.0` and `Nokogiri.uses_gumbo?`. Without them
+     Loofah skips its HTML5 classes and rails-html-sanitizer doesn't define
+     `Rails::HTML5::Sanitizer`. Parsing would still be HTML5 (decision 3),
+     but through the HTML4 class names, unlike the same app on real
+     Nokogiri. If the facade wants the HTML5 paths, it sets
+     `Nokogiri::VERSION` to its own gem version before requiring lobzique,
+     and `Lobzique::VERSION` is only defined when absent. The core keeps
+     `Lobzique::VERSION` until then.
 2. **XPath.** Decided: a location-path subset; anything else raises.
 
    Runtime HTML code uses a fixed set of expressions:
@@ -197,6 +215,66 @@ are in `inventory/raw/src`.
    (HTML5 only), reverse_markdown, premailer, roadie and html-pipeline are
    HTML gems and belong to the HTML work; the last four parse with the HTML4
    names (decision 3).
+
+5. **Object model and bindings.** Decided: copy Nokogiri's identity and
+   lifetime rules, because Loofah and app code depend on them. What Nokogiri
+   does (`ext/nokogiri/xml_node.c`, `xml_document.c`):
+   - wrapping the same node twice returns the same Ruby object: the
+     document keeps every wrapper in `@node_cache`, so `equal?`, instance
+     variables and modules added with `extend` survive;
+   - `Document#decorate` runs on each new wrapper and again after
+     reparenting, extending it with the modules in `decorators`;
+   - a wrapper marks its document; unlinked nodes live until the document
+     is collected;
+   - attributes are nodes too (`Attr`, with `parent` and `document`);
+   - moving a node to another document copies it and points the existing
+     wrapper at the copy; wrappers of its descendants stay on the old copy;
+   - inserting a text node copies it, and inserting next to a text node
+     merges the two the way libxml2 does, so `children.size` changes.
+
+   lobzique:
+   - **Arena per document.** `lobzique-core` holds one arena per document
+     with `u32` node ids. Nodes, attributes included, are never freed before
+     their document, which matches Nokogiri's unlinked-node lifetime.
+     Fragments and their nodes live in their document's arena. No `unsafe`.
+   - **Wrappers.** A node wrapper holds its document and its id, both
+     replaceable for cross-document moves. The document wrapper owns the
+     arena and a node cache (id → wrapper). Both mark with
+     `mark_movable` and implement `compact`, so the compaction tests
+     (Testing, item 5) pass.
+   - **Classes.** The wrapper class follows the node type
+     (`Element`, `Text`, `Comment`, `CDATA`, `DTD`, `Attr`,
+     `DocumentFragment`). Documents and fragments are created through
+     `allocate` and Ruby `initialize`, so Loofah's subclasses and
+     overridden `initialize` work.
+   - **Borrowing.** The arena sits in a `RefCell`, and no borrow is held
+     across a call into Ruby (decorators, blocks in `traverse`/`each`,
+     custom CSS pseudo-class handlers). A re-entrant mutation then can't
+     panic.
+   - **Depth.** Tree building, traversal, serialization and drop are
+     iterative, so input depth can't overflow the Rust stack. The parser
+     enforces Nokogiri::HTML5's `max_tree_depth` (400) and `max_attributes`
+     (400), with the same errors.
+6. **Differential testing.** Decided: Nokogiri is a development dependency,
+   and the harness runs both implementations in one process on the same
+   input (the namespaces don't collide in seam mode). The pinned
+   `Gemfile.lock` version is the oracle; bumping it is a reviewed change.
+   - **Compared.** `to_html` bytes, plus a tree dump (node type, name,
+     namespace, attributes, text) that locates a difference. Selector and
+     XPath results get added as those land.
+   - **Corpus.**
+     - Every push: inputs from `test/fixtures` (WPT tree-construction and
+       sanitizer `.dat`, html5lib tokenizer inputs, DOMPurify payloads,
+       Loofah, Nokogiri and Action Text assets).
+     - A weekly job: a pinned Common Crawl sample, a byte range of one WARC
+       file per entry, checked by SHA-256. It is downloaded, never
+       committed. A divergence found there is minimized into a small case
+       written for the repo, not copied from the page.
+   - **Known divergences.** Listed with a reason in
+     `test/differential/known.yml`. Anything else fails.
+   - **Before the parser exists.** The harness reports itself skipped while
+     `Lobzique::HTML5` is undefined, so CI starts enforcing it as soon as
+     parsing lands.
 
 Three extra phase 2 requirements came out of the inventory:
 
