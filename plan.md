@@ -40,10 +40,71 @@ HTML (and XML) parsing has a lot of existing tests, specs, and data. We should u
 
 0. Prepare test fixtures.
 1. Inventory the Nokogiri API used by Rails, Loofah, rails-dom-testing and the
-   top ~50 gems; that list is the API contract.
+   top ~50 gems; that list is the API contract. Done: `inventory/contract.yml`
+   (138 entries in scope), method and findings in `inventory/README.md`.
+   Tier 2 suites still have to run under the recorder.
 2. Core crate + gem: parse, DOM, select, serialize. Differential-test against
    Nokogiri::HTML5 on real HTML (output must match: apps have stored Action
    Text content and snapshot tests).
 3. Sanitizer vendor. Seam already exists: rails-html-sanitizer vendor classes,
    `best_supported_vendor`, `config.action_view.sanitizer_vendor`.
 4. Action Text + assert_select: actiontext and actionview suites green.
+
+## Open decisions from the inventory
+
+Evidence is in `inventory/README.md` and `inventory/summary.md`.
+
+1. **Gem name and namespace.** actionpack, actiontext, loofah,
+   rails-html-sanitizer and rails-dom-testing all hard-depend on `nokogiri`.
+   In 15 of 19 public apps, another runtime gem needs it as well (ruby-saml
+   7, sanitize 6, inline_svg 5, reverse_markdown 5, fog-xml 4). There is one
+   `Nokogiri` constant per process, so a shim that *is* `nokogiri` can only
+   replace it in apps where no XML gem remains. Options:
+   - A: ship as `nokogiri` from git/path, patched in with one Gemfile line.
+   - B: own namespace, plugged into Rails seams (sanitizer vendor; patches
+     for Action Text and rails-dom-testing). libxml2 stays installed but
+     never sees Rails' HTML.
+   - C: core under `Lobzique`, with an optional `Nokogiri` facade for apps
+     that can drop nokogiri.
+
+   Recommendation: C. Phase 3 then gives the sanitizing win to every app,
+   and the facade covers Lobsters/Fizzy/Campfire/DocuSeal-style apps.
+2. **XPath.** Runtime HTML code uses about ten fixed expressions:
+   - Loofah: `/html/body`, `./body`, `./form`, `//p[br[following-sibling::br]]`
+   - html-pipeline: `.//text()`
+   - inline_svg: `//comment()`
+   - roadie: `html/head/meta`
+   - reverse_markdown: `preceding::text()[1]`
+
+   `Rails::HTML::Sanitizer#remove_xpaths` takes arbitrary XPath, and
+   Capybara rack_test needs full XPath 1.0 (via `Nokogiri::CSS.xpath_for`).
+   Capybara is test-only in all 16 apps that have it.
+
+   Recommendation: support only a location-path subset that covers the
+   fixed expressions, and raise on anything else. Leave Capybara on real
+   Nokogiri in the `:test` group.
+3. **HTML4 entry points.** Rails' suites, rails-dom-testing (unless
+   `load_defaults` >= 7.1) and Capybara (unless `use_html5_parsing`) parse
+   with `HTML4::Document`. Loofah and Action Text pick HTML5 when
+   `defined?(Nokogiri::HTML5)`.
+
+   Recommendation: provide HTML5 only, so those checks choose it. Make the
+   HTML4 names route to the HTML5 parser, and document the differences.
+4. **XML parsing for SVG.** inline_svg calls `XML::Document.parse` on SVG
+   files at runtime (5 of 19 apps).
+
+   Decided: HTML first. XML users wait, smallest first: inline_svg (parse,
+   attribute edits, `//comment()`), then fog-xml and twilio-ruby. ruby-saml
+   needs XSD, C14N and namespaced XPath, so it stays on Nokogiri. sanitize
+   (HTML5 only), reverse_markdown, premailer, roadie and html-pipeline are
+   HTML gems and belong to the HTML work; the last four parse with the HTML4
+   names (decision 3).
+
+Two extra phase 2 requirements came out of the inventory:
+
+- **Extension points.** Loofah's `Document#decorators` hook, subclassing of
+  the Document/Fragment classes, and Nokogiri's class names and constants
+  for `case`/`is_a?` checks.
+- **CSS dialect.** A front end for Nokogiri's selector extensions:
+  `[@attr]`, `:first`, custom pseudo-class handlers passed to `css`, and
+  `CSS::SyntaxError`.

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Runs a test command with the Nokogiri usage recorder loaded.
+#
+#   script/inventory/trace LABEL DIR COMMAND...
+#
+# DIR is the checkout whose Gemfile is used; traces go to
+# inventory/raw/traces/LABEL-PID.json.
+set -euo pipefail
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+label="$1" dir="$2"
+shift 2
+out="$root/inventory/raw/traces"
+mkdir -p "$out"
+rm -f "$out/$label"-*.json
+cd "$dir"
+export BUNDLE_GEMFILE="${BUNDLE_GEMFILE:-$PWD/Gemfile}"
+export INVENTORY_OUT="$out" INVENTORY_LABEL="$label" PARALLEL_WORKERS=1
+export RUBYOPT="-rbundler/setup -r$root/script/inventory/recorder.rb ${RUBYOPT:-}"
+"$@"

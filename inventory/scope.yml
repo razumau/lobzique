@@ -1,0 +1,81 @@
+# Hand-made scope decisions applied by script/inventory/aggregate.rb on top of
+# its automatic rules. The first rule whose `match` (a regexp against the
+# entry's `api`) hits wins.
+#
+# Scopes:
+#   in          lobzique implements it (phase 2 unless the note says otherwise)
+#   stub        exists with a fixed answer (version/platform introspection)
+#   decision:*  depends on an open decision recorded in plan.md
+#   out:*       not implemented; the reason follows the colon
+#   noise       not a real use of Nokogiri (name match with another receiver)
+
+rules:
+  # ------------------------------------------------- false positives (checked by hand)
+  - match: '\ANokogiri::XML::Node#(wrap|path|after|parse)\z'
+    scope: noise
+    note: name match only; the receivers are ProviderList, URI, RSpec config and parser classes
+  - match: '\ANokogiri::XML::Namespace#href\z'
+    scope: noise
+    note: name match only; mechanize's receivers are links
+  - match: '\ANokogiri::XML::Node#to_xml\z'
+    scope: out:xml
+    note: no HTML-domain gem calls it (amazing_print's match is its own formatter)
+
+  # ------------------------------------------------- confirmed by reading the call sites
+  - match: '\ANokogiri::XML::Node#(traverse|add_child|attribute|child|first_element_child|next_element|previous_element|prepend_child|swap)\z'
+    scope: in
+    note: confirmed in Tier 2 HTML gems (premailer, sanitize, inky-rb, inline_svg)
+  - match: '\ANokogiri::XML::Node#has_attribute\?\z'
+    scope: in
+    note: confirmed in sanitize and roadie
+  - match: '\ANokogiri::XML::Searchable#(at_css|search)\z'
+    scope: in
+    note: confirmed in premailer and inline_svg; premailer's search strings use the [@attr] dialect
+  - match: '\ANokogiri::XML::Node#(create_internal_subset|internal_subset)\z'
+    scope: in
+    note: doctype handling in sanitize and roadie
+  - match: '\ANokogiri::XML::Node#fragment\z'
+    scope: in
+    note: html-pipeline builds replacement nodes with document.fragment
+  - match: '\ANokogiri::XML::Document#create_text_node\z'
+    scope: in
+    note: loofah/html5/scrub.rb escapes unsafe text into new text nodes
+  - match: '\ANokogiri::XML::Node#elem\?\z'
+    scope: in
+    note: alias of element?
+  - match: '\ANokogiri::XML::Node#to_xhtml\z'
+    scope: in
+    note: premailer's XHTML output mode; serializer variant, after to_html
+  - match: '\ANokogiri::XML::Document#decorators\z'
+    scope: in
+    note: Loofah registers ScrubBehavior via decorators(Nokogiri::XML::Node) << ...; every node the document hands out must be extended
+
+  # ------------------------------------------------- CSS selector engine
+  - match: '\ANokogiri::CSS::SyntaxError\z'
+    scope: in
+    note: raised for bad selectors; roadie and capybara rescue it
+  - match: '\ANokogiri::CSS(\.xpath_for)?\z'
+    scope: decision:xpath
+    note: the xpath gem translates CSS to XPath for Capybara (test-time only)
+
+  # ------------------------------------------------- out of scope (before the HTML4 rule)
+  - match: '\ANokogiri::(XML::SAX|HTML4::SAX)'
+    scope: out:sax
+    note: truncato subclasses Nokogiri::XML::SAX::Document and drives the HTML4 SAX parser
+  - match: '\ANokogiri::HTML4::Builder\z'
+    scope: out:xml
+    note: only XML-domain gems use it
+
+  # ------------------------------------------------- open decisions
+  - match: '\ANokogiri::XML::Searchable#(xpath|at_xpath)\z'
+    scope: decision:xpath
+    note: Loofah and rails-html-sanitizer use a few fixed expressions; Rails::HTML::Sanitizer#remove_xpaths takes user XPath; Capybara needs full XPath 1.0
+  - match: '\ANokogiri(::HTML4\b|\.HTML\z)'
+    scope: decision:html4
+    note: HTML4 entry points; Loofah, rails-dom-testing and Action Text fall back to them when HTML5 is unavailable
+  - match: '\ANokogiri::XML::Document\.parse\z'
+    scope: decision:xml-parse
+    note: inline_svg parses SVG files with it at runtime; Loofah's XML document classes use it
+  - match: '\ANokogiri\.XML\z'
+    scope: decision:xml-parse
+    note: only mechanize among HTML-domain gems (XML responses)

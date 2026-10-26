@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Downloads gems listed as "name version" lines on stdin and unpacks their
+# files into inventory/raw/unpacked/NAME-VERSION. Packages are unpacked as
+# data only (tar), never installed or loaded.
+set -uo pipefail
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+pkgs="$root/inventory/raw/gems"
+unpacked="$root/inventory/raw/unpacked"
+mkdir -p "$pkgs" "$unpacked"
+
+fetch_one() {
+  local name="$1" version="$2" file="$pkgs/$1-$2.gem" dest="$unpacked/$1-$2"
+  [ -d "$dest" ] && return 0
+  if [ ! -s "$file" ]; then
+    if ! curl -sSf --retry 3 --max-time 120 -L -o "$file" "https://rubygems.org/downloads/$name-$version.gem"; then
+      rm -f "$file"
+      # No pure-Ruby package: take a platform build, which has the same Ruby files.
+      local platform
+      platform=$(curl -sSf --max-time 30 "https://rubygems.org/api/v1/versions/$name.json" |
+        ruby -rjson -e 'v = JSON.parse($stdin.read).find { |x| x["number"] == ARGV[0] }; puts v ? v["platform"] : ""' "$version" 2>/dev/null)
+      if [ -z "$platform" ] || [ "$platform" = ruby ] ||
+        ! curl -sSf --retry 3 --max-time 120 -L -o "$file" "https://rubygems.org/downloads/$name-$version-$platform.gem"; then
+        rm -f "$file"
+        echo "fetch failed: $name $version" >&2
+        return 0
+      fi
+    fi
+  fi
+  rm -rf "$dest.tmp" && mkdir -p "$dest.tmp" &&
+    tar -xOf "$file" data.tar.gz | tar -xzf - -C "$dest.tmp" 2>/dev/null &&
+    mv "$dest.tmp" "$dest" || { rm -rf "$dest.tmp"; echo "unpack failed: $name $version" >&2; }
+}
+export -f fetch_one
+export pkgs unpacked
+
+xargs -P 4 -L 1 bash -c 'fetch_one "$0" "$1"'
