@@ -2,28 +2,42 @@ use super::{Document, NodeId, NodeKind};
 
 impl Document {
     /// Verifies that every link in the arena agrees with its counterpart.
-    /// For tests and fuzz targets; it walks the whole arena.
+    /// For tests and fuzz targets; linear in the size of the arena.
     pub fn check_invariants(&self) -> Result<(), String> {
         if self.parent(NodeId::DOCUMENT).is_some() {
             return Err("the document node has a parent".into());
         }
-        for index in 0..self.nodes.len() {
-            let id = NodeId::from_index(index);
-            if index > 0 && matches!(self.node_kind(id), NodeKind::Document) {
+        // Set when a node is reached from its parent's children or attributes
+        let mut listed = vec![false; self.nodes.len()];
+        for id in self.node_ids() {
+            if id != NodeId::DOCUMENT && matches!(self.node_kind(id), NodeKind::Document) {
                 return Err(format!("{id:?} is a second document node"));
             }
-            self.check_children(id)?;
-            self.check_attributes(id)?;
-            if self.ancestors(id).take(self.nodes.len()).any(|a| a == id) {
-                return Err(format!("{id:?} is its own ancestor"));
+            self.check_children(id, &mut listed)?;
+            self.check_attributes(id, &mut listed)?;
+        }
+        for id in self.node_ids() {
+            match self.parent(id) {
+                Some(parent) if !listed[id.index()] => {
+                    return Err(format!("{id:?} isn't listed by its parent {parent:?}"));
+                }
+                None if self.previous_sibling(id).is_some() || self.next_sibling(id).is_some() => {
+                    return Err(format!("{id:?} has siblings but no parent"));
+                }
+                _ => {}
             }
         }
-        Ok(())
+        self.check_acyclic()
     }
 
-    fn check_children(&self, id: NodeId) -> Result<(), String> {
+    fn check_children(&self, id: NodeId, listed: &mut [bool]) -> Result<(), String> {
         let mut previous = None;
-        for child in self.children(id).take(self.nodes.len() + 1) {
+        let mut next = self.first_child(id);
+        while let Some(child) = next {
+            // Also ends a sibling list that loops back on itself
+            if std::mem::replace(&mut listed[child.index()], true) {
+                return Err(format!("{child:?} is listed twice"));
+            }
             if self.parent(child) != Some(id) {
                 return Err(format!(
                     "{child:?} is linked under {id:?} but has another parent"
@@ -36,6 +50,7 @@ impl Document {
                 return Err(format!("attribute {child:?} is a child of {id:?}"));
             }
             previous = Some(child);
+            next = self.next_sibling(child);
         }
         if self.last_child(id) != previous {
             return Err(format!("{id:?} has the wrong last child"));
@@ -43,31 +58,50 @@ impl Document {
         if previous.is_some() && !self.node_kind(id).can_have_children() {
             return Err(format!("{id:?} can't have children but has some"));
         }
-        if let Some(parent) = self.parent(id) {
-            let listed = match self.node_kind(id) {
-                NodeKind::Attribute(_) => self.attributes(parent).contains(&id),
-                _ => self.children(parent).any(|c| c == id),
-            };
-            if !listed {
-                return Err(format!("{id:?} isn't listed by its parent {parent:?}"));
-            }
-        } else if self.previous_sibling(id).is_some() || self.next_sibling(id).is_some() {
-            return Err(format!("{id:?} has siblings but no parent"));
-        }
         Ok(())
     }
 
-    fn check_attributes(&self, id: NodeId) -> Result<(), String> {
-        let attributes = self.attributes(id);
-        for (i, &attribute) in attributes.iter().enumerate() {
+    fn check_attributes(&self, id: NodeId, listed: &mut [bool]) -> Result<(), String> {
+        for &attribute in self.attributes(id) {
             if !matches!(self.node_kind(attribute), NodeKind::Attribute(_)) {
                 return Err(format!("{attribute:?} on {id:?} isn't an attribute"));
             }
             if self.parent(attribute) != Some(id) {
                 return Err(format!("attribute {attribute:?} has the wrong parent"));
             }
-            if attributes[..i].contains(&attribute) {
+            if std::mem::replace(&mut listed[attribute.index()], true) {
                 return Err(format!("attribute {attribute:?} is listed twice"));
+            }
+        }
+        Ok(())
+    }
+
+    /// Follows parent links from every node, remembering which nodes are
+    /// known to reach a root, so each link is followed once.
+    fn check_acyclic(&self) -> Result<(), String> {
+        #[derive(Clone, Copy, PartialEq)]
+        enum Walk {
+            Unvisited,
+            OnPath,
+            ReachesRoot,
+        }
+        let mut walk = vec![Walk::Unvisited; self.nodes.len()];
+        let mut path = Vec::new();
+        for start in self.node_ids() {
+            let mut next = Some(start);
+            while let Some(id) = next {
+                match walk[id.index()] {
+                    Walk::ReachesRoot => break,
+                    Walk::OnPath => return Err(format!("{id:?} is its own ancestor")),
+                    Walk::Unvisited => {
+                        walk[id.index()] = Walk::OnPath;
+                        path.push(id);
+                        next = self.parent(id);
+                    }
+                }
+            }
+            for id in path.drain(..) {
+                walk[id.index()] = Walk::ReachesRoot;
             }
         }
         Ok(())

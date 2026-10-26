@@ -16,7 +16,7 @@ fuzz_target!(|ops: &[u8]| {
         let _ = match op[0] % 9 {
             0 => Ok(drop(doc.create_element(name("e")))),
             1 => Ok(drop(doc.create_text("t".into()))),
-            2 => Ok(drop(doc.create_attribute(name("a"), String::new()))),
+            2 => Ok(drop(doc.create_attribute(name("a"), Vec::new()))),
             3 => Ok(drop(doc.create_fragment())),
             4 => doc.append_child(a, b),
             5 => doc.insert_before(a, b),

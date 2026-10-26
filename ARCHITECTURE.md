@@ -109,16 +109,29 @@ What Nokogiri guarantees, and how lobzique keeps it:
 
   Subclasses that override `initialize`, like Loofah's documents and
   fragments, therefore see the same calls they see under Nokogiri.
+- **Moving to another document.** The node is copied into the new
+  document and its object repointed at the copy. The original keeps its
+  cache slot, so its old descendants, which keep their objects, still get
+  the moved object from `parent`, as in Nokogiri
+  (`test_a_node_moved_to_another_document`).
 - **Lifetime.**
   - A node object marks its document, and the document owns every node it
     ever created.
   - Unlinked nodes stay valid until the document is collected, as libxml2
     nodes pinned by Nokogiri do.
   - The `document` reference is marked movable and updated in `compact`.
+  - A document reports its arena's heap size to `ObjectSpace.memsize_of`.
 - **No borrow across Ruby.** The arena's `RefCell` is borrowed inside
   `with_arena`/`with_arena_mut` and released before any call into Ruby:
-  decorate, `initialize`, blocks, CSS handlers. A re-entrant call can't hit a
-  held borrow. If one ever did, it would raise instead of panicking.
+  decorate, `initialize`, blocks, CSS handlers. The closures must be
+  `Send`, and Ruby handles and values aren't, so the compiler rejects a
+  closure that calls Ruby or returns a Ruby object. A Ruby exception
+  therefore never unwinds past a held borrow, and a re-entrant call can't
+  hit one. If one ever did, it would raise instead of panicking.
+- **Strings.** Native methods take strings as Nokogiri hands them to
+  libxml2 (`StringValueCStr`): converted with `to_str`, refused if they
+  contain a NUL character, and stored as bytes without transcoding. They
+  come back tagged UTF-8, valid or not.
 
 ### Planned native classes
 
@@ -158,7 +171,8 @@ assemble it.
 
 **Names.**
 - Elements and attributes use html5ever's `QualName`, shared by the parser
-  and the selector engine.
+  and the selector engine, so names are UTF-8. Everything else (text,
+  attribute values, doctype fields) is bytes.
 - HTML elements are in the HTML namespace, following the HTML standard.
   `Node#namespace` shows that namespace as `nil`, as Nokogiri does.
 - An element made with `Node.new` takes the document's namespace: HTML in
@@ -168,7 +182,9 @@ assemble it.
 
 | what | Nokogiri | lobzique | why |
 |---|---|---|---|
-| `NodeSet` storage | C methods over libxml2's `xmlNodeSet` | the same methods in Ruby over an Array (`xml/node_set.rb`) | nothing native is needed, and Ruby's GC already handles an Array |
+| `NodeSet` storage | C methods over libxml2's `xmlNodeSet` | the same methods in Ruby over an Array (`xml/node_set.rb`); native results come through `NodeSet.wrap`, Nokogiri's `noko_xml_node_set_wrap` | nothing native is needed, and Ruby's GC already handles an Array |
+| attribute values | text node children of the `Attr` node | bytes on the `Attr` node | nothing in the contract reads an attribute's children; one fewer node per attribute |
+| names that aren't UTF-8 | kept as bytes | `ArgumentError` | names are atoms shared with the parser and selector engine; only `Node.new` can be given one |
 | CSS | Ruby parser → XPath → libxml2 | native selector engine behind `Searchable#css` | no XPath engine to compile to; `CSS.xpath_for` stays out of scope (decision 2) |
 | XPath | full XPath 1.0 in libxml2 | a native location-path subset behind the same `XPathContext` shape | decision 2 |
 | custom pseudo-class handlers | called per node from inside XPath evaluation | called once per pseudo-class with the candidate NodeSet, before matching; the id sets go into the match | no Ruby call while the arena is borrowed; the handlers in rails-dom-testing and Capybara filter sets either way |

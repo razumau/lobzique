@@ -5,7 +5,7 @@ use super::{
     attr::ATTR, cdata::CDATA, comment::COMMENT, document, document_fragment::DOCUMENT_FRAGMENT,
     dtd::DTD, text::TEXT,
 };
-use crate::support::{call_initialize, warn_deprecated, yield_to_block};
+use crate::support::{c_string, call_initialize, obj_class, warn_deprecated, yield_to_block};
 use crate::XML;
 use lobzique_core::dom::{self, NodeId, NodeType};
 use magnus::{
@@ -16,6 +16,7 @@ use magnus::{
     DataTypeFunctions, Error, RArray, RClass, RString, Ruby, TypedData, Value,
 };
 use std::cell::{Cell, OnceCell, RefCell};
+use std::mem::size_of;
 
 pub static NODE: Lazy<RClass> = Lazy::new(|ruby| {
     ruby.get_inner(&XML)
@@ -47,6 +48,12 @@ impl DataTypeFunctions for Node {
         if let Some(document) = self.document.get() {
             self.document.set(Some(compactor.location(document)));
         }
+    }
+
+    /// A document reports its arena, which holds all of its nodes.
+    fn size(&self) -> usize {
+        let arena = self.arena.get().and_then(|arena| arena.try_borrow().ok());
+        size_of::<Self>() + arena.map_or(0, |arena| arena.heap_size())
     }
 }
 
@@ -88,12 +95,12 @@ impl Node {
         self.id.get().ok_or_else(|| uninitialized(ruby))
     }
 
-    /// Runs `f` on the node's arena. The borrow ends when `f` returns, before
-    /// anything reaches Ruby (plan.md decision 5).
-    pub fn with_arena<R>(
+    /// Runs `f` on the node's arena, under the rules of
+    /// [`document::with_arena`] (plan.md decision 5).
+    pub fn with_arena<R: Send>(
         &self,
         ruby: &Ruby,
-        f: impl FnOnce(&dom::Document, NodeId) -> R,
+        f: impl FnOnce(&dom::Document, NodeId) -> R + Send,
     ) -> Result<R, Error> {
         let id = self.id(ruby)?;
         document::with_arena(ruby, self.document(ruby)?, |arena| f(arena, id))
@@ -104,9 +111,8 @@ impl Node {
     }
 
     fn node_name(ruby: &Ruby, rb_self: &Self) -> Result<Option<RString>, Error> {
-        rb_self.with_arena(ruby, |arena, id| {
-            arena.node_name(id).map(|name| ruby.str_new(name))
-        })
+        let name = rb_self.with_arena(ruby, |arena, id| arena.node_name(id).map(<[u8]>::to_vec))?;
+        Ok(name.map(|name| utf8_string(ruby, name)))
     }
 
     fn data_ptr_p(&self) -> bool {
@@ -123,6 +129,12 @@ impl Node {
             .map(|id| wrap(ruby, rb_self.document(ruby)?, id))
             .transpose()
     }
+}
+
+/// Bytes from the arena as a Ruby string tagged UTF-8, valid or not, as
+/// Nokogiri returns what libxml2 holds.
+pub fn utf8_string(ruby: &Ruby, bytes: impl AsRef<[u8]>) -> RString {
+    ruby.enc_str_new(bytes, ruby.utf8_encoding())
 }
 
 fn uninitialized(ruby: &Ruby) -> Error {
@@ -232,7 +244,7 @@ fn new(ruby: &Ruby, class: RClass, args: &[Value]) -> Result<Value, Error> {
         "Passing a Node as the second parameter to Node.new is deprecated. Please pass a Document instead, \
          or prefer an alternative constructor like Node#add_child.",
     )?;
-    let name = RString::try_convert(args[0])?.to_string()?;
+    let name = element_name(ruby, c_string(args[0])?)?;
     let id = document::with_arena_mut(ruby, document, |arena| arena.create_element_named(&name))?;
     // `Node.new` gives an Element, as libxml2's node type decides
     let class = if class.equal(node_class)? {
@@ -243,10 +255,26 @@ fn new(ruby: &Ruby, class: RClass, args: &[Value]) -> Result<Value, Error> {
     finish_new(ruby, document, id, class, args)
 }
 
+/// Names are atoms shared with the parser and selector engine, so unlike
+/// Nokogiri's they must be UTF-8 (ARCHITECTURE.md, departures).
+fn element_name(ruby: &Ruby, name: Vec<u8>) -> Result<String, Error> {
+    String::from_utf8(name)
+        .map_err(|_| Error::new(ruby.exception_arg_error(), "invalid byte sequence in UTF-8"))
+}
+
+/// Ruby's default copy would allocate an empty node and share the
+/// original's instance variables, `@node_cache` included. Refused until
+/// Nokogiri's native `dup` lands (plan.md, phase 2 step 4).
+fn initialize_copy(ruby: &Ruby, rb_self: Value, _original: Value) -> Result<(), Error> {
+    let message = format!("{} can't be copied yet", obj_class(rb_self).inspect());
+    Err(Error::new(ruby.exception_not_imp_error(), message))
+}
+
 pub fn init(ruby: &Ruby) -> Result<(), Error> {
     let class = ruby.get_inner(&NODE);
     class.define_alloc_func::<Node>();
     class.define_singleton_method("new", method!(new, -1))?;
+    class.define_method("initialize_copy", method!(initialize_copy, 1))?;
     class.define_method("data_ptr?", method!(Node::data_ptr_p, 0))?;
     class.define_method("document", method!(Node::document_method, 0))?;
     class.define_method("node_name", method!(Node::node_name, 0))?;

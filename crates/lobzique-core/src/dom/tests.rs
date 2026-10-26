@@ -28,9 +28,9 @@ fn node_names_follow_libxml2() {
     let comment = doc.create_comment("x".into());
     let cdata = doc.create_cdata("x".into());
     let fragment = doc.create_fragment();
-    assert_eq!(doc.node_name(element), Some("Div"));
-    assert_eq!(doc.node_name(text), Some("text"));
-    assert_eq!(doc.node_name(comment), Some("comment"));
+    assert_eq!(doc.node_name(element), Some(&b"Div"[..]));
+    assert_eq!(doc.node_name(text), Some(&b"text"[..]));
+    assert_eq!(doc.node_name(comment), Some(&b"comment"[..]));
     assert_eq!(doc.node_name(cdata), None);
     assert_eq!(doc.node_name(fragment), None);
     assert_eq!(doc.node_name(NodeId::DOCUMENT), None);
@@ -77,7 +77,7 @@ fn detached_nodes_stay_usable() {
     assert_eq!(children(&doc, p), [a, c]);
     assert_eq!(doc.parent(b), None);
     assert_eq!(doc.next_sibling(a), Some(c));
-    assert_eq!(doc.node_name(b), Some("b"));
+    assert_eq!(doc.node_name(b), Some(&b"b"[..]));
     doc.detach(b);
     doc.check_invariants().unwrap();
 }
@@ -126,7 +126,7 @@ fn html4_documents_start_with_libxml2s_doctype() {
     };
     assert_eq!(
         doctype.public_id.as_deref(),
-        Some("-//W3C//DTD HTML 4.0 Transitional//EN")
+        Some(&b"-//W3C//DTD HTML 4.0 Transitional//EN"[..])
     );
 
     let doc = Document::new_html4(Some("about:legacy-compat".into()), None);
@@ -134,7 +134,10 @@ fn html4_documents_start_with_libxml2s_doctype() {
         panic!("not a doctype");
     };
     assert_eq!(doctype.public_id, None);
-    assert_eq!(doctype.system_id.as_deref(), Some("about:legacy-compat"));
+    assert_eq!(
+        doctype.system_id.as_deref(),
+        Some(&b"about:legacy-compat"[..])
+    );
     assert_eq!(Document::new(DocumentKind::Html).doctype(), None);
 }
 
@@ -203,4 +206,99 @@ fn attributes_belong_to_their_element_but_are_not_children() {
         Err(HierarchyError::NotAnAttribute)
     );
     doc.check_invariants().unwrap();
+}
+
+#[test]
+fn character_data_keeps_bytes_that_are_not_utf8() {
+    let mut doc = html();
+    let text = doc.create_text(b"caf\xe9".to_vec());
+    let NodeKind::Text(content) = doc.node_kind(text) else {
+        panic!("not a text node");
+    };
+    assert_eq!(content, b"caf\xe9");
+}
+
+#[test]
+fn heap_size_counts_nodes_and_their_content() {
+    let mut doc = html();
+    let empty = doc.heap_size();
+    for _ in 0..100 {
+        doc.create_text(vec![b'x'; 1000]);
+    }
+    assert!(doc.heap_size() >= empty + 100 * 1000);
+}
+
+#[test]
+fn invariants_hold_on_a_wide_tree_in_linear_time() {
+    // Quadratic checks would take minutes here
+    let width = if cfg!(miri) { 1_000 } else { 200_000 };
+    let mut doc = html();
+    let parent = doc.create_element(html_name("ul"));
+    doc.append_child(NodeId::DOCUMENT, parent).unwrap();
+    for _ in 0..width {
+        let child = doc.create_element(html_name("li"));
+        doc.append_child(parent, child).unwrap();
+    }
+    doc.check_invariants().unwrap();
+}
+
+fn corrupted(corrupt: impl FnOnce(&mut Document, [NodeId; 3])) -> String {
+    let mut doc = html();
+    let [a, b, c] = ["a", "b", "c"].map(|n| doc.create_element(html_name(n)));
+    doc.append_child(NodeId::DOCUMENT, a).unwrap();
+    doc.append_child(a, b).unwrap();
+    doc.append_child(a, c).unwrap();
+    doc.check_invariants().unwrap();
+    corrupt(&mut doc, [a, b, c]);
+    doc.check_invariants().unwrap_err()
+}
+
+#[test]
+fn invariants_catch_broken_links() {
+    let error = corrupted(|doc, [_, b, _]| doc.node_mut(b).previous_sibling = Some(b));
+    assert!(error.contains("wrong previous sibling"), "{error}");
+
+    let error = corrupted(|doc, [a, b, _]| doc.node_mut(a).last_child = Some(b));
+    assert!(error.contains("wrong last child"), "{error}");
+
+    // Children whose parent has lost them
+    let error = corrupted(|doc, [a, _, _]| {
+        let a = doc.node_mut(a);
+        a.first_child = None;
+        a.last_child = None;
+    });
+    assert!(error.contains("isn't listed"), "{error}");
+}
+
+#[test]
+fn invariants_catch_cycles() {
+    // Siblings that loop back to the first child
+    let error = corrupted(|doc, [_, b, c]| doc.node_mut(c).next_sibling = Some(b));
+    assert!(error.contains("listed twice"), "{error}");
+
+    // Two detached nodes that are each other's parent and only child
+    let error = corrupted(|doc, [_, b, c]| {
+        doc.detach(b);
+        doc.detach(c);
+        for (node, other) in [(b, c), (c, b)] {
+            let node = doc.node_mut(node);
+            node.parent = Some(other);
+            node.first_child = Some(other);
+            node.last_child = Some(other);
+        }
+    });
+    assert!(error.contains("its own ancestor"), "{error}");
+}
+
+#[test]
+fn invariants_catch_attributes_listed_twice() {
+    let error = corrupted(|doc, [a, _, _]| {
+        let href = doc.create_attribute(html_name("href"), b"/".to_vec());
+        doc.append_attribute(a, href).unwrap();
+        let NodeKind::Element(element) = &mut doc.node_mut(a).kind else {
+            unreachable!()
+        };
+        element.attributes.push(href);
+    });
+    assert!(error.contains("listed twice"), "{error}");
 }

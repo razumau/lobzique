@@ -295,8 +295,8 @@ are in `inventory/raw/src`.
    - **Known divergences.** Listed with a reason in
      `test/differential/known.yml`. Anything else fails.
    - **Before the parser exists.** The harness reports itself skipped while
-     `Lobzique::HTML5` is undefined, so CI starts enforcing it as soon as
-     parsing lands.
+     `Lobzique::HTML5.parse` is undefined, so CI starts enforcing it as soon
+     as parsing lands.
 
 Three extra phase 2 requirements came out of the inventory:
 

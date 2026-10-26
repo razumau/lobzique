@@ -1,4 +1,5 @@
 use super::{NodeId, QualName};
+use std::mem::size_of;
 
 /// Node types numbered as libxml2 numbers them, which is what Nokogiri's
 /// `Node#type` and `Node::*_NODE` constants expose.
@@ -23,9 +24,9 @@ pub enum NodeKind {
     DocumentFragment,
     Element(Element),
     Attribute(Attribute),
-    Text(String),
-    CData(String),
-    Comment(String),
+    Text(Vec<u8>),
+    CData(Vec<u8>),
+    Comment(Vec<u8>),
     Doctype(Doctype),
     ProcessingInstruction(ProcessingInstruction),
 }
@@ -44,6 +45,24 @@ impl NodeKind {
             NodeKind::Comment(_) => NodeType::Comment,
             NodeKind::Doctype(_) => NodeType::Dtd,
             NodeKind::ProcessingInstruction(_) => NodeType::ProcessingInstruction,
+        }
+    }
+
+    /// Interned names belong to html5ever's atom table, not to the node.
+    pub(super) fn heap_size(&self) -> usize {
+        match self {
+            NodeKind::Document | NodeKind::DocumentFragment => 0,
+            NodeKind::Element(element) => element.attributes.capacity() * size_of::<NodeId>(),
+            NodeKind::Attribute(attribute) => attribute.value.capacity(),
+            NodeKind::Text(text) | NodeKind::CData(text) | NodeKind::Comment(text) => {
+                text.capacity()
+            }
+            NodeKind::Doctype(doctype) => {
+                doctype.name.capacity()
+                    + doctype.public_id.as_ref().map_or(0, Vec::capacity)
+                    + doctype.system_id.as_ref().map_or(0, Vec::capacity)
+            }
+            NodeKind::ProcessingInstruction(pi) => pi.target.capacity() + pi.data.capacity(),
         }
     }
 
@@ -66,20 +85,20 @@ pub struct Element {
 #[derive(Clone, Debug)]
 pub struct Attribute {
     pub name: QualName,
-    pub value: String,
+    pub value: Vec<u8>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Doctype {
-    pub name: String,
-    pub public_id: Option<String>,
-    pub system_id: Option<String>,
+    pub name: Vec<u8>,
+    pub public_id: Option<Vec<u8>>,
+    pub system_id: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug)]
 pub struct ProcessingInstruction {
-    pub target: String,
-    pub data: String,
+    pub target: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]

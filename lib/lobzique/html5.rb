@@ -76,4 +76,4 @@ module Lobzique
   end
 end
 
-require_relative "html5ever"
+require_relative "html5ever" # lobzique: Nokogiri's "gumbo"

@@ -1,7 +1,8 @@
 # frozen_string_literal: true
 
-# The native parser binding, in the role of Nokogiri's Gumbo module
-# (lib/nokogiri/gumbo.rb), with the same limits.
+# Adapted from Nokogiri 1.19.4, lib/nokogiri/gumbo.rb (MIT, see LICENSE-NOKOGIRI.md).
+# lobzique: renamed from Gumbo after the engine it binds (ARCHITECTURE.md,
+# departures).
 
 module Lobzique
   module Html5ever

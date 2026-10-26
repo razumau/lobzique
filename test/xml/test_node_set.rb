@@ -91,4 +91,17 @@ class TestNodeSetLobzique < Minitest::Test
   include NodeSetContract
 
   def root = Lobzique
+
+  def test_wrap_decorates_without_initialize
+    @doc.decorators(Lobzique::XML::NodeSet) << (marker = Module.new)
+    initialized = false
+    node_set_class = Class.new(Lobzique::XML::NodeSet) do
+      define_method(:initialize) { |*| initialized = true }
+    end
+    node_set = node_set_class.wrap(@doc, [@c, @a])
+    assert_kind_of marker, node_set
+    assert_same @doc, node_set.document
+    assert_equal %w[c a], names(node_set)
+    refute initialized
+  end
 end

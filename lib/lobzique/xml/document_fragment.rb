@@ -22,7 +22,7 @@ module Lobzique
         context_ = nil, options_ = ParseOptions::DEFAULT_XML,
         context: context_, options: options_
       ) # rubocop:disable Lint/MissingSuper
-        return unless tags
+        return self unless tags # rubocop:disable Lint/ReturnInVoidContext
 
         options = ParseOptions.new(options) if Integer === options
         @parse_options = options
@@ -31,9 +31,10 @@ module Lobzique
         children = if context
           context.parse(tags, options)
         else
-          wrapper_doc = XML::Document.parse("<root>#{tags}</root>", nil, nil, options)
-          self.errors = wrapper_doc.errors
-          wrapper_doc.xpath("/root/node()")
+          # lobzique: XML parsing is out of scope (plan.md decision 4).
+          # HTML4::DocumentFragment reaches this branch until its own
+          # #initialize is ported (plan.md, phase 2 step 7).
+          raise NotImplementedError, "#{XML::Document}.parse isn't supported"
         end
         children.each { |child| child.parent = self }
       end

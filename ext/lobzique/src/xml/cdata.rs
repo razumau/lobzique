@@ -2,7 +2,8 @@
 
 use super::document;
 use super::node::{document_for_new_node, finish_new};
-use super::text::{expect_document_or_node, expect_string, TEXT};
+use super::text::{expect_document_or_node, TEXT};
+use crate::support::{c_string_with_length, check_string};
 use crate::XML;
 use magnus::{method, prelude::*, value::Lazy, Error, RClass, Ruby, Value};
 
@@ -15,13 +16,14 @@ pub static CDATA: Lazy<RClass> = Lazy::new(|ruby| {
 /// `CDATA.new(document, content, *rest)`.
 fn new(ruby: &Ruby, class: RClass, args: &[Value]) -> Result<Value, Error> {
     ruby.check_arity(args.len(), 2..)?;
-    let content = expect_string(ruby, args[1])?;
+    check_string(ruby, args[1])?;
     let document = expect_document_or_node(ruby, args[0], "first")?;
     let document = document_for_new_node(
         ruby,
         document,
         "Passing a Node as the first parameter to CDATA.new is deprecated. Please pass a Document instead.",
     )?;
+    let content = c_string_with_length(args[1])?;
     let id = document::with_arena_mut(ruby, document, |arena| arena.create_cdata(content))?;
     finish_new(ruby, document, id, class, args)
 }

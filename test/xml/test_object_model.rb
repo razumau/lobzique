@@ -2,6 +2,7 @@
 
 require "test_helper"
 require "nokogiri"
+require "objspace"
 
 # How node objects are made, cached and decorated (plan.md decision 5). The
 # same tests run against Nokogiri, so each assertion is checked against the
@@ -113,6 +114,62 @@ module ObjectModelContract
     assert_equal "wrong argument type Integer (expected String)", error.message
   end
 
+  def test_type_errors_name_the_class_without_singletons
+    doc = root::HTML5::Document.new
+    decorated = Object.new.extend(marker)
+    error = assert_raises(TypeError) { root::XML::Comment.new(doc, decorated) }
+    assert_equal "wrong argument type Object (expected String)", error.message
+    error = assert_raises(TypeError) { root::XML::Text.new(nil, doc) }
+    assert_equal "wrong argument type nil (expected String)", error.message
+    error = assert_raises(TypeError) { root::XML::Text.new("t", decorated) }
+    assert_equal "expected second parameter to be a #{root}::XML::Document, received Object", error.message
+    error = assert_raises(TypeError) { root::XML::CDATA.new(nil, "t") }
+    assert_equal "expected first parameter to be a #{root}::XML::Document, received NilClass", error.message
+  end
+
+  # Nokogiri passes strings to libxml2 as C strings, unconverted
+  def test_strings_are_taken_as_c_strings
+    doc = root::HTML5::Document.new
+    ["caf\xe9".dup.force_encoding("ISO-8859-1"), "a\xffb".b, "a\xffb".dup.force_encoding("UTF-8")].each do |string|
+      assert_instance_of root::XML::Text, root::XML::Text.new(string, doc)
+      assert_instance_of root::XML::Comment, root::XML::Comment.new(doc, string)
+      assert_instance_of root::XML::CDATA, root::XML::CDATA.new(doc, string)
+    end
+    assert_equal "div", root::XML::Node.new("div".b, doc).name
+    [
+      -> { root::XML::Text.new("a\0b", doc) },
+      -> { root::XML::Comment.new(doc, "a\0b") },
+      -> { root::XML::CDATA.new(doc, "a\0b") },
+      -> { root::XML::Node.new("a\0b", doc) },
+      -> { root::HTML4::Document.new("a\0b") }
+    ].each do |make|
+      error = assert_raises(ArgumentError, &make)
+      assert_equal "string contains null byte", error.message
+    end
+  end
+
+  # Moving a node to another document copies it and points its object at
+  # the copy. The original's descendants keep their objects, and their
+  # parent is still the moved object.
+  def test_a_node_moved_to_another_document
+    skip "reparenting lands in plan.md phase 2, step 4" unless root::XML::Node.method_defined?(:add_child)
+
+    a = root::HTML5::Document.new
+    b = root::HTML5::Document.new
+    div = root::XML::Node.new("div", a)
+    span = root::XML::Node.new("span", a)
+    div.add_child(span)
+    paragraph = root::XML::Node.new("p", b)
+    paragraph.add_child(div)
+
+    assert_same b, div.document
+    assert_same paragraph, div.parent
+    assert_same a, span.document
+    assert_same div, span.parent
+    refute_same span, div.children.first
+    assert_same b, div.children.first.document
+  end
+
   def test_an_allocated_node_has_no_data
     node = root::XML::Node.allocate
     error = assert_raises(RuntimeError) { node.name }
@@ -155,4 +212,34 @@ class TestObjectModelLobzique < Minitest::Test
   include ObjectModelContract
 
   def root = Lobzique
+
+  # Until Nokogiri's native dup lands (plan.md, phase 2 step 4)
+  def test_copying_is_refused
+    doc = Lobzique::HTML5::Document.new
+    node = Lobzique::XML::Node.new("p", doc)
+    [-> { node.dup }, -> { node.clone }, -> { doc.dup }].each do |copy|
+      assert_raises(NotImplementedError, &copy)
+    end
+  end
+
+  def test_memsize_counts_the_arena
+    doc = Lobzique::HTML5::Document.new
+    empty = ObjectSpace.memsize_of(doc)
+    1000.times { Lobzique::XML::Text.new("x" * 100, doc) }
+    assert_operator ObjectSpace.memsize_of(doc), :>=, empty + 1000 * 100
+  end
+
+  # A departure: XML parsing is out of scope (plan.md decision 4)
+  def test_xml_fragments_without_a_context_are_not_parsed
+    doc = Lobzique::XML::Document.new
+    error = assert_raises(NotImplementedError) { Lobzique::XML::DocumentFragment.new(doc, "<a/>") }
+    assert_equal "Lobzique::XML::Document.parse isn't supported", error.message
+  end
+
+  # A departure: Nokogiri keeps any bytes as a name
+  def test_names_must_be_utf8
+    doc = Lobzique::HTML5::Document.new
+    error = assert_raises(ArgumentError) { Lobzique::XML::Node.new("caf\xe9".b, doc) }
+    assert_equal "invalid byte sequence in UTF-8", error.message
+  end
 end

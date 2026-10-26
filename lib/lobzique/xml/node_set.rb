@@ -15,6 +15,13 @@ module Lobzique
       # C over libxml2's xmlNodeSet. Here they work on an Array, which Ruby's
       # GC already marks.
 
+      # Nokogiri's C noko_xml_node_set_wrap: a decorated set of +nodes+,
+      # which must be distinct, without #initialize or a duplicate check per
+      # node. Native search results come through here.
+      def self.wrap(document, nodes) # :nodoc:
+        allocate.send(:adopt, document, nodes)
+      end
+
       def length
         @nodes.length
       end
@@ -38,7 +45,7 @@ module Lobzique
 
       def [](*args)
         result = @nodes[*args]
-        result.is_a?(Array) ? NodeSet.new(document, result) : result
+        result.is_a?(Array) ? NodeSet.wrap(document, result) : result
       end
       alias_method :slice, :[]
 
@@ -48,17 +55,20 @@ module Lobzique
 
       def &(other)
         check_node_set(other)
-        NodeSet.new(document, @nodes.select { |node| other.include?(node) })
+        members = identity_set(other.to_a)
+        NodeSet.wrap(document, @nodes.select { |node| members.key?(node) })
       end
 
       def -(other)
         check_node_set(other)
-        NodeSet.new(document, @nodes.reject { |node| other.include?(node) })
+        members = identity_set(other.to_a)
+        NodeSet.wrap(document, @nodes.reject { |node| members.key?(node) })
       end
 
       def |(other)
         check_node_set(other)
-        NodeSet.new(document, @nodes + other.to_a)
+        members = identity_set(@nodes)
+        NodeSet.wrap(document, @nodes + other.to_a.reject { |node| members.key?(node) })
       end
 
       def initialize_copy(other)
@@ -156,6 +166,17 @@ module Lobzique
       end
 
       private
+
+      def adopt(document, nodes)
+        @nodes = nodes
+        @document = document
+        document&.decorate(self)
+        self
+      end
+
+      def identity_set(nodes)
+        nodes.each_with_object({}.compare_by_identity) { |node, set| set[node] = true }
+      end
 
       def check_member(node)
         return if node.is_a?(XML::Node) || node.is_a?(XML::Namespace)

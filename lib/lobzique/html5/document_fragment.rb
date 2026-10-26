@@ -26,12 +26,13 @@ module Lobzique
 
         @document = doc
         @errors = []
-        return unless input
+        return self unless input # rubocop:disable Lint/ReturnInVoidContext
 
         input = HTML5.read_and_encode(input, nil)
 
         context = options.delete(:context) if options.key?(:context)
 
+        # lobzique: Html5ever is Nokogiri's Gumbo, renamed after the engine
         options[:max_attributes] ||= Html5ever::DEFAULT_MAX_ATTRIBUTES
         options[:max_errors] ||= options.delete(:max_parse_errors) || Html5ever::DEFAULT_MAX_ERRORS
         options[:max_tree_depth] ||= Html5ever::DEFAULT_MAX_TREE_DEPTH

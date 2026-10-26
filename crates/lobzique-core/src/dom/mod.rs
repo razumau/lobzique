@@ -4,7 +4,9 @@
 //!
 //! Element and attribute names follow the HTML standard, so HTML elements are
 //! in the HTML namespace; the bindings show that namespace as `nil`, as
-//! Nokogiri does.
+//! Nokogiri does. Names are UTF-8 atoms shared with the parser and selector
+//! engine. Everything else (text, attribute values, doctype fields) is bytes
+//! kept exactly as given, as libxml2 keeps what Nokogiri passes it.
 
 mod check;
 mod node;
@@ -17,6 +19,7 @@ pub use node::{Attribute, Doctype, Element, NodeKind, NodeType, ProcessingInstru
 pub use tree::{Ancestors, Children, Descendants, HierarchyError};
 
 use node::Node;
+use std::mem::size_of;
 use std::num::NonZeroU32;
 
 /// A node's index in its document's arena.
@@ -65,7 +68,7 @@ impl Document {
 
     /// An HTML document with the doctype libxml2's `htmlNewDoc` gives it,
     /// which `HTML4::Document.new` and so `HTML5::Document.new` start with.
-    pub fn new_html4(system_id: Option<String>, public_id: Option<String>) -> Document {
+    pub fn new_html4(system_id: Option<Vec<u8>>, public_id: Option<Vec<u8>>) -> Document {
         let mut document = Document::new(DocumentKind::Html);
         let doctype = if system_id.is_none() && public_id.is_none() {
             Doctype {
@@ -111,12 +114,12 @@ impl Document {
     }
 
     /// libxml2's `node->name`: what Nokogiri's native `node_name` returns.
-    pub fn node_name(&self, id: NodeId) -> Option<&str> {
+    pub fn node_name(&self, id: NodeId) -> Option<&[u8]> {
         match self.node_kind(id) {
-            NodeKind::Element(element) => Some(&element.name.local),
-            NodeKind::Attribute(attribute) => Some(&attribute.name.local),
-            NodeKind::Text(_) => Some("text"),
-            NodeKind::Comment(_) => Some("comment"),
+            NodeKind::Element(element) => Some(element.name.local.as_bytes()),
+            NodeKind::Attribute(attribute) => Some(attribute.name.local.as_bytes()),
+            NodeKind::Text(_) => Some(b"text"),
+            NodeKind::Comment(_) => Some(b"comment"),
             NodeKind::Doctype(doctype) => Some(&doctype.name),
             NodeKind::ProcessingInstruction(pi) => Some(&pi.target),
             NodeKind::Document | NodeKind::DocumentFragment | NodeKind::CData(_) => None,
@@ -146,19 +149,19 @@ impl Document {
             .find(|&child| matches!(self.node_kind(child), NodeKind::Doctype(_)))
     }
 
-    pub fn create_attribute(&mut self, name: QualName, value: String) -> NodeId {
+    pub fn create_attribute(&mut self, name: QualName, value: Vec<u8>) -> NodeId {
         self.create(NodeKind::Attribute(Attribute { name, value }))
     }
 
-    pub fn create_text(&mut self, text: String) -> NodeId {
+    pub fn create_text(&mut self, text: Vec<u8>) -> NodeId {
         self.create(NodeKind::Text(text))
     }
 
-    pub fn create_cdata(&mut self, text: String) -> NodeId {
+    pub fn create_cdata(&mut self, text: Vec<u8>) -> NodeId {
         self.create(NodeKind::CData(text))
     }
 
-    pub fn create_comment(&mut self, text: String) -> NodeId {
+    pub fn create_comment(&mut self, text: Vec<u8>) -> NodeId {
         self.create(NodeKind::Comment(text))
     }
 
@@ -168,6 +171,17 @@ impl Document {
 
     pub fn create_doctype(&mut self, doctype: Doctype) -> NodeId {
         self.create(NodeKind::Doctype(doctype))
+    }
+
+    /// Bytes the arena holds on the heap, for `ObjectSpace.memsize_of`.
+    /// Walks every node.
+    pub fn heap_size(&self) -> usize {
+        self.nodes.capacity() * size_of::<Node>()
+            + self
+                .nodes
+                .iter()
+                .map(|node| node.kind.heap_size())
+                .sum::<usize>()
     }
 
     fn create(&mut self, kind: NodeKind) -> NodeId {

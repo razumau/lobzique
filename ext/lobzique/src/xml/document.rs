@@ -1,7 +1,7 @@
 //! `XML::Document`: the node object that owns its document's arena.
 
 use super::node::{Node, NODE};
-use crate::support::call_initialize;
+use crate::support::{call_initialize, displayed_class};
 use crate::XML;
 use lobzique_core::dom::{self, DocumentKind};
 use magnus::{method, prelude::*, value::Lazy, Error, RClass, Ruby, Value};
@@ -37,7 +37,7 @@ pub fn unwrap(ruby: &Ruby, document: Value) -> Result<&Node, Error> {
     if !document.is_kind_of(class) {
         let message = format!(
             "wrong argument type {} (expected {})",
-            document.class().inspect(),
+            displayed_class(document),
             class.inspect()
         );
         return Err(Error::new(ruby.exception_type_error(), message));
@@ -58,20 +58,26 @@ fn arena<'a>(
 }
 
 /// Runs `f` on the document's arena; the borrow ends when `f` returns.
-pub fn with_arena<R>(
+///
+/// `f` can't reach Ruby while the arena is borrowed: Ruby handles and
+/// values aren't `Send`, so `f` can neither capture nor return one. A Ruby
+/// exception can therefore never unwind past the borrow and leave the
+/// document locked.
+pub fn with_arena<R: Send>(
     ruby: &Ruby,
     document: Value,
-    f: impl FnOnce(&dom::Document) -> R,
+    f: impl FnOnce(&dom::Document) -> R + Send,
 ) -> Result<R, Error> {
     let arena = arena(ruby, unwrap(ruby, document)?)?;
     let arena = arena.try_borrow().map_err(|_| busy(ruby))?;
     Ok(f(&arena))
 }
 
-pub fn with_arena_mut<R>(
+/// [`with_arena`] with a mutable borrow.
+pub fn with_arena_mut<R: Send>(
     ruby: &Ruby,
     document: Value,
-    f: impl FnOnce(&mut dom::Document) -> R,
+    f: impl FnOnce(&mut dom::Document) -> R + Send,
 ) -> Result<R, Error> {
     let arena = arena(ruby, unwrap(ruby, document)?)?;
     let mut arena = arena.try_borrow_mut().map_err(|_| busy(ruby))?;
