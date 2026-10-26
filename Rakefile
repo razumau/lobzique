@@ -36,6 +36,11 @@ namespace :test do
   end
 end
 
+desc "Compare lobzique with Nokogiri::HTML5 (DIFFOPTS='--corpus crawl' etc., see script/differential)"
+task differential: :compile do
+  ruby "-Ilib", "script/differential", *ENV.fetch("DIFFOPTS", "").split
+end
+
 desc "Report how much of the in-scope Nokogiri API (inventory/contract.yml) is implemented"
 task progress: :compile do
   ruby "-Ilib", "script/progress.rb"

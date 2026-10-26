@@ -39,6 +39,17 @@ arg "[libfuzzer_args]..." help="Passed to libFuzzer, e.g. -max_total_time=60" va
 '''
 run = "cargo +nightly fuzz run {{usage.target}} -- {{usage.libfuzzer_args | default(value=[]) | join(sep=' ')}}"
 
+[tasks.differential]
+description = "Compare lobzique with Nokogiri::HTML5 on the fixtures corpus"
+usage = '''
+arg "[args]..." help="Passed to script/differential, e.g. --corpus crawl --only tests1" var=#true
+'''
+run = "bundle exec rake compile && bundle exec ruby -Ilib script/differential {{usage.args | default(value=[]) | join(sep=' ')}}"
+
+[tasks."crawl:fetch"]
+description = "Download the pinned Common Crawl sample into tmp/crawl/"
+run = "script/fetch_crawl"
+
 [tasks.lint]
 description = "Lint the Ruby code with standard"
 run = "bundle exec rake standard"

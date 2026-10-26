@@ -1,0 +1,14 @@
+# Common Crawl sample for the differential harness, written by
+# `script/fetch_crawl --pin`. Each entry is the first `bytes` of a WARC
+# file under https://data.commoncrawl.org/, ending on a record boundary.
+crawl: CC-MAIN-2026-43
+files:
+- path: crawl-data/CC-MAIN-2026-43/segments/1791170053823.21/warc/CC-MAIN-20261005105623-20261005135623-00000.warc.gz
+  bytes: 41935357
+  sha256: 9efa19a6348c1ec1862d65fa014da4a376f81a7d2976b221b868e74d8d088430
+- path: crawl-data/CC-MAIN-2026-43/segments/1791170054379.51/warc/CC-MAIN-20261009160033-20261009190033-00333.warc.gz
+  bytes: 41938195
+  sha256: 06c6f543fa49dc73c5e48560d07c45315bed48d76fc08b5ead9ecee665441946
+- path: crawl-data/CC-MAIN-2026-43/segments/1791170054911.64/warc/CC-MAIN-20261013211541-20261014001541-00666.warc.gz
+  bytes: 41893909
+  sha256: 98e03b36b3549344249e33a77ebfc3a2fac96dd7d40426772618ee8feb2cff6a

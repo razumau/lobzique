@@ -1,0 +1,107 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Downloads the Common Crawl sample for the differential harness (plan.md
+# decision 6) into tmp/crawl/. Pages aren't committed: the repo pins a byte
+# range of each WARC file plus its SHA-256 in test/differential/crawl.yml.
+#
+#   script/fetch_crawl                                   fetch and verify the pinned sample
+#   script/fetch_crawl --pin CC-MAIN-2026-43 --files 3 --megabytes 40
+#                                                        choose a new sample and rewrite crawl.yml
+#
+# Each range starts at the beginning of a WARC file and ends on a record
+# boundary. Stdlib only; nothing downloaded is evaluated.
+
+require "digest"
+require "fileutils"
+require "net/http"
+require "optparse"
+require "yaml"
+require "zlib"
+require_relative "../test/differential/warc"
+
+module FetchCrawl
+  BASE = URI("https://data.commoncrawl.org/")
+  PIN = File.expand_path("../test/differential/crawl.yml", __dir__)
+  DIR = File.expand_path("../tmp/crawl", __dir__)
+
+  class Error < StandardError; end
+
+  module_function
+
+  def fetch
+    pin = YAML.safe_load_file(PIN)
+    FileUtils.mkdir_p(DIR)
+    pin.fetch("files").each do |entry|
+      dest = File.join(DIR, File.basename(entry.fetch("path")))
+      if File.exist?(dest) && Digest::SHA256.file(dest).hexdigest == entry.fetch("sha256")
+        puts "ok     #{File.basename(dest)}"
+        next
+      end
+      puts "fetch  #{entry.fetch("path")} (#{entry.fetch("bytes")} bytes)"
+      download(entry.fetch("path"), entry.fetch("bytes"), dest)
+      actual = Digest::SHA256.file(dest).hexdigest
+      raise Error, "#{dest}: SHA-256 #{actual}, crawl.yml pins #{entry.fetch("sha256")}" unless actual == entry.fetch("sha256")
+    end
+  end
+
+  # Picks `files` WARC files spread evenly over the crawl, downloads the first
+  # `megabytes` of each, and cuts it back to the last complete record.
+  def pin(crawl, files:, megabytes:)
+    paths = Zlib.gunzip(get("crawl-data/#{crawl}/warc.paths.gz")).split("\n")
+    chosen = Array.new(files) { |i| paths[(i * paths.size) / files] }
+    FileUtils.mkdir_p(DIR)
+    entries = chosen.map do |path|
+      dest = File.join(DIR, File.basename(path))
+      puts "pin    #{path}"
+      download(path, megabytes * 1024 * 1024, dest)
+      bytes = File.open(dest, "rb") { |io| Differential::Warc.each_member(io).sum { |_offset, size, _data| size } }
+      File.truncate(dest, bytes)
+      pages = Differential::Warc.each_html_response(dest).count
+      puts "       #{bytes} bytes, #{pages} HTML pages"
+      {"path" => path, "bytes" => bytes, "sha256" => Digest::SHA256.file(dest).hexdigest}
+    end
+
+    File.write(PIN, <<~YAML + YAML.dump("crawl" => crawl, "files" => entries).delete_prefix("---\n"))
+      # Common Crawl sample for the differential harness, written by
+      # `script/fetch_crawl --pin`. Each entry is the first `bytes` of a WARC
+      # file under #{BASE}, ending on a record boundary.
+    YAML
+  end
+
+  def download(path, bytes, dest)
+    uri = BASE + path
+    Net::HTTP.start(uri.host, uri.port, use_ssl: true, read_timeout: 120) do |http|
+      request = Net::HTTP::Get.new(uri, "Range" => "bytes=0-#{bytes - 1}")
+      http.request(request) do |response|
+        raise Error, "#{uri}: HTTP #{response.code}" unless response.code == "206"
+
+        File.open(dest, "wb") { |io| response.read_body { |chunk| io.write(chunk) } }
+      end
+    end
+  end
+
+  def get(path)
+    response = Net::HTTP.get_response(BASE + path)
+    raise Error, "#{BASE + path}: HTTP #{response.code}" unless response.code == "200"
+
+    response.body
+  end
+end
+
+options = {}
+OptionParser.new do |opts|
+  opts.on("--pin CRAWL", "e.g. CC-MAIN-2026-43") { options[:pin] = _1 }
+  opts.on("--files N", Integer) { options[:files] = _1 }
+  opts.on("--megabytes N", Integer, "per file") { options[:megabytes] = _1 }
+end.parse!
+
+begin
+  if options[:pin]
+    FetchCrawl.pin(options[:pin], files: options.fetch(:files, 3), megabytes: options.fetch(:megabytes, 40))
+  else
+    FetchCrawl.fetch
+  end
+rescue FetchCrawl::Error => e
+  abort "fetch_crawl: #{e.message}"
+end

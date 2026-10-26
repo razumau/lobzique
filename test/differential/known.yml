@@ -1,0 +1,7 @@
+# Differences from Nokogiri::HTML5 that are accepted, each with a reason.
+# script/differential fails on any difference not listed here, and on an entry
+# that no longer differs.
+#
+#   - match: regexp against the case id (e.g. \Awpt-parsing/tests1\.dat#12\z)
+#     reason: why lobzique differs and why that is acceptable
+[]

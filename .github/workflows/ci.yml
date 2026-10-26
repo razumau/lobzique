@@ -60,6 +60,8 @@ jobs:
           cargo-cache: true
       - name: Run the tests
         run: bundle exec rake compile test
+      - name: Compare with Nokogiri::HTML5
+        run: bundle exec ruby -Ilib script/differential
       # A separate build: the gc-stress feature is compiled in, so the release build can't be reused
       - name: Run the tests under GC.stress
         if: matrix.gc-stress

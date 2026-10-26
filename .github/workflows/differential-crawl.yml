@@ -1,0 +1,38 @@
+name: Differential (crawl)
+
+# Compares lobzique with Nokogiri::HTML5 on the pinned Common Crawl sample
+# (test/differential/crawl.yml). Too slow to download for every push.
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  crawl:
+    name: Common Crawl sample
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Ruby & Rust
+        uses: oxidize-rb/actions/setup-ruby-and-rust@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+          cargo-cache: true
+      # The pin changes rarely; the download is ~120 MB
+      - uses: actions/cache@v6
+        with:
+          path: tmp/crawl
+          key: crawl-${{ hashFiles('test/differential/crawl.yml') }}
+      - name: Fetch the sample
+        run: script/fetch_crawl
+      - name: Compile
+        run: bundle exec rake compile
+      - name: Compare with Nokogiri::HTML5
+        run: bundle exec ruby -Ilib script/differential --corpus crawl --show 30

@@ -1,0 +1,42 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Differential test: parses every corpus case with Nokogiri::HTML5 and with
+# Lobzique and compares the output (plan.md decision 6). Exits non-zero on a
+# difference that test/differential/known.yml doesn't list.
+#
+#   script/differential                      the fixtures corpus
+#   script/differential --corpus crawl       the Common Crawl sample (script/fetch_crawl first)
+#   script/differential --only 'tests1\.dat' cases whose id matches
+#   script/differential --oracle-only        run Nokogiri alone, to check the corpus loads
+#
+# Until Lobzique can parse, it reports itself skipped and exits 0.
+
+require "optparse"
+require "nokogiri"
+require "lobzique"
+require_relative "../test/differential/harness"
+
+options = {corpus: "fixtures", only: nil, show: 10, oracle_only: false}
+OptionParser.new do |opts|
+  opts.on("--corpus NAME", Differential::Corpus.names) { options[:corpus] = _1 }
+  opts.on("--only REGEXP", Regexp) { options[:only] = _1 }
+  opts.on("--show N", Integer, "failures to print (default 10)") { options[:show] = _1 }
+  opts.on("--oracle-only", "parse with Nokogiri only") { options[:oracle_only] = true }
+end.parse!
+
+implementation = unless options[:oracle_only]
+  unless defined?(Lobzique::HTML5) && Lobzique::HTML5.respond_to?(:parse)
+    puts "differential: skipped, Lobzique::HTML5.parse doesn't exist yet"
+    exit
+  end
+  Lobzique
+end
+
+cases = Differential::Corpus.each(options[:corpus])
+cases = cases.select { |c| options[:only].match?(c.id) } if options[:only]
+
+harness = Differential::Harness.new(implementation: implementation)
+harness.run(cases).report(show: options[:show])
+# A filtered run can't tell which known entries went stale
+exit(harness.ok? && (options[:only] ? true : harness.stale.empty?))

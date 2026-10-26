@@ -22,6 +22,17 @@ The CI workflow runs these checks on every PR and daily. Locally they need night
 
 Every entry point that takes untrusted input gets a fuzz target in `fuzz/fuzz_targets/`, plus a `[[bin]]` entry in `fuzz/Cargo.toml`. CI fuzzes each target for 60 seconds on PRs.
 
+### Differential test against Nokogiri::HTML5
+
+`script/differential` parses the same inputs with Nokogiri (a development dependency) and with lobzique and compares `to_html` and the tree. It reports itself skipped until lobzique can parse.
+
+| Corpus | Command | When CI runs it |
+| --- | --- | --- |
+| fixtures: WPT, html5lib, DOMPurify and asset inputs from `test/fixtures` | `script/differential` | every push |
+| a pinned Common Crawl sample (~3,100 pages) | `script/fetch_crawl`, then `script/differential --corpus crawl` | weekly |
+
+Crawled pages aren't committed: `test/differential/crawl.yml` pins byte ranges of WARC files with their SHA-256, and `script/fetch_crawl` downloads them into `tmp/crawl/`. Accepted differences go in `test/differential/known.yml` with a reason.
+
 ## License
 
 The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).
