@@ -21,3 +21,15 @@ RbSys::ExtensionTask.new("lobzique", GEMSPEC) do |ext|
 end
 
 task default: %i[compile test standard]
+
+desc "Report how much of the in-scope Nokogiri API (inventory/contract.yml) is implemented"
+task progress: :compile do
+  ruby "-Ilib", "script/progress.rb"
+end
+
+namespace :progress do
+  desc "Like progress, and list the entries not implemented yet"
+  task missing: :compile do
+    ruby "-Ilib", "script/progress.rb", "--missing"
+  end
+end
