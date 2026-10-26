@@ -87,11 +87,10 @@ bundles, packages, traces, scans and the corpus, about 2 GB in total.
 
 | scope | entries | meaning |
 |---|---:|---|
-| `in` | 138 | 112 of them are needed by Tier 1 alone, and 101 were seen at runtime |
+| `in` | 151 | the DOM below, plus the HTML4 entry points (10), `xpath`/`at_xpath` and the `Nokogiri::CSS` namespace |
 | `stub` | 5 | `VERSION`, `VersionInfo#libxml2?`, `jruby?`, `uses_gumbo?` |
-| `decision:html4` | 10 | HTML4 entry points (below) |
-| `decision:xpath` | 4 | `xpath`, `at_xpath`, `Nokogiri::CSS.xpath_for` (below) |
-| `decision:xml-parse` | 2 | `XML::Document.parse`, `Nokogiri.XML` (below) |
+| `later:xml` | 2 | `XML::Document.parse`, `Nokogiri.XML`; XML comes after the HTML work |
+| `out:xpath` | 1 | `Nokogiri::CSS.xpath_for`, used only by Capybara through the xpath gem |
 | `out:xml` | 52 | used only by XML-domain gems |
 | `out:sax` | 7 | SAX; the only HTML user is truncato |
 | `noise` | 5 | name matches whose receivers aren't Nokogiri objects |
@@ -127,36 +126,15 @@ construction. Some parts are less obvious:
 
   Servo's `selectors` crate needs a front end that rewrites these.
 
-## Decisions this raises (also in plan.md)
+## Decisions this raised
 
-1. **XPath.** Runtime HTML code uses a small, fixed set of expressions:
+These were decided in `plan.md` ("Decisions from the inventory"); the
+numbers below follow it. This section keeps the evidence.
 
-   | Gem | Expressions |
-   |---|---|
-   | Loofah | `/html/body`, `./body`, `./form`, `//p[br[following-sibling::br]]` |
-   | html-pipeline | `.//text()` |
-   | inline_svg | `//comment()` |
-   | reverse_markdown | `preceding::text()[1]`, `li` |
-   | roadie | `html/head/meta` |
-
-   There are two exceptions:
-   - `Rails::HTML::Sanitizer#remove_xpaths` passes user-supplied XPath
-     straight to `xpath`.
-   - Capybara's rack_test driver needs full XPath 1.0 through the `xpath`
-     gem and `Nokogiri::CSS.xpath_for`.
-
-   Capybara/xpath are in 16 of 19 apps and are test-only in all 16.
-2. **HTML4 entry points.** Rails' own suites go through
-   `HTML4::Document.parse`, because rails-dom-testing defaults to HTML4
-   unless `load_defaults` sets HTML5. Capybara parses with HTML4 unless
-   `Capybara.use_html5_parsing` is set. Loofah, Action Text and
-   rails-dom-testing fall back to HTML4 when `defined?(Nokogiri::HTML5)` is
-   false.
-3. **XML parsing of SVG.** inline_svg runs in 5 of 19 apps at runtime. It
-   parses SVG files with `XML::Document.parse` and edits them.
-4. **Which gem name and constant lobzique occupies.** actionpack, actiontext,
-   loofah, rails-html-sanitizer and rails-dom-testing all hard-depend on
-   `nokogiri`.
+1. **Which gem name and constant lobzique occupies.** Decided: a core under
+   `Lobzique`, plus a `nokogiri` facade for apps that can drop real
+   Nokogiri. actionpack, actiontext, loofah, rails-html-sanitizer and
+   rails-dom-testing all hard-depend on `nokogiri`.
    - In 15 of 19 corpus apps, at least one other runtime gem also depends on
      it. The common ones are ruby-saml (7), sanitize (6), inline_svg (5),
      reverse_markdown (5), fog-xml (4) and twilio-ruby (3).
@@ -164,7 +142,44 @@ construction. Some parts are less obvious:
      solely through Rails.
    - Discourse would also qualify if sanitize, reverse_markdown and
      ruby-readability run on lobzique.
-   - Maybe and Errbit would qualify if decision 3 is "yes".
+   - Maybe and Errbit would qualify once XML parsing lands (decision 4).
+2. **XPath.** Decided: a location-path subset; anything else raises.
+   Runtime HTML code uses a small, fixed set of expressions:
+
+   | Gem | Expressions |
+   |---|---|
+   | Loofah | `/html/body`, `./body`, `./form`, `//p[br[following-sibling::br]]` |
+   | html-pipeline | `.//text()` |
+   | inline_svg | `//comment()` |
+   | reverse_markdown | `preceding::text()[1]`, `li` |
+   | roadie | `html`, `html/head`, `html/head/meta` |
+   | mechanize | `//head/meta[@http-equiv="Set-Cookie"]`, `string(((/html/head \| /html \| /head \| /)/title)[1])` |
+
+   mechanize is the only HTML gem that needs unions and functions. It stays
+   out of the subset unless it turns out to be runtime in the corpus.
+
+   Two cases need more than the subset:
+   - `Rails::HTML::Sanitizer#remove_xpaths` passes its argument straight to
+     `xpath`. It is private, and only rails-html-sanitizer's own tests call
+     it, so it is a hook for subclasses.
+   - Capybara's rack_test driver needs full XPath 1.0 through the `xpath`
+     gem and `Nokogiri::CSS.xpath_for`. Capybara/xpath are in 16 of 19 apps
+     and are test-only in all 16. Facade apps can't keep real Nokogiri next
+     to the facade, so rack_test is unsupported there for now.
+3. **HTML4 entry points.** Decided: they keep Nokogiri's names and
+   hierarchy but parse and serialize with the HTML5 parser.
+   - Rails' own suites go through `HTML4::Document.parse`, because
+     rails-dom-testing defaults to HTML4 unless `load_defaults` sets HTML5.
+   - Capybara parses with HTML4 unless `Capybara.use_html5_parsing` is set.
+   - Loofah, Action Text and rails-dom-testing fall back to HTML4 when
+     `defined?(Nokogiri::HTML5)` is false.
+   - `sanitizer_vendor` defaults to `Rails::HTML4::Sanitizer` before
+     `load_defaults 7.1`.
+   - premailer, roadie, reverse_markdown, html2text, inky-rb, mechanize and
+     html-pipeline always use HTML4.
+4. **XML parsing of SVG.** Decided: after the HTML work, starting with
+   inline_svg. inline_svg runs in 5 of 19 apps at runtime. It parses SVG
+   files with `XML::Document.parse` and edits them.
 
 ## Not done yet
 

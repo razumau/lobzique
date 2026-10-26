@@ -378,8 +378,8 @@ entries:
       - lib/loofah.rb:13
 - api: Nokogiri::CSS
   kind: module
-  scope: decision:xpath
-  note: the xpath gem translates CSS to XPath for Capybara (test-time only)
+  scope: in
+  note: namespace of CSS::SyntaxError
   usage: test
   domains:
   - html-test
@@ -400,8 +400,8 @@ entries:
       - lib/xpath/renderer.rb:96
 - api: Nokogiri::HTML4
   kind: module
-  scope: decision:html4
-  note: HTML4 entry points; Loofah, rails-dom-testing and Action Text fall back to them when HTML5 is unavailable
+  scope: in
+  note: HTML4 names and hierarchy kept, but they parse and serialize with the HTML5 parser (plan.md decision 3)
   usage: runtime
   domains:
   - html
@@ -626,8 +626,8 @@ entries:
       - lib/rubyXL/objects/ooxml_object.rb:118
 - api: Nokogiri.HTML
   kind: singleton
-  scope: decision:html4
-  note: HTML4 entry points; Loofah, rails-dom-testing and Action Text fall back to them when HTML5 is unavailable
+  scope: in
+  note: HTML4 names and hierarchy kept, but they parse and serialize with the HTML5 parser (plan.md decision 3)
   usage: runtime
   domains:
   - html
@@ -744,8 +744,8 @@ entries:
       - lib/azure/storage/common/service/serialization.rb:317
 - api: Nokogiri.XML
   kind: singleton
-  scope: decision:xml-parse
-  note: only mechanize among HTML-domain gems (XML responses)
+  scope: later:xml
+  note: only mechanize among HTML-domain gems (XML responses); XML comes after the HTML work (plan.md decision 4)
   usage: runtime
   domains:
   - html
@@ -1084,8 +1084,8 @@ entries:
       - lib/roadie/inliner.rb:103
 - api: Nokogiri::CSS.xpath_for
   kind: singleton
-  scope: decision:xpath
-  note: the xpath gem translates CSS to XPath for Capybara (test-time only)
+  scope: out:xpath
+  note: the xpath gem translates CSS to XPath for Capybara rack_test (test-time only); unsupported in facade mode (plan.md decision 2)
   usage: test
   domains:
   - html-test
@@ -1139,8 +1139,8 @@ entries:
       - lib/slather/coverage_service/html_output.rb:248
 - api: Nokogiri::HTML4::Document
   kind: class
-  scope: decision:html4
-  note: HTML4 entry points; Loofah, rails-dom-testing and Action Text fall back to them when HTML5 is unavailable
+  scope: in
+  note: HTML4 names and hierarchy kept, but they parse and serialize with the HTML5 parser (plan.md decision 3)
   usage: runtime
   domains:
   - html
@@ -1213,8 +1213,8 @@ entries:
       - lib/rails/dom/testing/assertions/selector_assertions.rb:381
 - api: Nokogiri::HTML4::DocumentFragment
   kind: class
-  scope: decision:html4
-  note: HTML4 entry points; Loofah, rails-dom-testing and Action Text fall back to them when HTML5 is unavailable
+  scope: in
+  note: HTML4 names and hierarchy kept, but they parse and serialize with the HTML5 parser (plan.md decision 3)
   usage: runtime
   domains:
   - html
@@ -1277,8 +1277,8 @@ entries:
       - lib/rails/dom/testing.rb:27
 - api: Nokogiri::HTML4.fragment
   kind: singleton
-  scope: decision:html4
-  note: HTML4 entry points; Loofah, rails-dom-testing and Action Text fall back to them when HTML5 is unavailable
+  scope: in
+  note: HTML4 names and hierarchy kept, but they parse and serialize with the HTML5 parser (plan.md decision 3)
   usage: runtime
   domains:
   - html
@@ -1311,8 +1311,8 @@ entries:
       - lib/roadie/document.rb:125
 - api: Nokogiri::HTML4.parse
   kind: singleton
-  scope: decision:html4
-  note: HTML4 entry points; Loofah, rails-dom-testing and Action Text fall back to them when HTML5 is unavailable
+  scope: in
+  note: HTML4 names and hierarchy kept, but they parse and serialize with the HTML5 parser (plan.md decision 3)
   usage: runtime
   domains:
   - html
@@ -1359,8 +1359,8 @@ entries:
       - lib/roadie/document.rb:90
 - api: Nokogiri::HTML4::Document#title
   kind: instance
-  scope: decision:html4
-  note: HTML4 entry points; Loofah, rails-dom-testing and Action Text fall back to them when HTML5 is unavailable
+  scope: in
+  note: HTML4 names and hierarchy kept, but they parse and serialize with the HTML5 parser (plan.md decision 3)
   usage: test
   domains:
   - html-test
@@ -1404,8 +1404,8 @@ entries:
       - lib/slather/coverage_service/html_output.rb:251
 - api: Nokogiri::HTML4::Document.new
   kind: singleton
-  scope: decision:html4
-  note: HTML4 entry points; Loofah, rails-dom-testing and Action Text fall back to them when HTML5 is unavailable
+  scope: in
+  note: HTML4 names and hierarchy kept, but they parse and serialize with the HTML5 parser (plan.md decision 3)
   usage: runtime
   domains:
   - html
@@ -1464,8 +1464,8 @@ entries:
       - lib/rails/dom/testing/assertions/selector_assertions.rb:381
 - api: Nokogiri::HTML4::Document.parse
   kind: singleton
-  scope: decision:html4
-  note: HTML4 entry points; Loofah, rails-dom-testing and Action Text fall back to them when HTML5 is unavailable
+  scope: in
+  note: HTML4 names and hierarchy kept, but they parse and serialize with the HTML5 parser (plan.md decision 3)
   usage: runtime
   domains:
   - html
@@ -1522,8 +1522,8 @@ entries:
       - lib/loofah/concerns.rb:136
 - api: Nokogiri::HTML4::DocumentFragment.parse
   kind: singleton
-  scope: decision:html4
-  note: HTML4 entry points; Loofah, rails-dom-testing and Action Text fall back to them when HTML5 is unavailable
+  scope: in
+  note: HTML4 names and hierarchy kept, but they parse and serialize with the HTML5 parser (plan.md decision 3)
   usage: test
   domains:
   - html
@@ -4328,8 +4328,8 @@ entries:
       - lib/twilio-ruby/twiml/twiml.rb:65
 - api: Nokogiri::XML::Document.parse
   kind: singleton
-  scope: decision:xml-parse
-  note: inline_svg parses SVG files with it at runtime; Loofah's XML document classes use it
+  scope: later:xml
+  note: inline_svg parses SVG files with it at runtime; Loofah's XML document classes use it; XML comes after the HTML work (plan.md decision 4)
   usage: runtime
   domains:
   - html
@@ -11913,8 +11913,8 @@ entries:
       - lib/slather/coverage_service/cobertura_xml_output.rb:56
 - api: Nokogiri::XML::Searchable#at_xpath
   kind: instance
-  scope: decision:xpath
-  note: Loofah and rails-html-sanitizer use a few fixed expressions; Rails::HTML::Sanitizer#remove_xpaths takes user XPath; Capybara needs full XPath 1.0
+  scope: in
+  note: location-path subset covering the fixed expressions HTML gems use; anything else raises (plan.md decision 2)
   usage: runtime
   domains:
   - html
@@ -12299,8 +12299,8 @@ entries:
       - lib/premailer/adapter/nokogiri.rb:143
 - api: Nokogiri::XML::Searchable#xpath
   kind: instance
-  scope: decision:xpath
-  note: Loofah and rails-html-sanitizer use a few fixed expressions; Rails::HTML::Sanitizer#remove_xpaths takes user XPath; Capybara needs full XPath 1.0
+  scope: in
+  note: location-path subset covering the fixed expressions HTML gems use; anything else raises (plan.md decision 2)
   usage: runtime
   domains:
   - html

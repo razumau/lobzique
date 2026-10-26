@@ -5,7 +5,7 @@
 # Scopes:
 #   in          lobzique implements it (phase 2 unless the note says otherwise)
 #   stub        exists with a fixed answer (version/platform introspection)
-#   decision:*  depends on an open decision recorded in plan.md
+#   later:*     planned after the HTML work (plan.md decision 4); the reason follows the colon
 #   out:*       not implemented; the reason follows the colon
 #   noise       not a real use of Nokogiri (name match with another receiver)
 
@@ -54,9 +54,12 @@ rules:
   - match: '\ANokogiri::CSS::SyntaxError\z'
     scope: in
     note: raised for bad selectors; roadie and capybara rescue it
-  - match: '\ANokogiri::CSS(\.xpath_for)?\z'
-    scope: decision:xpath
-    note: the xpath gem translates CSS to XPath for Capybara (test-time only)
+  - match: '\ANokogiri::CSS\z'
+    scope: in
+    note: namespace of CSS::SyntaxError
+  - match: '\ANokogiri::CSS\.xpath_for\z'
+    scope: out:xpath
+    note: the xpath gem translates CSS to XPath for Capybara rack_test (test-time only); unsupported in facade mode (plan.md decision 2)
 
   # ------------------------------------------------- out of scope (before the HTML4 rule)
   - match: '\ANokogiri::(XML::SAX|HTML4::SAX)'
@@ -66,16 +69,16 @@ rules:
     scope: out:xml
     note: only XML-domain gems use it
 
-  # ------------------------------------------------- open decisions
+  # ------------------------------------------------- decided in plan.md
   - match: '\ANokogiri::XML::Searchable#(xpath|at_xpath)\z'
-    scope: decision:xpath
-    note: Loofah and rails-html-sanitizer use a few fixed expressions; Rails::HTML::Sanitizer#remove_xpaths takes user XPath; Capybara needs full XPath 1.0
+    scope: in
+    note: location-path subset covering the fixed expressions HTML gems use; anything else raises (plan.md decision 2)
   - match: '\ANokogiri(::HTML4\b|\.HTML\z)'
-    scope: decision:html4
-    note: HTML4 entry points; Loofah, rails-dom-testing and Action Text fall back to them when HTML5 is unavailable
+    scope: in
+    note: HTML4 names and hierarchy kept, but they parse and serialize with the HTML5 parser (plan.md decision 3)
   - match: '\ANokogiri::XML::Document\.parse\z'
-    scope: decision:xml-parse
-    note: inline_svg parses SVG files with it at runtime; Loofah's XML document classes use it
+    scope: later:xml
+    note: inline_svg parses SVG files with it at runtime; Loofah's XML document classes use it; XML comes after the HTML work (plan.md decision 4)
   - match: '\ANokogiri\.XML\z'
-    scope: decision:xml-parse
-    note: only mechanize among HTML-domain gems (XML responses)
+    scope: later:xml
+    note: only mechanize among HTML-domain gems (XML responses); XML comes after the HTML work (plan.md decision 4)
