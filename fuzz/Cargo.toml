@@ -16,8 +16,8 @@ lobzique-core = { path = "../crates/lobzique-core" }
 members = ["."]
 
 [[bin]]
-name = "hello"
-path = "fuzz_targets/hello.rs"
+name = "dom"
+path = "fuzz_targets/dom.rs"
 test = false
 doc = false
 bench = false

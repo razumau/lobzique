@@ -1,16 +1,7 @@
-//! The Ruby-free part of lobzique. Code here must not depend on magnus or
-//! rb-sys, so Miri, sanitizers and fuzzers can run it without a Ruby VM.
+//! The Ruby-free part of lobzique: the engine that libxml2 and gumbo are for
+//! Nokogiri. Code here must not depend on magnus or rb-sys, so Miri,
+//! sanitizers and fuzzers can run it without a Ruby VM. See ARCHITECTURE.md.
 
-pub fn hello(subject: &str) -> String {
-    format!("Hello {subject}, from Rust!")
-}
+#![forbid(unsafe_code)]
 
-#[cfg(test)]
-mod tests {
-    use super::hello;
-
-    #[test]
-    fn test_hello() {
-        assert_eq!("Hello world, from Rust!", hello("world"));
-    }
-}
+pub mod dom;

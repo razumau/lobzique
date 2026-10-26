@@ -1,23 +1,29 @@
-use magnus::{function, prelude::*, Error, Ruby};
+//! Ruby bindings: the native classes and methods Nokogiri's C extension
+//! defines, with the same names, each a thin call into lobzique-core. Files
+//! mirror `lib/lobzique/`; see ARCHITECTURE.md.
 
-pub fn hello(subject: String) -> String {
-    lobzique_core::hello(&subject)
-}
+mod html4;
+mod html5;
+mod support;
+mod xml;
+
+use magnus::{value::Lazy, Error, Module, RModule, Ruby};
+
+// The root is named only through the `Lobzique` constant, which a facade can
+// point at its own module (plan.md decision 1).
+pub static LOBZIQUE: Lazy<RModule> = Lazy::new(|ruby| ruby.define_module("Lobzique").unwrap());
+pub static XML: Lazy<RModule> =
+    Lazy::new(|ruby| ruby.get_inner(&LOBZIQUE).define_module("XML").unwrap());
+pub static HTML4: Lazy<RModule> =
+    Lazy::new(|ruby| ruby.get_inner(&LOBZIQUE).define_module("HTML4").unwrap());
+pub static HTML5: Lazy<RModule> =
+    Lazy::new(|ruby| ruby.get_inner(&LOBZIQUE).define_module("HTML5").unwrap());
 
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
-    let module = ruby.define_module("Lobzique")?;
-    module.define_singleton_method("hello", function!(hello, 1))?;
+    // Parents before children, as in Nokogiri's Init_nokogiri
+    xml::init(ruby)?;
+    html4::init(ruby)?;
+    html5::init(ruby)?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use rb_sys_test_helpers::ruby_test;
-    use super::hello;
-
-    #[ruby_test]
-    fn test_hello() {
-        assert_eq!("Hello world, from Rust!", hello("world".to_string()));
-    }
 }

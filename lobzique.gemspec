@@ -23,7 +23,7 @@ Gem::Specification.new do |spec|
     ext/**/*.{rb,rs,toml}
     crates/**/*.{rs,toml}
     Cargo.toml Cargo.lock
-    README.md CHANGELOG.md LICENSE.txt
+    README.md CHANGELOG.md LICENSE.txt LICENSE-NOKOGIRI.md
   ], base: __dir__)
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]

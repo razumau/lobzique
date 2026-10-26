@@ -57,10 +57,12 @@ fuzzing (see README). To add once there is real code, roughly by value:
    advisories.
 4. **`#![forbid(unsafe_code)]` in `lobzique-core`**, keeping `unsafe` in the
    bindings. An index-based arena DOM doesn't need it; Miri then mostly
-   checks dependencies.
+   checks dependencies. Done.
 5. **GC compaction** (`GC.verify_compaction_references`,
    `GC.auto_compact`). GC.stress never moves objects; compaction breaks a
-   stored Ruby reference that isn't pinned or updated.
+   stored Ruby reference that isn't pinned or updated. Started:
+   `test/xml/test_object_model.rb` compacts with live wrappers; a CI run
+   with `GC.auto_compact` is still to add.
 6. **Leak check**: LSan with `RUBY_FREE_AT_EXIT=1`, or the `ruby_memcheck`
    gem. The ASan job has leak detection off because Ruby doesn't free
    everything at exit.
@@ -80,7 +82,27 @@ parsing targets.
    Tier 2 suites still have to run under the recorder.
 2. Core crate + gem: parse, DOM, select, serialize. Differential-test against
    Nokogiri::HTML5 on real HTML (output must match: apps have stored Action
-   Text content and snapshot tests; decision 6).
+   Text content and snapshot tests; decision 6). The design is in
+   `ARCHITECTURE.md`: Nokogiri's Ruby layer, ported, over native methods with
+   Nokogiri's names, over the Rust engine. Steps:
+   1. Skeleton. Done:
+      - the class tree and constants;
+      - the object model (wrappers, node cache, decorators, constructors);
+      - the arena DOM.
+   2. Parse and serialize together, so the differential harness starts
+      enforcing: `Html5ever.parse`/`fragment`, `html_standard_serialize`,
+      `HTML5.parse`.
+   3. Read-only DOM: traversal, attributes and content, porting the rest of
+      `node.rb` that needs no mutation.
+   4. Mutation: `reparent`, `coerce`, `inner_html=`, `replace`, `dup`.
+   5. CSS: selectors, Nokogiri's dialect, custom pseudo-class handlers.
+   6. XPath subset (decision 2).
+   7. HTML4 names on the HTML5 parser (decision 3).
+   8. XHTML output (`native_write_to`) for premailer.
+
+   Later, once profiling shows where it pays: move hot ported Ruby methods
+   into Rust. Methods that subclasses and mixins override (`to_s`,
+   `serialize`, `fragment`, `initialize`, `coerce`) stay Ruby entry points.
 3. Sanitizer vendor. Seam already exists: rails-html-sanitizer vendor classes,
    `best_supported_vendor`, `config.action_view.sanitizer_vendor` and
    `config.action_text.sanitizer_vendor`. It is native: Loofah subclasses

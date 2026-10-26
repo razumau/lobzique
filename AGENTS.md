@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-lobzique is a Ruby gem with a Rust extension that reimplements the subset of Nokogiri's HTML API that Rails and its HTML dependencies (Loofah, rails-html-sanitizer, rails-dom-testing, Action Text) use, so libxml2 drops out of Rails' path. It is early: the Rust code is still a `hello` placeholder. `plan.md` holds the goal, scope, phases and the design decisions (namespace and facade, XPath subset, HTML4 names parsing as HTML5, XML deferred); read it before any design work.
+lobzique is a Ruby gem with a Rust extension that reimplements the subset of Nokogiri's HTML API that Rails and its HTML dependencies (Loofah, rails-html-sanitizer, rails-dom-testing, Action Text) use, so libxml2 drops out of Rails' path. `plan.md` holds the goal, scope, phases and the design decisions (namespace and facade, XPath subset, HTML4 names parsing as HTML5, XML deferred). `ARCHITECTURE.md` describes how the code is built. Read both before any design work.
 
 ## Commands
 
@@ -31,10 +31,13 @@ mise run crawl:fetch      # download the pinned Common Crawl sample into tmp/cra
 
 ## Architecture
 
-- `crates/lobzique-core`: all library logic. Must not depend on Ruby (magnus/rb-sys), so Miri, ASan and fuzzers run it without a Ruby VM. The plan is to keep it free of `unsafe` (an index-based arena DOM).
-- `ext/lobzique`: magnus bindings only, built by rb_sys (`extconf.rb`) into `lib/lobzique/lobzique.{bundle,so}`. The `gc-stress` Cargo feature is what `rake test:gc_stress` turns on.
-- `lib/`: Ruby side. `Lobzique::` is meant to mirror Nokogiri's class tree (`XML::Node`, `XML::NodeSet`, `HTML5::Document`, …) with Nokogiri's names, constants and hierarchy, because callers use `is_a?`/`case`, subclass the document classes, and compare `Node::*_NODE` constants. A separate `nokogiri` facade gem is planned on top.
+Details and the list of deliberate departures from Nokogiri are in `ARCHITECTURE.md`.
+
+- `lib/lobzique/`: Nokogiri's Ruby layer, ported file for file (same paths, classes, methods). Ported files name their Nokogiri source in the header; every change to ported code carries a `# lobzique:` comment. Don't design new Ruby APIs and alias Nokogiri names onto them.
+- `ext/lobzique`: magnus bindings only, built by rb_sys (`extconf.rb`) into `lib/lobzique/lobzique.{bundle,so}`. Defines the native methods Nokogiri's C extension defines, with the same names, arity and visibility; files mirror `lib/lobzique/` (`xml/node.rb` ↔ `src/xml/node.rs`). The `gc-stress` Cargo feature is what `rake test:gc_stress` turns on.
+- `crates/lobzique-core`: all library logic, `#![forbid(unsafe_code)]`, an index-based arena DOM. Must not depend on Ruby (magnus/rb-sys), so Miri, ASan and fuzzers run it without a Ruby VM.
 - `fuzz/`: its own Cargo workspace (nightly-only; the main workspace builds on stable). Every entry point that takes untrusted input needs a target in `fuzz/fuzz_targets/` plus a `[[bin]]` in `fuzz/Cargo.toml`; CI fuzzes each for 60s.
+- Behavior tests for Nokogiri-compatible API go in a module included by a `…Nokogiri` and a `…Lobzique` test case (see `test/xml/test_object_model.rb`), so each assertion is checked against Nokogiri too.
 
 ## Test fixtures and inventory
 
