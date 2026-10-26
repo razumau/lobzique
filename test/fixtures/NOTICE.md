@@ -39,7 +39,7 @@ derived file is noted. Upstream license texts are copied into each directory.
 
 - Source: [sparklemotion/nokogiri](https://github.com/sparklemotion/nokogiri/tree/2d0f04bd124e18648fdb967fea0c4d94ff82b5d0) at `2d0f04bd124e18648fdb967fea0c4d94ff82b5d0`
 - License: MIT (`LICENSE.md`)
-- Purpose: HTML5 (gumbo) parse/serialize and CSS selector behavior to match.
+- Purpose: HTML5 (gumbo) parse/serialize and CSS selector behavior to match, plus the DOM contract: Node, NodeSet, fragments, reparenting, attributes, XPath, subclassing and decorators. Most DOM tests parse staff.xml; port them to HTML. The HTML4 tests show the API shape; their libxml2 output doesn't apply (plan.md decision 3). helper.rb is there to read the tests, not to run.
 
 ## loofah/
 

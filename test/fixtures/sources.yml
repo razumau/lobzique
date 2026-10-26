@@ -103,10 +103,49 @@ sources:
     ref: HEAD
     license: MIT
     license_files: [LICENSE.md]
-    purpose: HTML5 (gumbo) parse/serialize and CSS selector behavior to match.
+    purpose: >-
+      HTML5 (gumbo) parse/serialize and CSS selector behavior to match, plus
+      the DOM contract: Node, NodeSet, fragments, reparenting, attributes,
+      XPath, subclassing and decorators. Most DOM tests parse staff.xml; port
+      them to HTML. The HTML4 tests show the API shape; their libxml2 output
+      doesn't apply (plan.md decision 3). helper.rb is there to read the
+      tests, not to run.
     files:
       - include: ["test/html5/**", "test/css/**"]
         exclude: ["test/css/bench_*"]
+        strip: test
+        to: .
+      - include:
+          - "test/helper.rb"
+          - "test/test_nokogiri.rb"
+          - "test/test_html.rb"
+          - "test/test_class_resolver.rb"
+          - "test/test_compaction.rb"
+          - "test/test_nokogumbo_contract.rb"
+          - "test/decorators/test_slop.rb"
+          - "test/xml/test_node.rb"
+          - "test/xml/test_node_set.rb"
+          - "test/xml/test_node_reparenting.rb"
+          - "test/xml/test_node_attributes.rb"
+          - "test/xml/test_node_inheritance.rb"
+          - "test/xml/test_unparented_node.rb"
+          - "test/xml/test_document.rb"
+          - "test/xml/test_document_fragment.rb"
+          - "test/xml/test_text.rb"
+          - "test/xml/test_comment.rb"
+          - "test/xml/test_cdata.rb"
+          - "test/xml/test_attr.rb"
+          - "test/xml/test_xpath.rb"
+          - "test/xml/node/test_attribute_methods.rb"
+          - "test/xml/node/test_save_options.rb"
+          - "test/xml/node/test_subclass.rb"
+          - "test/html4/test_document.rb"
+          - "test/html4/test_document_fragment.rb"
+          - "test/html4/test_node.rb"
+          - "test/html4/test_attributes.rb"
+          - "test/html4/test_comments.rb"
+          - "test/files/staff.xml"
+          - "test/files/tlm.html"
         strip: test
         to: .
 
