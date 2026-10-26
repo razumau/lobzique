@@ -1,2 +1,60 @@
 [tools]
 ruby = "3.3"
+
+[tasks.check]
+description = "Compile, run the Ruby and core crate tests, and lint"
+run = ["bundle exec rake", "cargo test -p lobzique-core"]
+
+[tasks.compile]
+description = "Build the extension into lib/lobzique/"
+run = "bundle exec rake compile"
+
+[tasks.test]
+description = "Compile and run the Ruby tests (TEST=file, TESTOPTS='-n name' narrow it)"
+run = "bundle exec rake compile test"
+
+[tasks."test:rust"]
+description = "Run the core crate's tests"
+run = "cargo test -p lobzique-core"
+
+[tasks."test:gc-stress"]
+description = "Run the Ruby tests under GC.stress on a dev build (run compile afterwards)"
+run = "bundle exec rake test:gc_stress"
+
+[tasks.miri]
+description = "Run the core crate's tests under Miri"
+run = "cargo +nightly miri test -p lobzique-core"
+
+[tasks.asan]
+description = "Run the core crate's tests under AddressSanitizer"
+env = { RUSTFLAGS = "-Zsanitizer=address" }
+# An explicit target keeps ASan out of build scripts and proc macros
+run = 'cargo +nightly test -Zbuild-std --target "$(rustc -vV | sed -n "s/^host: //p")" -p lobzique-core'
+
+[tasks.fuzz]
+description = "Fuzz one target from fuzz/fuzz_targets/"
+usage = '''
+arg "<target>" help="Fuzz target name, see `cargo fuzz list`"
+arg "[libfuzzer_args]..." help="Passed to libFuzzer, e.g. -max_total_time=60" var=#true
+'''
+run = "cargo +nightly fuzz run {{usage.target}} -- {{usage.libfuzzer_args | default(value=[]) | join(sep=' ')}}"
+
+[tasks.lint]
+description = "Lint the Ruby code with standard"
+run = "bundle exec rake standard"
+
+[tasks."lint:fix"]
+description = "Lint and autofix the Ruby code with standard"
+run = "bundle exec rake standard:fix"
+
+[tasks.progress]
+description = "Report how much of inventory/contract.yml is implemented"
+run = "bundle exec rake progress"
+
+[tasks."progress:missing"]
+description = "Like progress, and list what is not implemented yet"
+run = "bundle exec rake progress:missing"
+
+[tasks."fixtures:verify"]
+description = "Check test/fixtures against MANIFEST.json, offline"
+run = "script/fetch_fixtures --verify"
