@@ -39,6 +39,38 @@ Rails' seams (decision 1).
 
 HTML (and XML) parsing has a lot of existing tests, specs, and data. We should use them instead of creating synthetic data for anything larger than a unit test for a method.
 
+The Safety workflow already runs Miri, ASan (Rust and Ruby), GC.stress and
+fuzzing (see README). To add once there is real code, roughly by value:
+
+1. **Sanitizer fuzz targets.** Sanitizing untrusted HTML is the point of the
+   gem, so these matter most:
+   - re-parsing serialized output gives the same tree (mutation XSS, the
+     classic sanitizer bypass);
+   - sanitizing twice gives the same result as sanitizing once;
+   - output matches Nokogiri::HTML5 (differential).
+2. **DoS limits.** A Rust stack overflow on deeply nested HTML aborts the
+   whole process instead of raising. Needs a depth limit (Nokogiri::HTML5
+   has `max_tree_depth`), tests with very deep nesting, and fuzz
+   `-timeout`/`-rss_limit_mb` so slow or memory-hungry inputs fail.
+3. **`cargo-deny`**: RustSec advisories, licenses, allowed sources.
+   html5ever pulls in `tendril`, which is heavy on `unsafe` and has had
+   advisories.
+4. **`#![forbid(unsafe_code)]` in `lobzique-core`**, keeping `unsafe` in the
+   bindings. An index-based arena DOM doesn't need it; Miri then mostly
+   checks dependencies.
+5. **GC compaction** (`GC.verify_compaction_references`,
+   `GC.auto_compact`). GC.stress never moves objects; compaction breaks a
+   stored Ruby reference that isn't pinned or updated.
+6. **Leak check**: LSan with `RUBY_FREE_AT_EXIT=1`, or the `ruby_memcheck`
+   gem. The ASan job has leak detection off because Ruby doesn't free
+   everything at exit.
+7. **Debug Ruby** (`ruby-version: debug`) for its internal assertions,
+   which catch write-barrier mistakes once wrapped objects are marked
+   write-barrier protected.
+
+Seed the fuzz corpus from `test/fixtures/html5lib-tests` once there are
+parsing targets.
+
 ## Phases
 
 0. Prepare test fixtures.

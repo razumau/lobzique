@@ -10,8 +10,13 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
+lobzique-core = { path = "../../crates/lobzique-core" }
 magnus = { version = "0.8.2" }
 rb-sys = { version = "0.9", features = ["stable-api-compiled-fallback"] }
+
+[features]
+# Runs a full GC before and after every Ruby C API call (see `rake test:gc_stress`).
+gc-stress = ["rb-sys/gc-stress"]
 
 [build-dependencies]
 rb-sys-env = "0.2.2"

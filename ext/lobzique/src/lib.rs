@@ -1,7 +1,7 @@
 use magnus::{function, prelude::*, Error, Ruby};
 
 pub fn hello(subject: String) -> String {
-    format!("Hello {subject}, from Rust!")
+    lobzique_core::hello(&subject)
 }
 
 #[magnus::init]

@@ -1,0 +1,23 @@
+[package]
+name = "lobzique-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+lobzique-core = { path = "../crates/lobzique-core" }
+
+# Separate workspace: fuzzing needs nightly, and the main workspace builds on stable.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "hello"
+path = "fuzz_targets/hello.rs"
+test = false
+doc = false
+bench = false

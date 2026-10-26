@@ -108,11 +108,16 @@ dependencies = [
 name = "lobzique"
 version = "0.1.0"
 dependencies = [
+ "lobzique-core",
  "magnus",
  "rb-sys",
  "rb-sys-env",
  "rb-sys-test-helpers",
 ]
+
+[[package]]
+name = "lobzique-core"
+version = "0.1.0"
 
 [[package]]
 name = "magnus"

@@ -3,7 +3,7 @@
 # in the ext/ directory.
 
 [workspace]
-members = ["./ext/lobzique"]
+members = ["./crates/lobzique-core", "./ext/lobzique"]
 resolver = "2"
 
 [profile.release]

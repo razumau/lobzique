@@ -1,0 +1,9 @@
+[package]
+name = "lobzique-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["Jury Razumau <mail@razumau.net>"]
+license = "MIT"
+publish = false
+
+[dependencies]

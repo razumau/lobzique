@@ -22,6 +22,17 @@ end
 
 task default: %i[compile test standard]
 
+namespace :test do
+  desc "Run the tests under GC.stress, on a dev build with rb-sys's gc-stress feature"
+  task :gc_stress do
+    ENV["RB_SYS_CARGO_PROFILE"] = "dev"
+    ENV["RB_SYS_EXTRA_CARGO_ARGS"] = "--features gc-stress"
+    ENV["LOBZIQUE_GC_STRESS"] = "1"
+    Rake::Task["compile"].invoke
+    Rake::Task["test"].invoke
+  end
+end
+
 desc "Report how much of the in-scope Nokogiri API (inventory/contract.yml) is implemented"
 task progress: :compile do
   ruby "-Ilib", "script/progress.rb"
