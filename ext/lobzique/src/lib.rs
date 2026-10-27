@@ -4,6 +4,7 @@
 
 mod html4;
 mod html5;
+mod html5ever;
 mod support;
 mod xml;
 
@@ -18,6 +19,11 @@ pub static HTML4: Lazy<RModule> =
     Lazy::new(|ruby| ruby.get_inner(&LOBZIQUE).define_module("HTML4").unwrap());
 pub static HTML5: Lazy<RModule> =
     Lazy::new(|ruby| ruby.get_inner(&LOBZIQUE).define_module("HTML5").unwrap());
+pub static HTML5EVER: Lazy<RModule> = Lazy::new(|ruby| {
+    ruby.get_inner(&LOBZIQUE)
+        .define_module("Html5ever")
+        .unwrap()
+});
 
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
@@ -25,5 +31,6 @@ fn init(ruby: &Ruby) -> Result<(), Error> {
     xml::init(ruby)?;
     html4::init(ruby)?;
     html5::init(ruby)?;
+    html5ever::init(ruby)?;
     Ok(())
 }

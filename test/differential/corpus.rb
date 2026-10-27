@@ -17,6 +17,7 @@ module Differential
   module Corpus
     ROOT = File.expand_path("../..", __dir__)
     FIXTURES = File.join(ROOT, "test", "fixtures")
+    CASES = File.join(__dir__, "cases.yml")
     CRAWL_PIN = File.join(__dir__, "crawl.yml")
     CRAWL_DIR = File.join(ROOT, "tmp", "crawl")
 
@@ -42,6 +43,7 @@ module Differential
     end
 
     def each_fixture(&block)
+      each_case(&block)
       fixture_glob("wpt-parsing/tree-construction/*.dat").each { |path| each_dat(path, "wpt-parsing", &block) }
       fixture_glob("wpt-sanitizer-api/*.dat").each { |path| each_dat(path, "wpt-sanitizer-api", &block) }
       fixture_glob("html5lib-tests/tokenizer/*.test").each { |path| each_tokenizer(path, &block) }
@@ -50,6 +52,14 @@ module Differential
         fixture_glob(glob).each do |path|
           yield Case.new(id: relative(path), source: glob[%r{\A[^/]+}], kind: :document, input: File.binread(path))
         end
+      end
+    end
+
+    def each_case
+      YAML.safe_load_file(CASES).each do |test|
+        context = test["context"]
+        yield Case.new(id: "cases/#{test.fetch("id")}", source: "cases",
+          kind: context ? :fragment : :document, input: test.fetch("input"), context: context, note: test["note"])
       end
     end
 

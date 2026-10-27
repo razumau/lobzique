@@ -24,14 +24,15 @@ Every entry point that takes untrusted input gets a fuzz target in `fuzz/fuzz_ta
 
 ### Differential test against Nokogiri::HTML5
 
-`script/differential` parses the same inputs with Nokogiri (a development dependency) and with lobzique and compares `to_html` and the tree. It reports itself skipped until lobzique can parse.
+`script/differential` parses the same inputs with Nokogiri (a development dependency) and with lobzique and compares `to_html` and the tree.
 
 | Corpus | Command | When CI runs it |
 | --- | --- | --- |
 | fixtures: WPT, html5lib, DOMPurify and asset inputs from `test/fixtures` | `script/differential` | every push |
+| small hand-written cases in `test/differential/cases.yml` | `script/differential` | every push |
 | a pinned Common Crawl sample (~3,100 pages) | `script/fetch_crawl`, then `script/differential --corpus crawl` | weekly |
 
-Crawled pages aren't committed: `test/differential/crawl.yml` pins byte ranges of WARC files with their SHA-256, and `script/fetch_crawl` downloads them into `tmp/crawl/`. Accepted differences go in `test/differential/known.yml` with a reason.
+Crawled pages aren't committed: `test/differential/crawl.yml` pins byte ranges of WARC files with their SHA-256, and `script/fetch_crawl` downloads them into `tmp/crawl/`. A difference found on a crawled page becomes a small case in `cases.yml`. Accepted differences go in `test/differential/known.yml` with a reason.
 
 ## License
 

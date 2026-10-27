@@ -133,13 +133,14 @@ What Nokogiri guarantees, and how lobzique keeps it:
   contain a NUL character, and stored as bytes without transcoding. They
   come back tagged UTF-8, valid or not.
 
-### Planned native classes
+### Other native classes
 
-| class | role | Nokogiri counterpart |
-|---|---|---|
-| `Lobzique::Html5ever` | `parse(input, url, klass, **limits)`, `fragment(fragment, input, context, **limits)` and the `DEFAULT_MAX_*` limits | `Nokogiri::Gumbo` |
-| `XML::XPathContext` | `new(node)`, `evaluate(path, handler)` for the XPath subset | same |
-| `CSS::Selector` | a compiled selector list: `search(node, include_self, resolved_handlers)` | none; Nokogiri compiles CSS to XPath |
+| class | role | Nokogiri counterpart | status |
+|---|---|---|---|
+| `Lobzique::Html5ever` | `parse(input, url, klass, **limits)`, `fragment(fragment, input, context, **limits)` and the `DEFAULT_MAX_*` limits | `Nokogiri::Gumbo` | built |
+| `XML::Namespace` | a node's namespace: `prefix`, `href` | same | built |
+| `XML::XPathContext` | `new(node)`, `evaluate(path, handler)` for the XPath subset | same | planned |
+| `CSS::Selector` | a compiled selector list: `search(node, include_self, resolved_handlers)` | none; Nokogiri compiles CSS to XPath | planned |
 
 Each arrives with the phase 2 step that needs it (plan.md).
 
@@ -162,9 +163,9 @@ assemble it.
 |---|---|---|
 | `dom` | `Document`, an arena of nodes addressed by `NodeId`; `NodeType` numbered as libxml2 numbers node types; `tree` (linking, unlinking, iterators); `check` (invariants for tests and fuzzing) | built |
 | `dom::reparent` | Nokogiri's `reparent_node_with` rules: hierarchy checks, copying text and cross-document nodes, merging adjacent text | planned |
-| `dom::text` | content, `blank?`, `encode_special_chars` | planned |
-| `html5::parse` | html5ever `TreeSink` into the arena: documents, fragments with a context node, `max_tree_depth`/`max_attributes`, quirks mode, errors | planned |
-| `html5::serialize` | `html_standard_serialize`, byte for byte with Nokogiri::HTML5 | planned |
+| `dom::text` | content and editing character data; `blank?`, `encode_special_chars` | content built |
+| `html5::parse` | html5ever `TreeSink` into the arena: documents, fragments with a context node, `max_tree_depth`/`max_attributes`, quirks mode, errors; gumbo's text and CDATA nodes | built |
+| `html5::serialize` | `html_standard_serialize`, byte for byte with Nokogiri::HTML5 | built |
 | `xml::serialize` | `native_write_to` for `to_xhtml` | planned, late in phase 2 |
 | `css` | Servo `selectors` over the arena; `dialect` for Nokogiri's extensions (`[@attr]`, `:first`, …) | planned |
 | `xpath` | parser and evaluator for the location-path subset; everything else is an error naming the construct (plan.md decision 2) | planned |
@@ -190,7 +191,10 @@ assemble it.
 | custom pseudo-class handlers | called per node from inside XPath evaluation | called once per pseudo-class with the candidate NodeSet, before matching; the id sets go into the match | no Ruby call while the arena is borrowed; the handlers in rails-dom-testing and Capybara filter sets either way |
 | HTML4 names | libxml2's HTML4 parser and serializer | the HTML5 parser and serializer; `HTML5::Node`'s overrides apply to any `HTML4::Document` | decision 3 |
 | `Node#parse` / `in_context` | libxml2's HTML4 parser, even in HTML5 documents | the HTML5 fragment parser with the node as context | one parser |
-| parse error text | gumbo's | html5ever's | different parsers; listed in `test/differential/known.yml` if compared |
+| parse error text | gumbo's, with line and column | html5ever's, with line only | different parsers; listed in `test/differential/known.yml` if compared |
+| `<select>` contents | dropped, as the HTML standard did before 2025 | kept, as the standard and browsers now do (customizable select) | html5ever implements the current standard; `known.yml` lists the cases |
+| `max_tree_depth` | counted on gumbo's stack of open elements | each element's depth where it is inserted, void elements excepted | html5ever doesn't expose its stack; the two agree on ordinary nesting and can differ after the adoption agency moves elements |
+| `XML::Namespace` objects | one per libxml2 `xmlNs`, shared by the nodes that use it | a new object per `Node#namespace` call | namespace definitions are out of scope; Loofah and rails-html-sanitizer read only `prefix` and `href` |
 | native parser module | `Gumbo` | `Html5ever` | named after the engine it binds |
 
 ## How a call flows

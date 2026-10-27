@@ -21,3 +21,10 @@ path = "fuzz_targets/dom.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "html5"
+path = "fuzz_targets/html5.rs"
+test = false
+doc = false
+bench = false

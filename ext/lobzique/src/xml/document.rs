@@ -1,10 +1,10 @@
 //! `XML::Document`: the node object that owns its document's arena.
 
-use super::node::{Node, NODE};
-use crate::support::{call_initialize, displayed_class};
+use super::node::{utf8_string, Node, NODE};
+use crate::support::{c_string, call_initialize, displayed_class};
 use crate::XML;
 use lobzique_core::dom::{self, DocumentKind};
-use magnus::{method, prelude::*, value::Lazy, Error, RClass, Ruby, Value};
+use magnus::{method, prelude::*, value::Lazy, Error, RClass, RString, Ruby, Value};
 
 pub static DOCUMENT: Lazy<RClass> = Lazy::new(|ruby| {
     ruby.get_inner(&XML)
@@ -92,8 +92,21 @@ fn busy(ruby: &Ruby) -> Error {
     )
 }
 
+fn encoding(ruby: &Ruby, rb_self: Value) -> Result<Option<RString>, Error> {
+    let encoding = with_arena(ruby, rb_self, |arena| arena.encoding().map(<[u8]>::to_vec))?;
+    Ok(encoding.map(|encoding| utf8_string(ruby, encoding)))
+}
+
+fn set_encoding(ruby: &Ruby, rb_self: Value, encoding: Value) -> Result<Value, Error> {
+    let label = c_string(encoding)?;
+    with_arena_mut(ruby, rb_self, |arena| arena.set_encoding(Some(label)))?;
+    Ok(encoding)
+}
+
 pub fn init(ruby: &Ruby) -> Result<(), Error> {
     let class = ruby.get_inner(&DOCUMENT);
     class.define_singleton_method("new", method!(new, -1))?;
+    class.define_method("encoding", method!(encoding, 0))?;
+    class.define_method("encoding=", method!(set_encoding, 1))?;
     Ok(())
 }

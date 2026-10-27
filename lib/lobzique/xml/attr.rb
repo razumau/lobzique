@@ -5,6 +5,9 @@
 module Lobzique
   module XML
     class Attr < Node
+      alias_method :value, :content
+      alias_method :to_s, :content
+
       private
 
       def inspect_attributes

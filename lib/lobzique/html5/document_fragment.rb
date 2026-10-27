@@ -7,6 +7,27 @@ require_relative "../html4/document_fragment"
 module Lobzique
   module HTML5
     class DocumentFragment < HTML4::DocumentFragment
+      class << self
+        # Parses in a new HTML5::Document. Takes `context:` among the options.
+        def parse(
+          input,
+          encoding_ = nil, positional_options_hash = nil,
+          encoding: encoding_, **options
+        )
+          unless positional_options_hash.nil? || positional_options_hash.empty?
+            options.merge!(positional_options_hash)
+          end
+
+          context = options.delete(:context)
+
+          document = HTML5::Document.new
+          document.encoding = "UTF-8"
+          input = HTML5.read_and_encode(input, encoding)
+
+          new(document, input, context, options)
+        end
+      end
+
       # Ruby attributes, not the native `Node#document`: Loofah and others
       # build a fragment with `new(document, input)` and read them back.
       attr_accessor :document
@@ -39,6 +60,15 @@ module Lobzique
 
         Html5ever.fragment(self, input, context, **options)
       end
+
+      def serialize(options = {}, &block) # :nodoc:
+        # Bypass XML::Document.serialize which doesn't support options even
+        # though we might be passed options (like :preserve_newline)
+        XML::Node.instance_method(:serialize).bind_call(self, options, &block)
+      end
+
+      # lobzique: extract_params waits for namespace definitions, which are
+      # out of scope (ARCHITECTURE.md, port rule)
     end
   end
 end

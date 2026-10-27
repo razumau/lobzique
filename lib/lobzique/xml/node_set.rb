@@ -161,6 +161,24 @@ module Lobzique
 
       alias_method :+, :|
 
+      def inner_html(*args)
+        collect { |j| j.inner_html(*args) }.join("")
+      end
+
+      def to_s
+        map(&:to_s).join # rubocop:disable Style/MapJoin -- a NodeSet has no #join
+      end
+
+      def to_html(*args)
+        if empty?
+          encoding = (args.first.is_a?(Hash) ? args.first[:encoding] : nil)
+          encoding ||= document.encoding
+          encoding.nil? ? "" : "".encode(encoding)
+        else
+          map { |x| x.to_html(*args) }.join
+        end
+      end
+
       def deconstruct
         to_a
       end

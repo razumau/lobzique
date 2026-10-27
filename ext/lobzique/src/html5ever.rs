@@ -1,0 +1,270 @@
+//! `Html5ever`, Nokogiri's `Gumbo` (`ext/nokogiri/gumbo.c`): the HTML5
+//! parser's entry points behind `HTML5::Document.parse` and
+//! `HTML5::DocumentFragment#initialize`.
+
+use crate::support::{c_string, c_string_with_length, call_initialize, check_string};
+use crate::xml::document::{self, wrap_document};
+use crate::xml::node::{utf8_string, Node};
+use crate::{HTML5EVER, XML};
+use lobzique_core::html5::{
+    self, Context, ContextNamespace, LimitError, Options, ParseError, QuirksMode,
+};
+use magnus::{
+    function,
+    prelude::*,
+    scan_args::{get_kwargs, scan_args},
+    typed_data::Obj,
+    Error, RClass, RHash, RObject, RString, Ruby, Value,
+};
+
+/// `Html5ever.parse(input, url, klass, **options)`: a document of `klass`,
+/// initialized with no arguments, then given `@url`, `@quirks_mode` and,
+/// if there were any, `@errors`.
+fn parse(ruby: &Ruby, args: &[Value]) -> Result<Value, Error> {
+    let args = scan_args::<(Value, Value, Value), (), (), (), RHash, ()>(args)?;
+    let (input, url, klass) = args.required;
+    let options = options(args.keywords)?;
+    let input = input_bytes(ruby, input)?;
+    let klass = RClass::try_convert(klass)?;
+
+    let (arena, parsed) =
+        html5::parse_document(&input, &options).map_err(|error| limit_error(ruby, error))?;
+    let document = wrap_document(ruby, klass, arena)?;
+    call_initialize(document, &[])?;
+    let object = Obj::<Node>::try_convert(document)?;
+    object.ivar_set("@url", url)?;
+    object.ivar_set("@quirks_mode", parsed.quirks_mode as u8)?;
+    add_errors(ruby, object, parsed.errors, url)?;
+    Ok(document)
+}
+
+/// `Html5ever.fragment(fragment, input, context, **options)`: parses
+/// `input` in `context` (nil, a name such as `"svg:path"`, or a node) and
+/// appends the result to `fragment`.
+fn fragment(ruby: &Ruby, args: &[Value]) -> Result<(), Error> {
+    let args = scan_args::<(Value, Value, Value), (), (), (), RHash, ()>(args)?;
+    let (fragment, input, context_arg) = args.required;
+    let options = options(args.keywords)?;
+    let context =
+        context_for(ruby, context_arg)?.with_quirks_mode(quirks_mode_for(fragment, context_arg)?);
+    let input = input_bytes(ruby, input)?;
+
+    // Nokogiri builds in the document `fragment.document` names; the nodes
+    // can only go into the arena the fragment itself is in
+    let target = Obj::<Node>::try_convert(fragment)?;
+    let id = target.id(ruby)?;
+    let parsed = document::with_arena_mut(ruby, target.document(ruby)?, |arena| {
+        html5::parse_fragment(arena, id, &input, &context, &options)
+    })?
+    .map_err(|error| limit_error(ruby, error))?;
+    target.ivar_set("@quirks_mode", parsed.quirks_mode as u8)?;
+    add_errors(
+        ruby,
+        target,
+        parsed.errors,
+        utf8_string(ruby, "#fragment").as_value(),
+    )
+}
+
+/// Gumbo's options: three required keywords and one optional one. A
+/// negative limit is no limit.
+fn options(keywords: RHash) -> Result<Options, Error> {
+    let keywords = get_kwargs::<_, (i32, i32, i32), (Option<Value>,), ()>(
+        keywords,
+        &["max_attributes", "max_errors", "max_tree_depth"],
+        &["parse_noscript_content_as_text"],
+    )?;
+    let (max_attributes, max_errors, max_tree_depth) = keywords.required;
+    let (noscript_as_text,) = keywords.optional;
+    let limit = |value: i32| usize::try_from(value).ok();
+    Ok(Options {
+        max_attributes: limit(max_attributes),
+        max_errors: limit(max_errors),
+        max_tree_depth: limit(max_tree_depth),
+        parse_noscript_content_as_text: noscript_as_text.is_some_and(|value| value.to_bool()),
+    })
+}
+
+/// The whole string, zero bytes included, as gumbo reads it.
+fn input_bytes(ruby: &Ruby, input: Value) -> Result<Vec<u8>, Error> {
+    check_string(ruby, input)?;
+    let input = RString::from_value(input).expect("checked to be a String");
+    // SAFETY: the bytes are copied before any Ruby code could change them.
+    Ok(unsafe { input.as_slice() }.to_vec())
+}
+
+fn limit_error(ruby: &Ruby, error: LimitError) -> Error {
+    Error::new(ruby.exception_arg_error(), error.to_string())
+}
+
+fn context_for(ruby: &Ruby, context: Value) -> Result<Context, Error> {
+    if context.is_nil() {
+        return Ok(Context::new(ContextNamespace::Html, "body"));
+    }
+    if RString::from_value(context).is_some() {
+        return named_context(ruby, &c_string(context)?);
+    }
+
+    let name: Value = context.funcall("name", ())?;
+    check_string(ruby, name)?;
+    let name = String::from_utf8_lossy(&c_string(name)?).into_owned();
+    let namespace = namespace_of(ruby, context)?.ok_or_else(|| {
+        let href = context
+            .funcall::<_, _, Value>("namespace", ())
+            .and_then(|ns| ns.funcall::<_, _, Value>("href", ()))
+            .and_then(c_string_with_length)
+            .unwrap_or_default();
+        let href = String::from_utf8_lossy(&href);
+        let message = format!("Unexpected namespace URI \"{href}\"");
+        Error::new(ruby.exception_arg_error(), message)
+    })?;
+
+    let mut has_form_ancestor = false;
+    let mut node = context;
+    while !node.is_nil() {
+        if node.funcall::<_, _, Value>("element?", ())?.to_bool() {
+            let name = c_string_with_length(node.funcall("name", ())?)?;
+            if name.eq_ignore_ascii_case(b"form")
+                && namespace_of(ruby, node)? == Some(ContextNamespace::Html)
+            {
+                has_form_ancestor = true;
+                break;
+            }
+        }
+        node = if node.respond_to("parent", false)? {
+            node.funcall("parent", ())?
+        } else {
+            ruby.qnil().as_value()
+        };
+    }
+
+    let encoding =
+        if namespace == ContextNamespace::MathMl && name.eq_ignore_ascii_case("annotation-xml") {
+            // Nokogiri reads it with `context["encoding"]`, which needs
+            // `Node#get` (plan.md, phase 2 step 3)
+            let node = <&Node>::try_convert(context)?;
+            node.with_arena(ruby, |arena, id| {
+                arena.attributes(id).iter().find_map(|&attribute| {
+                    let name = arena.node_name(attribute)?;
+                    (name == b"encoding" && arena.namespace(attribute).is_none())
+                        .then(|| arena.content(attribute))
+                        .flatten()
+                })
+            })?
+        } else {
+            None
+        };
+
+    Ok(Context::new(namespace, &name)
+        .with_encoding(encoding)
+        .with_form_ancestor(has_form_ancestor))
+}
+
+/// A context given by name: `"tr"`, `"svg:path"`, or `"svg"` and `"math"`,
+/// which name their own namespace.
+fn named_context(ruby: &Ruby, tag: &[u8]) -> Result<Context, Error> {
+    let tag = String::from_utf8_lossy(tag);
+    let (namespace, name) = match tag.split_once(':') {
+        Some((prefix, name)) => {
+            let namespace = match prefix.to_ascii_lowercase().as_str() {
+                "svg" => ContextNamespace::Svg,
+                "html" => ContextNamespace::Html,
+                "math" => ContextNamespace::MathMl,
+                _ => {
+                    // gumbo.c's "%*s" pads to the prefix's length, so the
+                    // whole name is shown
+                    let message = format!("Invalid context namespace '{tag}'");
+                    return Err(Error::new(ruby.exception_arg_error(), message));
+                }
+            };
+            (namespace, name)
+        }
+        None if tag.eq_ignore_ascii_case("svg") => (ContextNamespace::Svg, &*tag),
+        None if tag.eq_ignore_ascii_case("math") => (ContextNamespace::MathMl, &*tag),
+        None => (ContextNamespace::Html, &*tag),
+    };
+    let form = namespace == ContextNamespace::Html && name.eq_ignore_ascii_case("form");
+    Ok(Context::new(namespace, name).with_form_ancestor(form))
+}
+
+/// gumbo.c's `lookup_namespace`, through `node.namespace.href`; `None` for
+/// a namespace the parser has no rules for.
+fn namespace_of(ruby: &Ruby, node: Value) -> Result<Option<ContextNamespace>, Error> {
+    let namespace: Value = node.funcall("namespace", ())?;
+    if namespace.is_nil() {
+        return Ok(Some(ContextNamespace::Html));
+    }
+    let href: Value = namespace.funcall("href", ())?;
+    check_string(ruby, href)?;
+    Ok(match &*c_string_with_length(href)? {
+        b"http://www.w3.org/1999/xhtml" => Some(ContextNamespace::Html),
+        b"http://www.w3.org/1998/Math/MathML" => Some(ContextNamespace::MathMl),
+        b"http://www.w3.org/2000/svg" => Some(ContextNamespace::Svg),
+        _ => None,
+    })
+}
+
+/// No quirks unless the context is a node of a parsed document; then the
+/// quirks mode its doctype selects, or quirks if it has none.
+fn quirks_mode_for(fragment: Value, context: Value) -> Result<QuirksMode, Error> {
+    let document: Value = fragment.funcall("document", ())?;
+    let doctype: Value = document.funcall("internal_subset", ())?;
+    let document_quirks_mode =
+        Obj::<Node>::try_convert(document)?.ivar_get::<_, Value>("@quirks_mode")?;
+    if context.is_nil() || RString::from_value(context).is_some() || document_quirks_mode.is_nil() {
+        return Ok(QuirksMode::NoQuirks);
+    }
+    if doctype.is_nil() {
+        return Ok(QuirksMode::Quirks);
+    }
+    let field = |name: &str| -> Result<Option<Vec<u8>>, Error> {
+        let value: Value = doctype.funcall(name, ())?;
+        (!value.is_nil()).then(|| c_string(value)).transpose()
+    };
+    let (name, public_id, system_id) = (field("name")?, field("external_id")?, field("system_id")?);
+    Ok(html5::quirks_mode_for_doctype(
+        name.as_deref(),
+        public_id.as_deref(),
+        system_id.as_deref(),
+    ))
+}
+
+/// gumbo.c's `add_errors`: one `XML::SyntaxError` per parse error, set
+/// only if there were any.
+fn add_errors(
+    ruby: &Ruby,
+    target: Obj<Node>,
+    errors: Vec<ParseError>,
+    file: Value,
+) -> Result<(), Error> {
+    if errors.is_empty() {
+        return Ok(());
+    }
+    let class: RClass = ruby.get_inner(&XML).const_get("SyntaxError")?;
+    let array = ruby.ary_new_capa(errors.len());
+    for error in errors {
+        let syntax_error: Value = class.new_instance((utf8_string(ruby, &error.message),))?;
+        let syntax_error = RObject::try_convert(syntax_error)?;
+        syntax_error.ivar_set("@domain", 1)?; // XML_FROM_PARSER
+        syntax_error.ivar_set("@code", 1)?; // XML_ERR_INTERNAL_ERROR
+        syntax_error.ivar_set("@level", 2)?; // XML_ERR_ERROR
+        syntax_error.ivar_set("@file", file)?;
+        syntax_error.ivar_set("@line", error.line)?;
+        // gumbo's error code; html5ever's errors have none
+        syntax_error.ivar_set("@str1", ruby.qnil())?;
+        syntax_error.ivar_set("@str2", ruby.qnil())?;
+        syntax_error.ivar_set("@str3", ruby.qnil())?;
+        syntax_error.ivar_set("@int1", 0)?;
+        // html5ever reports lines only
+        syntax_error.ivar_set("@column", 0)?;
+        array.push(syntax_error)?;
+    }
+    target.ivar_set("@errors", array)
+}
+
+pub fn init(ruby: &Ruby) -> Result<(), Error> {
+    let module = ruby.get_inner(&HTML5EVER);
+    module.define_singleton_method("parse", function!(parse, -1))?;
+    module.define_singleton_method("fragment", function!(fragment, -1))?;
+    Ok(())
+}

@@ -2,6 +2,28 @@
 # script/differential fails on any difference not listed here, and on an entry
 # that no longer differs.
 #
-#   - match: regexp against the case id (e.g. \Awpt-parsing/tests1\.dat#12\z)
+#   - match: regexp against the case id (e.g. \Awpt-parsing/tree-construction/tests1\.dat#12\z)
 #     reason: why lobzique differs and why that is acceptable
-[]
+- match: \Awpt-parsing/tree-construction/(menuitem-element\.dat#14|tests1\.dat#(30|100)|tests10\.dat#(4|5|17|18)|tests18\.dat#(14|15)|tests7\.dat#34|tests9\.dat#(5|6|18|19)|tests_innerHTML_1\.dat#(77|78)|webkit02\.dat#(19|36|38|39|40|41|42|43))\z
+  reason: >-
+    html5ever implements the 2025 customizable <select> parsing, which keeps
+    elements such as svg, math, div, button and datalist inside a select;
+    gumbo predates it. lobzique's tree is the one the WPT expectations give.
+- match: \A(cases/element-in-option|crawl/CC-MAIN-20261005105623-20261005135623-00000\.warc\.gz@2555606|crawl/CC-MAIN-20261009160033-20261009190033-00333\.warc\.gz@(604984|22178628)|crawl/CC-MAIN-20261013211541-20261014001541-00666\.warc\.gz@(976107|25147464|39767012))\z
+  reason: >-
+    Customizable <select> parsing, as above, on real pages: markup inside
+    select and option elements stays where it was written.
+- match: \Awpt-parsing/tree-construction/webkit02\.dat#(45|46|47|48)\z
+  reason: >-
+    Customizable <select> as above. The standard also copies the selected
+    option into <selectedcontent>; html5ever leaves that to a TreeSink hook
+    lobzique doesn't implement, so <selectedcontent> stays empty, unlike in
+    browsers.
+- match: \Awpt-parsing/tree-construction/tests_innerHTML_1\.dat#76\z
+  reason: >-
+    html5ever keeps <input> when parsing a fragment in a select context; the
+    standard and gumbo drop it.
+- match: \A(cases/cr-after-ampersand-in-attribute|crawl/CC-MAIN-20261005105623-20261005135623-00000\.warc\.gz@21360212)\z
+  reason: >-
+    gumbo keeps a CR that follows "&" in an attribute value; the standard,
+    and lobzique, turn CR LF into LF everywhere.

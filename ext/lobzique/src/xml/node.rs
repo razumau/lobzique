@@ -3,11 +3,12 @@
 use super::ELEMENT;
 use super::{
     attr::ATTR, cdata::CDATA, comment::COMMENT, document, document_fragment::DOCUMENT_FRAGMENT,
-    dtd::DTD, text::TEXT,
+    dtd::DTD, namespace, text::TEXT,
 };
 use crate::support::{c_string, call_initialize, obj_class, warn_deprecated, yield_to_block};
 use crate::XML;
 use lobzique_core::dom::{self, NodeId, NodeType};
+use lobzique_core::html5;
 use magnus::{
     gc, method,
     prelude::*,
@@ -129,6 +130,78 @@ impl Node {
             .map(|id| wrap(ruby, rb_self.document(ruby)?, id))
             .transpose()
     }
+
+    fn parent(ruby: &Ruby, rb_self: &Self) -> Result<Option<Value>, Error> {
+        let parent = rb_self.with_arena(ruby, |arena, id| arena.parent(id))?;
+        parent
+            .map(|id| wrap(ruby, rb_self.document(ruby)?, id))
+            .transpose()
+    }
+
+    fn children(ruby: &Ruby, rb_self: &Self) -> Result<Value, Error> {
+        let ids = rb_self.with_arena(ruby, |arena, id| arena.children(id).collect())?;
+        node_set(ruby, rb_self.document(ruby)?, ids)
+    }
+
+    /// An Array, not a NodeSet, as in Nokogiri.
+    fn attribute_nodes(ruby: &Ruby, rb_self: &Self) -> Result<RArray, Error> {
+        let ids = rb_self.with_arena(ruby, |arena, id| arena.attributes(id).to_vec())?;
+        wrap_all(ruby, rb_self.document(ruby)?, ids)
+    }
+
+    fn content(ruby: &Ruby, rb_self: &Self) -> Result<Option<RString>, Error> {
+        let content = rb_self.with_arena(ruby, |arena, id| arena.content(id))?;
+        Ok(content.map(|content| utf8_string(ruby, content)))
+    }
+
+    fn namespace(ruby: &Ruby, rb_self: &Self) -> Result<Option<Value>, Error> {
+        let namespace = rb_self.with_arena(ruby, |arena, id| {
+            arena
+                .namespace(id)
+                .map(|ns| (ns.prefix.map(str::to_owned), ns.href.to_owned()))
+        })?;
+        namespace
+            .map(|(prefix, href)| namespace::wrap(ruby, rb_self.document(ruby)?, prefix, href))
+            .transpose()
+    }
+
+    fn html_standard_serialize(
+        ruby: &Ruby,
+        rb_self: &Self,
+        preserve_newline: Value,
+    ) -> Result<RString, Error> {
+        let preserve_newline = preserve_newline.to_bool();
+        let html = rb_self.with_arena(ruby, |arena, id| {
+            html5::serialize(arena, id, preserve_newline)
+        })?;
+        Ok(utf8_string(ruby, html))
+    }
+
+    fn prepend_newline_p(ruby: &Ruby, rb_self: &Self) -> Result<bool, Error> {
+        rb_self.with_arena(ruby, html5::prepend_newline)
+    }
+}
+
+/// The node objects for `ids`, in an Array.
+pub fn wrap_all(ruby: &Ruby, document: Value, ids: Vec<NodeId>) -> Result<RArray, Error> {
+    let nodes = ruby.ary_new_capa(ids.len());
+    for id in ids {
+        nodes.push(wrap(ruby, document, id)?)?;
+    }
+    Ok(nodes)
+}
+
+static NODE_SET: Lazy<RClass> = Lazy::new(|ruby| {
+    ruby.get_inner(&XML)
+        .const_get("NodeSet")
+        .expect("lib/lobzique/xml/node_set.rb defines XML::NodeSet")
+});
+
+/// A NodeSet of the node objects for `ids`: `noko_xml_node_set_wrap`, which
+/// is Ruby's `NodeSet.wrap` here (ARCHITECTURE.md, departures).
+pub fn node_set(ruby: &Ruby, document: Value, ids: Vec<NodeId>) -> Result<Value, Error> {
+    let nodes = wrap_all(ruby, document, ids)?;
+    ruby.get_inner(&NODE_SET).funcall("wrap", (document, nodes))
 }
 
 /// Bytes from the arena as a Ruby string tagged UTF-8, valid or not, as
@@ -280,5 +353,15 @@ pub fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("node_name", method!(Node::node_name, 0))?;
     class.define_method("node_type", method!(Node::node_type, 0))?;
     class.define_method("internal_subset", method!(Node::internal_subset, 0))?;
+    class.define_method("parent", method!(Node::parent, 0))?;
+    class.define_method("children", method!(Node::children, 0))?;
+    class.define_method("attribute_nodes", method!(Node::attribute_nodes, 0))?;
+    class.define_method("content", method!(Node::content, 0))?;
+    class.define_method("namespace", method!(Node::namespace, 0))?;
+    class.define_private_method("prepend_newline?", method!(Node::prepend_newline_p, 0))?;
+    class.define_private_method(
+        "html_standard_serialize",
+        method!(Node::html_standard_serialize, 1),
+    )?;
     Ok(())
 }

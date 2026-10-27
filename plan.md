@@ -51,7 +51,10 @@ fuzzing (see README). To add once there is real code, roughly by value:
 2. **DoS limits.** A Rust stack overflow on deeply nested HTML aborts the
    whole process instead of raising. Needs a depth limit (Nokogiri::HTML5
    has `max_tree_depth`), tests with very deep nesting, and fuzz
-   `-timeout`/`-rss_limit_mb` so slow or memory-hungry inputs fail.
+   `-timeout`/`-rss_limit_mb` so slow or memory-hungry inputs fail. Done
+   for parsing and serialization: both limits, deep-nesting tests on a
+   small stack, and `-timeout` in CI (libFuzzer's default `-rss_limit_mb`
+   is 2 GB).
 3. **`cargo-deny`**: RustSec advisories, licenses, allowed sources.
    html5ever pulls in `tendril`, which is heavy on `unsafe` and has had
    advisories.
@@ -70,8 +73,8 @@ fuzzing (see README). To add once there is real code, roughly by value:
    which catch write-barrier mistakes once wrapped objects are marked
    write-barrier protected.
 
-Seed the fuzz corpus from `test/fixtures/html5lib-tests` once there are
-parsing targets.
+CI seeds the `html5` fuzz target from the WPT tree-construction and
+html5lib tokenizer inputs.
 
 ## Phases
 
@@ -91,7 +94,10 @@ parsing targets.
       - the arena DOM.
    2. Parse and serialize together, so the differential harness starts
       enforcing: `Html5ever.parse`/`fragment`, `html_standard_serialize`,
-      `HTML5.parse`.
+      `HTML5.parse`. Done, with the read-only methods the harness's tree
+      dump needs (`children`, `attribute_nodes`, `namespace`, `content`,
+      `parent`). Fixtures and the crawl sample match except for the cases
+      `test/differential/known.yml` explains.
    3. Read-only DOM: traversal, attributes and content, porting the rest of
       `node.rb` that needs no mutation.
    4. Mutation: `reparent`, `coerce`, `inner_html=`, `replace`, `dup`.

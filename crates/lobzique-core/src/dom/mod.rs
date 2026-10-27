@@ -12,12 +12,14 @@ mod check;
 mod node;
 #[cfg(test)]
 mod tests;
+mod text;
 mod tree;
 
 pub use html5ever::{LocalName, Namespace, Prefix, QualName};
 pub use node::{Attribute, Doctype, Element, NodeKind, NodeType, ProcessingInstruction};
 pub use tree::{Ancestors, Children, Descendants, HierarchyError};
 
+use html5ever::ns;
 use node::Node;
 use std::mem::size_of;
 use std::num::NonZeroU32;
@@ -44,6 +46,13 @@ impl NodeId {
     }
 }
 
+/// A namespace as libxml2 records it on a node: Nokogiri's `XML::Namespace`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NamespaceRef<'a> {
+    pub prefix: Option<&'a str>,
+    pub href: &'a str,
+}
+
 /// Whether a document came from the HTML or the XML side, which decides its
 /// node type, as libxml2's `htmlDocPtr` and `xmlDocPtr` do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,6 +65,8 @@ pub enum DocumentKind {
 pub struct Document {
     kind: DocumentKind,
     nodes: Vec<Node>,
+    /// libxml2's `doc->encoding`: a label, kept as given.
+    encoding: Option<Vec<u8>>,
 }
 
 impl Document {
@@ -63,6 +74,7 @@ impl Document {
         Document {
             kind,
             nodes: vec![Node::new(NodeKind::Document)],
+            encoding: None,
         }
     }
 
@@ -92,6 +104,14 @@ impl Document {
 
     pub fn kind(&self) -> DocumentKind {
         self.kind
+    }
+
+    pub fn encoding(&self) -> Option<&[u8]> {
+        self.encoding.as_deref()
+    }
+
+    pub fn set_encoding(&mut self, encoding: Option<Vec<u8>>) {
+        self.encoding = encoding;
     }
 
     /// Every node in the arena, linked or not, in creation order.
@@ -173,10 +193,49 @@ impl Document {
         self.create(NodeKind::Doctype(doctype))
     }
 
+    pub fn create_processing_instruction(&mut self, target: Vec<u8>, data: Vec<u8>) -> NodeId {
+        self.create(NodeKind::ProcessingInstruction(ProcessingInstruction {
+            target,
+            data,
+        }))
+    }
+
+    /// The node's namespace as Nokogiri shows it after an HTML5 parse: none
+    /// for HTML elements, and the prefix gumbo gives each foreign namespace.
+    pub fn namespace(&self, id: NodeId) -> Option<NamespaceRef<'_>> {
+        let (name, prefixes): (_, &[(Namespace, &str)]) = match self.node_kind(id) {
+            NodeKind::Element(element) => {
+                (&element.name, &[(ns!(svg), "svg"), (ns!(mathml), "math")])
+            }
+            NodeKind::Attribute(attribute) => (
+                &attribute.name,
+                &[
+                    (ns!(xlink), "xlink"),
+                    (ns!(xml), "xml"),
+                    (ns!(xmlns), "xmlns"),
+                ],
+            ),
+            _ => return None,
+        };
+        if name.ns == ns!() || name.ns == ns!(html) {
+            return None;
+        }
+        let prefix = prefixes
+            .iter()
+            .find(|(namespace, _)| *namespace == name.ns)
+            .map(|&(_, prefix)| prefix)
+            .or(name.prefix.as_deref());
+        Some(NamespaceRef {
+            prefix,
+            href: &name.ns,
+        })
+    }
+
     /// Bytes the arena holds on the heap, for `ObjectSpace.memsize_of`.
     /// Walks every node.
     pub fn heap_size(&self) -> usize {
         self.nodes.capacity() * size_of::<Node>()
+            + self.encoding.as_ref().map_or(0, Vec::capacity)
             + self
                 .nodes
                 .iter()

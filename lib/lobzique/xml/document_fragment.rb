@@ -43,6 +43,17 @@ module Lobzique
         "#document-fragment"
       end
 
+      def to_s
+        children.to_s
+      end
+
+      def to_html(*args)
+        children.to_html(*args)
+      end
+
+      # lobzique: to_xhtml and to_xml wait for native_write_to (plan.md,
+      # phase 2 step 8)
+
       def errors
         document.errors
       end

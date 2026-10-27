@@ -4,6 +4,7 @@ pub mod comment;
 pub mod document;
 pub mod document_fragment;
 pub mod dtd;
+pub mod namespace;
 pub mod node;
 pub mod text;
 
@@ -24,9 +25,10 @@ pub static CHARACTER_DATA: Lazy<RClass> = Lazy::new(|ruby| {
 });
 
 pub fn init(ruby: &Ruby) -> Result<(), Error> {
+    namespace::init(ruby)?;
     node::init(ruby)?;
     attr::init(ruby);
-    dtd::init(ruby);
+    dtd::init(ruby)?;
     ruby.get_inner(&ELEMENT);
     ruby.get_inner(&CHARACTER_DATA);
     comment::init(ruby)?;

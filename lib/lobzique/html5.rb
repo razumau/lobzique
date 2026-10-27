@@ -7,8 +7,20 @@ require_relative "html5/document_fragment"
 require_relative "html5/node"
 
 module Lobzique
+  def self.HTML5(...)
+    HTML5::Document.parse(...)
+  end
+
   module HTML5
     class << self
+      def parse(...)
+        Document.parse(...)
+      end
+
+      def fragment(...)
+        DocumentFragment.parse(...)
+      end
+
       # Reads an IO or String and returns it as UTF-8, which the parser takes.
       def read_and_encode(string, encoding)
         if string.respond_to?(:read)

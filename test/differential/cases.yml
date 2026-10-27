@@ -1,0 +1,14 @@
+# Inputs written for the differential harness, each small enough to read.
+# Most are minimized from differences found on crawled pages; the page itself
+# is never copied here (AGENTS.md).
+#
+#   - id: a stable name; the case id is cases/<id>
+#     input: the HTML
+#     context: a fragment context ("body", "svg:path"); omit for a document
+#     note: where it came from, what it checks
+- id: cr-after-ampersand-in-attribute
+  input: "<a href=\"x&\r\ny\">"
+  note: from a crawled page whose mailto link had line breaks in its query
+- id: element-in-option
+  input: "<select><option>2XS - <span class=money>3,750.00</span></option></select>"
+  note: from crawled shop pages that mark up prices inside options

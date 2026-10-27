@@ -2,6 +2,8 @@
 
 # Adapted from Nokogiri 1.19.4, lib/nokogiri/xml/node.rb (MIT, see LICENSE-NOKOGIRI.md).
 
+require "stringio"
+
 module Lobzique
   module XML
     class Node
@@ -91,7 +93,58 @@ module Lobzique
 
       alias_method :elem?, :element?
 
+      def to_s
+        document.xml? ? to_xml : to_html
+      end
+
+      def inner_html(*args)
+        children.map { |x| x.to_html(*args) }.join
+      end
+
+      # :section: Serialization and Generating Output
+
+      # Save options can also be set with a block, which gets a SaveOptions.
+      def serialize(*args, &block)
+        options = if args.first.is_a?(Hash)
+          args.shift
+        else
+          {
+            encoding: args[0],
+            save_with: args[1]
+          }
+        end
+
+        options[:encoding] ||= document.encoding
+        encoding = Encoding.find(options[:encoding] || "UTF-8")
+
+        io = StringIO.new(String.new(encoding: encoding))
+
+        write_to(io, options, &block)
+        io.string
+      end
+
+      def to_html(options = {})
+        to_format(SaveOptions::DEFAULT_HTML, options)
+      end
+
+      # lobzique: to_xml, to_xhtml, write_to and the write_*_to methods
+      # that use them wait for native_write_to (plan.md, phase 2 step 8)
+
+      def write_html_to(io, options = {})
+        write_format_to(SaveOptions::DEFAULT_HTML, io, options)
+      end
+
       private
+
+      def to_format(save_option, options)
+        options[:save_with] = save_option unless options[:save_with]
+        serialize(options)
+      end
+
+      def write_format_to(save_option, io, options)
+        options[:save_with] ||= save_option
+        write_to(io, options)
+      end
 
       def inspect_attributes
         [:name, :namespace, :attribute_nodes, :children]
