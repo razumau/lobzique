@@ -5,6 +5,15 @@
 module Lobzique
   module XML
     class Document < Node
+      # The xmlns keys #create_element treats as namespace definitions.
+      NCNAME_START_CHAR = "A-Za-z_"
+      NCNAME_CHAR = NCNAME_START_CHAR + "\\-\\.0-9"
+      NCNAME_RE = /^xmlns(?::([#{NCNAME_START_CHAR}][#{NCNAME_CHAR}]*))?$/
+
+      OBJECT_DUP_METHOD = Object.instance_method(:dup)
+      OBJECT_CLONE_METHOD = Object.instance_method(:clone)
+      private_constant :OBJECT_DUP_METHOD, :OBJECT_CLONE_METHOD
+
       attr_accessor :errors
       attr_accessor :namespace_inheritance
 
@@ -14,6 +23,42 @@ module Lobzique
         @errors = []
         @decorators = nil
         @namespace_inheritance = false
+      end
+
+      # A copy of the document, with its whole tree unless +level+ is 0.
+      def dup(level = 1)
+        copy = OBJECT_DUP_METHOD.bind_call(self)
+        copy.initialize_copy_with_args(self, level)
+      end
+
+      def clone(level = 1)
+        copy = OBJECT_CLONE_METHOD.bind_call(self)
+        copy.initialize_copy_with_args(self, level)
+      end
+
+      # An element named +name+. Each argument is a Hash of attributes or
+      # the element's content; the block gets the element first.
+      def create_element(name, *contents_or_attrs, &block)
+        elm = XML::Element.new(name, self, &block)
+        contents_or_attrs.each do |arg|
+          case arg
+          when Hash
+            arg.each do |k, v|
+              key = k.to_s
+              if NCNAME_RE.match?(key)
+                # lobzique: Nokogiri adds a namespace definition here, and
+                # makes an unprefixed one the element's namespace; adding
+                # definitions is out of scope
+                raise NotImplementedError, "namespace definitions can't be added"
+              else
+                elm[k.to_s] = v.to_s
+              end
+            end
+          else
+            elm.content = arg
+          end
+        end
+        elm
       end
 
       def create_text_node(string, &block)
@@ -57,10 +102,24 @@ module Lobzique
         root ? root.namespaces : {}
       end
 
-      # lobzique: Nokogiri also undefines swap, default_namespace=,
+      # lobzique: Nokogiri also undefines default_namespace=,
       # add_namespace_definition, line and add_namespace, which aren't
-      # defined yet
-      undef_method :parent, :namespace, :attributes, :namespace_definitions
+      # defined
+      undef_method :swap, :parent, :namespace, :attributes, :namespace_definitions
+
+      def add_child(node_or_tags)
+        raise "A document may not have multiple root nodes." if root && root.name != "nokogiri_text_wrapper" && !(node_or_tags.comment? || node_or_tags.processing_instruction?)
+
+        node_or_tags = coerce(node_or_tags)
+        if node_or_tags.is_a?(XML::NodeSet)
+          raise "A document may not have multiple root nodes." if node_or_tags.size > 1
+
+          super(node_or_tags.first)
+        else
+          super
+        end
+      end
+      alias_method :<<, :add_child
 
       def deconstruct_keys(keys)
         {root: root}

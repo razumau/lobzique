@@ -111,7 +111,68 @@ module Lobzique
         nil
       end
 
+      def before(datum)
+        first.before(datum)
+      end
+
+      def after(datum)
+        last.after(datum)
+      end
+
       alias_method :<<, :push
+
+      # lobzique: native in Nokogiri, which also calls each node's #unlink
+      def unlink
+        each { |node| node.unlink unless node.is_a?(XML::Namespace) }
+        self
+      end
+      alias_method :remove, :unlink
+
+      def add_class(name)
+        each do |el|
+          el.add_class(name)
+        end
+        self
+      end
+
+      def append_class(name)
+        each do |el|
+          el.append_class(name)
+        end
+        self
+      end
+
+      def remove_class(name = nil)
+        each do |el|
+          el.remove_class(name)
+        end
+        self
+      end
+
+      # With a value, a Hash or a block, sets attributes on every node;
+      # otherwise the first node's attribute named +key+.
+      def attr(key, value = nil, &block)
+        setting = key.is_a?(Hash) || (key && (value || block))
+        return first&.attribute(key) unless setting
+
+        hash = key.is_a?(Hash) ? key : {key => value}
+
+        hash.each do |k, v|
+          each do |node|
+            node[k] = v || yield(node)
+          end
+        end
+
+        self
+      end
+      alias_method :set, :attr
+      alias_method :attribute, :attr
+
+      def remove_attr(name)
+        each { |el| el.delete(name) }
+        self
+      end
+      alias_method :remove_attribute, :remove_attr
 
       def each
         return to_enum unless block_given?
@@ -176,6 +237,11 @@ module Lobzique
 
       def inner_html(*args)
         collect { |j| j.inner_html(*args) }.join("")
+      end
+
+      def wrap(node_or_tags)
+        map { |node| node.wrap(node_or_tags) }
+        self
       end
 
       def to_s

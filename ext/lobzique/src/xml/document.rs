@@ -1,10 +1,14 @@
 //! `XML::Document`: the node object that owns its document's arena.
 
 use super::node::{utf8_string, wrap, Node, NODE};
-use crate::support::{c_string, call_initialize, displayed_class};
+use super::ELEMENT;
+use crate::support::{c_string, call_initialize, displayed_class, obj_class};
 use crate::XML;
-use lobzique_core::dom::{self, DocumentKind, NodeId};
-use magnus::{method, prelude::*, value::Lazy, Error, RClass, RString, Ruby, Value};
+use lobzique_core::dom::{self, CopyDepth, DocumentKind, NodeId, NodeType};
+use magnus::{
+    method, prelude::*, rb_sys::AsRawValue, typed_data::Obj, value::Lazy, Error, RClass, RString,
+    Ruby, Value,
+};
 
 pub static DOCUMENT: Lazy<RClass> = Lazy::new(|ruby| {
     ruby.get_inner(&XML)
@@ -84,6 +88,20 @@ pub fn with_arena_mut<R: Send>(
     Ok(f(&mut arena))
 }
 
+/// [`with_arena_mut`] on two different documents at once.
+pub fn with_arenas_mut<R: Send>(
+    ruby: &Ruby,
+    first: Value,
+    second: Value,
+    f: impl FnOnce(&mut dom::Document, &mut dom::Document) -> R + Send,
+) -> Result<R, Error> {
+    let first = arena(ruby, unwrap(ruby, first)?)?;
+    let second = arena(ruby, unwrap(ruby, second)?)?;
+    let mut first = first.try_borrow_mut().map_err(|_| busy(ruby))?;
+    let mut second = second.try_borrow_mut().map_err(|_| busy(ruby))?;
+    Ok(f(&mut first, &mut second))
+}
+
 // Unreachable while no borrow outlives a call into Ruby; a guard, not a feature
 fn busy(ruby: &Ruby) -> Error {
     Error::new(
@@ -98,6 +116,63 @@ fn root(ruby: &Ruby, rb_self: Value) -> Result<Option<Value>, Error> {
         arena.element_children(NodeId::DOCUMENT).next()
     })?;
     root.map(|id| wrap(ruby, rb_self, id)).transpose()
+}
+
+/// `Document#root=`. A root from another document is copied, and the
+/// argument returned as given, still in its own document.
+fn set_root(ruby: &Ruby, rb_self: Value, new_root: Value) -> Result<Value, Error> {
+    unwrap(ruby, rb_self)?;
+    if new_root.is_nil() {
+        with_arena_mut(ruby, rb_self, |arena| arena.set_root(None))?
+            .expect("no root is always allowed");
+        return Ok(new_root);
+    }
+    let node_class = ruby.get_inner(&NODE);
+    if !new_root.is_kind_of(node_class) {
+        let message = format!(
+            "expected {} but received {}",
+            node_class.inspect(),
+            obj_class(new_root).inspect()
+        );
+        return Err(Error::new(ruby.exception_arg_error(), message));
+    }
+    let root = <&Node>::try_convert(new_root)?;
+    let (root_document, id) = (root.document(ruby)?, root.id(ruby)?);
+    if root.with_arena(ruby, |arena, id| arena.node_type(id))? != NodeType::Element {
+        let message = format!("root must be a {}", ruby.get_inner(&ELEMENT).inspect());
+        return Err(Error::new(ruby.exception_type_error(), message));
+    }
+    let set = if root_document.as_raw() == rb_self.as_raw() {
+        with_arena_mut(ruby, rb_self, |arena| arena.set_root(Some(id)))?
+    } else {
+        with_arenas_mut(ruby, rb_self, root_document, |arena, source| {
+            let copy = arena.import(source, id, CopyDepth::Deep);
+            arena.set_root(copy)
+        })?
+    };
+    set.expect("checked to be an element");
+    Ok(new_root)
+}
+
+/// `Document#initialize_copy_with_args(other, level)`, after `Object#dup`
+/// has allocated the copy and copied the instance variables: the arena is
+/// copied, as `xmlCopyDoc` copies the document, with a new node cache.
+fn initialize_copy_with_args(
+    ruby: &Ruby,
+    rb_self: Obj<Node>,
+    other: Value,
+    level: i32,
+) -> Result<Value, Error> {
+    let copy = with_arena(ruby, other, move |arena| arena.copy_document(level != 0))?;
+    if rb_self.adopt_arena(copy).is_err() {
+        return Err(Error::new(
+            ruby.exception_runtime_error(),
+            "document is already initialized",
+        ));
+    }
+    rb_self.set_document(rb_self.as_value());
+    rb_self.ivar_set("@node_cache", ruby.ary_new())?;
+    Ok(rb_self.as_value())
 }
 
 fn encoding(ruby: &Ruby, rb_self: Value) -> Result<Option<RString>, Error> {
@@ -115,7 +190,12 @@ pub fn init(ruby: &Ruby) -> Result<(), Error> {
     let class = ruby.get_inner(&DOCUMENT);
     class.define_singleton_method("new", method!(new, -1))?;
     class.define_method("root", method!(root, 0))?;
+    class.define_method("root=", method!(set_root, 1))?;
     class.define_method("encoding", method!(encoding, 0))?;
     class.define_method("encoding=", method!(set_encoding, 1))?;
+    class.define_protected_method(
+        "initialize_copy_with_args",
+        method!(initialize_copy_with_args, 2),
+    )?;
     Ok(())
 }

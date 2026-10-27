@@ -7,6 +7,7 @@ module Lobzique
     class Attr < Node
       alias_method :value, :content
       alias_method :to_s, :content
+      alias_method :content=, :value=
 
       def deconstruct_keys(keys)
         {name: name, value: value, namespace: namespace}

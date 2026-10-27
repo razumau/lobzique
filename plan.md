@@ -106,6 +106,12 @@ html5lib tokenizer inputs.
       (libxml2's HTML4 element table), and `matches?` and
       `ancestors(selector)`, which wait for CSS.
    4. Mutation: `reparent`, `coerce`, `inner_html=`, `replace`, `dup`.
+      Done, with attribute and content editing, `root=`,
+      `create_internal_subset` and NodeSet's mutators; the departures are
+      in `ARCHITECTURE.md`. Left out: `Node#parse`/`in_context` and
+      `XML::Document#fragment` (HTML4 names, step 7, and XML parsing),
+      `matches?` (CSS), and `namespace=`, `default_namespace=` and
+      `add_namespace_definition` (adding namespace definitions).
    5. CSS: selectors, Nokogiri's dialect, custom pseudo-class handlers.
    6. XPath subset (decision 2).
    7. HTML4 names on the HTML5 parser (decision 3).

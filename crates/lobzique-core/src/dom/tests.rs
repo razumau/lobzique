@@ -544,3 +544,324 @@ fn special_characters_are_escaped_as_libxml2_does() {
         b"&lt;a href=&quot;x&quot;&gt;'&amp;'&#13;\n\xff&lt;/a&gt;"
     );
 }
+
+fn text(doc: &Document, id: NodeId) -> &[u8] {
+    match doc.node_kind(id) {
+        NodeKind::Text(text) => text,
+        kind => panic!("{kind:?} isn't text"),
+    }
+}
+
+#[test]
+fn reparenting_merges_text_only_where_libxml2_does() {
+    let (mut doc, p, _, [a, b, _, d, i]) = paragraph();
+    doc.detach(i);
+    let x = doc.create_text("x".into());
+    let merged = doc.reparent(p, Position::LastChild, x, false).unwrap();
+    assert_eq!((merged, text(&doc, d)), (d, &b"dx"[..]));
+    assert_eq!(doc.parent(x), None, "the original is left behind");
+
+    let y = doc.create_text("y".into());
+    let copy = doc.reparent(b, Position::Before, y, false).unwrap();
+    assert_ne!(copy, y);
+    assert_eq!(children(&doc, p)[..3], [a, copy, b]);
+    assert_eq!(text(&doc, a), b"a");
+    doc.check_invariants().unwrap();
+}
+
+#[test]
+fn replacing_with_text_merges_both_neighbors_into_the_previous_one() {
+    let mut doc = html();
+    let p = doc.create_element(html_name("p"));
+    let [a, b, c] = [b"a", b"b", b"c"].map(|t| doc.create_text(t.to_vec()));
+    let br = doc.create_element(html_name("br"));
+    for child in [a, br, c] {
+        doc.append_child(p, child).unwrap();
+    }
+    let merged = doc.reparent(br, Position::Replace, b, false).unwrap();
+    assert_eq!(merged, a);
+    assert_eq!(children(&doc, p), [a]);
+    assert_eq!(text(&doc, a), b"abc");
+    assert_eq!((doc.parent(c), text(&doc, c)), (None, &b"c"[..]));
+    assert_eq!(doc.parent(br), None);
+    doc.check_invariants().unwrap();
+}
+
+#[test]
+fn refused_reparenting_follows_nokogiri() {
+    let (mut doc, p, [id, _], [a, b, ..]) = paragraph();
+    let snapshot = |doc: &Document| children(doc, p);
+    let before = snapshot(&doc);
+    let error = |doc: &mut Document, pivot, position, node| {
+        doc.reparent(pivot, position, node, false).unwrap_err()
+    };
+    assert_eq!(
+        error(&mut doc, a, Position::LastChild, b),
+        ReparentError::NotAllowed
+    );
+    assert_eq!(
+        error(&mut doc, p, Position::LastChild, id),
+        ReparentError::NotAllowed
+    );
+    let fragment = doc.create_fragment();
+    assert_eq!(
+        error(&mut doc, p, Position::LastChild, fragment),
+        ReparentError::NotAllowed
+    );
+    assert_eq!(
+        error(&mut doc, b, Position::LastChild, p),
+        ReparentError::Cycle
+    );
+    assert_eq!(error(&mut doc, b, Position::After, p), ReparentError::Cycle);
+    assert_eq!(snapshot(&doc), before, "nothing changed");
+
+    assert_eq!(
+        error(&mut doc, b, Position::After, b),
+        ReparentError::Refused
+    );
+    assert_eq!(doc.parent(b), None, "unlinked first, as in Nokogiri");
+    let loose = doc.create_element(html_name("q"));
+    assert_eq!(
+        error(&mut doc, loose, Position::Before, a),
+        ReparentError::Refused
+    );
+    doc.check_invariants().unwrap();
+}
+
+#[test]
+fn nodes_from_another_document_are_copied_in() {
+    let (mut source, p, _, [_, b, ..]) = paragraph();
+    let mut doc = html();
+    let body = doc.create_element(html_name("body"));
+    doc.append_child(NodeId::DOCUMENT, body).unwrap();
+    let copy = doc
+        .reparent_from(body, Position::LastChild, &mut source, p, false)
+        .unwrap();
+    assert_eq!(doc.parent(copy), Some(body));
+    assert_eq!(source.parent(p), None);
+    assert_eq!(source.parent(b), Some(p), "the original keeps its subtree");
+    assert_eq!(doc.attributes(copy).len(), 2);
+    assert_eq!(doc.content(copy), source.content(p));
+    doc.check_invariants().unwrap();
+    source.check_invariants().unwrap();
+}
+
+#[test]
+fn copies_take_what_their_depth_says() {
+    let (mut doc, p, _, _) = paragraph();
+    let deep = doc.copy(p, CopyDepth::Deep).unwrap();
+    let attributes = doc.copy(p, CopyDepth::Attributes).unwrap();
+    let shallow = doc.copy(p, CopyDepth::Shallow).unwrap();
+    assert_eq!(children(&doc, deep).len(), 5);
+    assert_eq!(doc.content(deep), doc.content(p));
+    assert_eq!(
+        (
+            doc.attributes(attributes).len(),
+            doc.first_child(attributes)
+        ),
+        (2, None)
+    );
+    assert_eq!(
+        (doc.attributes(shallow).len(), doc.first_child(shallow)),
+        (0, None)
+    );
+    assert_eq!(doc.parent(deep), None);
+    assert_eq!(doc.copy(NodeId::DOCUMENT, CopyDepth::Deep), None);
+    doc.check_invariants().unwrap();
+}
+
+#[test]
+fn deep_copies_cost_no_stack() {
+    let depth = if cfg!(miri) { 1_000 } else { 100_000 };
+    let mut doc = html();
+    let top = doc.create_element(html_name("div"));
+    let mut parent = top;
+    for _ in 0..depth {
+        let child = doc.create_element(html_name("div"));
+        doc.append_child(parent, child).unwrap();
+        parent = child;
+    }
+    let copy = doc.copy(top, CopyDepth::Deep).unwrap();
+    assert_eq!(doc.descendants(copy).count(), depth);
+    let mut other = html();
+    let body = other.create_element(html_name("body"));
+    other.append_child(NodeId::DOCUMENT, body).unwrap();
+    other
+        .reparent_from(body, Position::LastChild, &mut doc, top, false)
+        .unwrap();
+    assert_eq!(other.descendants(body).count(), depth + 1);
+}
+
+#[test]
+fn a_document_copy_leaves_unlinked_nodes_behind() {
+    let (mut doc, p, _, [a, ..]) = paragraph();
+    doc.set_encoding(Some(b"UTF-8".to_vec()));
+    doc.detach(a);
+    let doctype = doc.create_internal_subset(Doctype {
+        name: b"html".to_vec(),
+        public_id: None,
+        system_id: None,
+    });
+    assert!(doctype.is_some());
+    let copy = doc.copy_document(true);
+    assert_eq!(copy.node_ids().len(), 1 + 1 + 1 + 2 + 4);
+    assert_eq!(copy.encoding(), Some(&b"UTF-8"[..]));
+    assert!(matches!(
+        copy.node_kind(copy.doctype().unwrap()),
+        NodeKind::Doctype(_)
+    ));
+    assert_eq!(copy.content(NodeId::DOCUMENT), doc.content(p));
+    assert_eq!(doc.copy_document(false).node_ids().len(), 1);
+    copy.check_invariants().unwrap();
+}
+
+#[test]
+fn copies_define_the_foreign_namespaces_they_use() {
+    let mut doc = html();
+    let html = doc.create_element(html_name("html"));
+    let svg = doc.create_element(QualName::new(None, ns!(svg), local_name!("svg")));
+    let a = doc.create_element(QualName::new(None, ns!(svg), local_name!("a")));
+    doc.append_child(NodeId::DOCUMENT, html).unwrap();
+    doc.append_child(html, svg).unwrap();
+    doc.append_child(svg, a).unwrap();
+    attribute(&mut doc, a, xlink("href"), "h");
+    doc.define_namespace(html, Some(Prefix::from("svg")), ns!(svg));
+    doc.define_namespace(html, Some(Prefix::from("xlink")), ns!(xlink));
+
+    let copy = doc.copy(svg, CopyDepth::Deep).unwrap();
+    let prefixes = |doc: &Document, id| -> Vec<String> {
+        doc.namespace_definitions(id)
+            .iter()
+            .map(|definition| definition.prefix.as_deref().unwrap_or("").to_owned())
+            .collect()
+    };
+    assert_eq!(prefixes(&doc, copy), ["svg", "xlink"]);
+    let a_copy = doc.first_child(copy).unwrap();
+    assert!(prefixes(&doc, a_copy).is_empty());
+
+    // Moving it back under definitions already in scope drops them
+    doc.reparent(html, Position::LastChild, copy, false)
+        .unwrap();
+    assert!(prefixes(&doc, copy).is_empty());
+}
+
+#[test]
+fn prefixed_names_resolve_when_reparented() {
+    let mut doc = html();
+    let svg = doc.create_element(QualName::new(None, ns!(svg), local_name!("svg")));
+    let circle = doc.create_element_named("svg:circle");
+    let unknown = doc.create_element_named("x:y");
+    doc.reparent(svg, Position::LastChild, circle, false)
+        .unwrap();
+    doc.reparent(svg, Position::LastChild, unknown, false)
+        .unwrap();
+    assert_eq!(doc.node_name(circle), Some(&b"circle"[..]));
+    assert_eq!(doc.namespace(circle).map(|ns| ns.href), Some(&*ns!(svg)));
+    assert_eq!(doc.node_name(unknown), Some(&b"x:y"[..]));
+}
+
+#[test]
+fn namespace_inheritance_takes_the_parents_namespace() {
+    let mut doc = html();
+    let svg = doc.create_element(QualName::new(None, ns!(svg), local_name!("svg")));
+    let [kept, inherits] = ["g", "g"].map(|name| doc.create_element_named(name));
+    doc.reparent(svg, Position::LastChild, kept, false).unwrap();
+    doc.reparent(svg, Position::LastChild, inherits, true)
+        .unwrap();
+    assert_eq!(doc.namespace(kept), None);
+    assert_eq!(doc.namespace(inherits).map(|ns| ns.href), Some(&*ns!(svg)));
+}
+
+#[test]
+fn setting_attributes_follows_xml_set_prop() {
+    let (mut doc, p, [id, _], _) = paragraph();
+    assert_eq!(doc.set_attribute(p, "id", b"new".to_vec()), Some(id));
+    assert_eq!(doc.attribute_value(p, b"id"), Some(&b"new"[..]));
+    let lang = doc.set_attribute(p, "xml:lang", b"de".to_vec()).unwrap();
+    assert_eq!(doc.namespace(lang).map(|ns| ns.href), Some(&*ns!(xml)));
+    assert_eq!(doc.lang(p), Some(&b"de"[..]));
+    doc.set_lang(p, b"fr".to_vec());
+    assert_eq!(
+        (doc.lang(p), doc.attributes(p).len()),
+        (Some(&b"fr"[..]), 3)
+    );
+    let unbound = doc.set_attribute(p, "a:b", Vec::new()).unwrap();
+    assert_eq!(
+        (doc.node_name(unbound), doc.namespace(unbound)),
+        (Some(&b"a:b"[..]), None)
+    );
+    let text = doc.create_text("t".into());
+    assert_eq!(doc.set_attribute(text, "id", Vec::new()), None);
+    doc.check_invariants().unwrap();
+}
+
+#[test]
+fn setting_content_follows_xml_node_set_content() {
+    let (mut doc, p, [id, _], [a, b, c, ..]) = paragraph();
+    doc.set_content(p, b"&lt;&#65;&#x42;&amp;amp;&#0;&nbsp;&#xZZ;&".to_vec());
+    let [only] = children(&doc, p)[..] else {
+        panic!("one text child")
+    };
+    assert_eq!(text(&doc, only), b"<AB&amp;&#0;&nbsp;&#xZZ;&");
+    assert_eq!((doc.parent(a), doc.parent(b)), (None, None));
+    doc.set_content(p, Vec::new());
+    assert_eq!(doc.first_child(p), None);
+
+    doc.set_content(c, b"&lt;".to_vec());
+    assert_eq!(
+        doc.content(c),
+        Some(b"&lt;".to_vec()),
+        "comments take content as is"
+    );
+    doc.set_content(id, b"&quot;".to_vec());
+    assert_eq!(doc.content(id), Some(b"\"".to_vec()));
+    doc.set_content(NodeId::DOCUMENT, b"x".to_vec());
+    assert_eq!(doc.first_child(NodeId::DOCUMENT), None);
+    doc.check_invariants().unwrap();
+}
+
+#[test]
+fn renaming_keeps_fixed_names() {
+    let (mut doc, p, [id, _], [a, ..]) = paragraph();
+    doc.set_name(p, "section");
+    doc.set_name(id, "key");
+    doc.set_name(a, "other");
+    assert_eq!(doc.node_name(p), Some(&b"section"[..]));
+    assert_eq!(doc.node_name(id), Some(&b"key"[..]));
+    assert_eq!(doc.node_name(a), Some(&b"text"[..]));
+    assert_eq!(doc.namespace(p), None);
+}
+
+#[test]
+fn roots_and_internal_subsets() {
+    let (mut doc, p, _, [a, ..]) = paragraph();
+    let q = doc.create_element(html_name("q"));
+    assert_eq!(doc.set_root(Some(a)), Err(HierarchyError::NotAnElement));
+    assert_eq!(
+        doc.parent(p),
+        Some(NodeId::DOCUMENT),
+        "a refused root changes nothing"
+    );
+    doc.set_root(Some(q)).unwrap();
+    assert_eq!(
+        (doc.parent(p), doc.parent(q)),
+        (None, Some(NodeId::DOCUMENT))
+    );
+    doc.set_root(None).unwrap();
+    assert_eq!(doc.first_child(NodeId::DOCUMENT), None);
+
+    let mut xml = Document::new(DocumentKind::Xml);
+    let comment = xml.create_comment("c".into());
+    let root = xml.create_element_named("r");
+    xml.append_child(NodeId::DOCUMENT, comment).unwrap();
+    xml.set_root(Some(root)).unwrap();
+    let doctype = Doctype {
+        name: b"r".to_vec(),
+        public_id: None,
+        system_id: None,
+    };
+    let dtd = xml.create_internal_subset(doctype.clone()).unwrap();
+    assert_eq!(children(&xml, NodeId::DOCUMENT), [comment, dtd, root]);
+    assert_eq!(xml.create_internal_subset(doctype), None);
+    xml.check_invariants().unwrap();
+}

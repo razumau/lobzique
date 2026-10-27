@@ -7,7 +7,9 @@ use super::{
 };
 use crate::support::{c_string, call_initialize, obj_class, warn_deprecated, yield_to_block};
 use crate::XML;
-use lobzique_core::dom::{self, NamespaceRef, NodeId, NodeType};
+use lobzique_core::dom::{
+    self, CopyDepth, Doctype, NamespaceRef, NodeId, NodeType, Position, ReparentError,
+};
 use lobzique_core::html5;
 use magnus::{
     gc, method,
@@ -80,6 +82,20 @@ impl Node {
     /// Completes a document node's data once its Ruby object exists.
     pub fn set_document(&self, document: Value) {
         self.document.set(Some(document.into()));
+    }
+
+    /// Gives an allocated, empty object the arena it is the document of.
+    pub fn adopt_arena(&self, arena: dom::Document) -> Result<(), RefCell<dom::Document>> {
+        self.arena.set(RefCell::new(arena))?;
+        self.id.set(Some(NodeId::DOCUMENT));
+        Ok(())
+    }
+
+    /// Points the object at another node, possibly in another document, as
+    /// Nokogiri resets `DATA_PTR` after copying or merging a node.
+    fn repoint(&self, document: Value, id: NodeId) {
+        self.document.set(Some(document.into()));
+        self.id.set(Some(id));
     }
 
     pub fn arena(&self) -> Option<&RefCell<dom::Document>> {
@@ -324,6 +340,190 @@ impl Node {
     fn prepend_newline_p(ruby: &Ruby, rb_self: &Self) -> Result<bool, Error> {
         rb_self.with_arena(ruby, html5::prepend_newline)
     }
+
+    fn add_child_node(ruby: &Ruby, rb_self: &Self, node: Value) -> Result<Value, Error> {
+        reparent(ruby, rb_self, node, Position::LastChild)
+    }
+
+    fn add_previous_sibling_node(ruby: &Ruby, rb_self: &Self, node: Value) -> Result<Value, Error> {
+        reparent(ruby, rb_self, node, Position::Before)
+    }
+
+    fn add_next_sibling_node(ruby: &Ruby, rb_self: &Self, node: Value) -> Result<Value, Error> {
+        reparent(ruby, rb_self, node, Position::After)
+    }
+
+    fn replace_node(ruby: &Ruby, rb_self: &Self, node: Value) -> Result<Value, Error> {
+        reparent(ruby, rb_self, node, Position::Replace)
+    }
+
+    fn unlink(ruby: &Ruby, rb_self: Obj<Self>) -> Result<Obj<Self>, Error> {
+        rb_self.with_arena_mut(ruby, |arena, id| arena.detach(id))?;
+        Ok(rb_self)
+    }
+
+    /// `Node#[]=`'s native half: `nil`, and no change, unless an element.
+    fn set(ruby: &Ruby, rb_self: &Self, name: Value, value: Value) -> Result<Value, Error> {
+        let is_element =
+            rb_self.with_arena(ruby, |arena, id| arena.node_type(id) == NodeType::Element)?;
+        if !is_element {
+            return Ok(ruby.qnil().as_value());
+        }
+        let name = element_name(ruby, c_string(name)?)?;
+        let bytes = c_string(value)?;
+        rb_self.with_arena_mut(ruby, move |arena, id| {
+            arena.set_attribute(id, &name, bytes);
+        })?;
+        Ok(value)
+    }
+
+    fn set_native_content(ruby: &Ruby, rb_self: &Self, content: Value) -> Result<Value, Error> {
+        let bytes = c_string(content)?;
+        rb_self.with_arena_mut(ruby, move |arena, id| arena.set_content(id, bytes))?;
+        Ok(content)
+    }
+
+    fn set_name(ruby: &Ruby, rb_self: &Self, new_name: Value) -> Result<Value, Error> {
+        let name = element_name(ruby, c_string(new_name)?)?;
+        rb_self.with_arena_mut(ruby, move |arena, id| arena.set_name(id, &name))?;
+        Ok(new_name)
+    }
+
+    fn set_lang(ruby: &Ruby, rb_self: &Self, lang: Value) -> Result<(), Error> {
+        let lang = c_string(lang)?;
+        rb_self.with_arena_mut(ruby, move |arena, id| arena.set_lang(id, lang))
+    }
+
+    fn create_internal_subset(
+        ruby: &Ruby,
+        rb_self: &Self,
+        name: Value,
+        external_id: Value,
+        system_id: Value,
+    ) -> Result<Value, Error> {
+        let doctype = Doctype {
+            name: optional_c_string(name)?.unwrap_or_default(),
+            public_id: optional_c_string(external_id)?,
+            system_id: optional_c_string(system_id)?,
+        };
+        let document = rb_self.document(ruby)?;
+        let dtd = document::with_arena_mut(ruby, document, |arena| {
+            arena.create_internal_subset(doctype)
+        })?
+        .ok_or_else(|| {
+            Error::new(
+                ruby.exception_runtime_error(),
+                "Document already has an internal subset",
+            )
+        })?;
+        wrap(ruby, document, dtd)
+    }
+
+    /// `initialize_copy_with_args(other, level, new_parent_doc)`, after
+    /// `Object#dup` or `#clone` has allocated the copy: `xmlDocCopyNode`,
+    /// then the object is cached and decorated. `nil` for nodes libxml2
+    /// doesn't copy, such as doctypes.
+    fn initialize_copy_with_args(
+        ruby: &Ruby,
+        rb_self: Obj<Self>,
+        other: Value,
+        level: i32,
+        new_parent_doc: Value,
+    ) -> Result<Option<Obj<Self>>, Error> {
+        let node_class = ruby.get_inner(&NODE);
+        if !other.is_kind_of(node_class) {
+            let message = format!("argument must be a kind of {}", node_class.inspect());
+            return Err(Error::new(ruby.exception_type_error(), message));
+        }
+        let other = <&Node>::try_convert(other)?;
+        let (source, id) = (other.document(ruby)?, other.id(ruby)?);
+        document::unwrap(ruby, new_parent_doc)?;
+        let depth = CopyDepth::from_level(level);
+        let copy = if source.as_raw() == new_parent_doc.as_raw() {
+            document::with_arena_mut(ruby, source, move |arena| arena.copy(id, depth))?
+        } else {
+            document::with_arenas_mut(ruby, new_parent_doc, source, move |arena, source| {
+                arena.import(source, id, depth)
+            })?
+        };
+        let Some(copy) = copy else {
+            return Ok(None);
+        };
+        rb_self.repoint(new_parent_doc, copy);
+        let cache: RArray = Obj::<Node>::try_convert(new_parent_doc)?.ivar_get("@node_cache")?;
+        cache.store(cache_index(copy), rb_self)?;
+        new_parent_doc.funcall::<_, _, Value>("decorate", (rb_self,))?;
+        Ok(Some(rb_self))
+    }
+
+    /// [`Node::with_arena`] with a mutable borrow.
+    pub fn with_arena_mut<R: Send>(
+        &self,
+        ruby: &Ruby,
+        f: impl FnOnce(&mut dom::Document, NodeId) -> R + Send,
+    ) -> Result<R, Error> {
+        let id = self.id(ruby)?;
+        document::with_arena_mut(ruby, self.document(ruby)?, |arena| f(arena, id))
+    }
+}
+
+/// Nokogiri's `reparent_node_with`. A node that the core copied, because
+/// it is text or from another document, or merged into neighboring text,
+/// keeps its object, which is pointed at what went into the tree; that
+/// node gets an object of its own, which is decorated and returned. As in
+/// Nokogiri, a text node's original loses its cached object.
+fn reparent(ruby: &Ruby, pivot: &Node, node: Value, position: Position) -> Result<Value, Error> {
+    let node_class = ruby.get_inner(&NODE);
+    if !node.is_kind_of(node_class) || node.is_kind_of(ruby.get_inner(&document::DOCUMENT)) {
+        let message = format!("node must be a {}", node_class.inspect());
+        return Err(Error::new(ruby.exception_arg_error(), message));
+    }
+    let reparentee = <&Node>::try_convert(node)?;
+    let (document, pivot_id) = (pivot.document(ruby)?, pivot.id(ruby)?);
+    let (source, id) = (reparentee.document(ruby)?, reparentee.id(ruby)?);
+    let namespace_inheritance = Obj::<Node>::try_convert(document)?
+        .ivar_get::<_, Value>("@namespace_inheritance")?
+        .to_bool();
+    let is_text = reparentee.with_arena(ruby, |arena, id| arena.node_type(id) == NodeType::Text)?;
+
+    let reparented = if source.as_raw() == document.as_raw() {
+        document::with_arena_mut(ruby, document, |arena| {
+            arena.reparent(pivot_id, position, id, namespace_inheritance)
+        })?
+    } else {
+        document::with_arenas_mut(ruby, document, source, |arena, source| {
+            arena.reparent_from(pivot_id, position, source, id, namespace_inheritance)
+        })?
+    };
+    let reparented = match reparented {
+        Ok(reparented) => reparented,
+        Err(ReparentError::NotAllowed) => {
+            let message = format!("cannot reparent {} there", obj_class(node).inspect());
+            return Err(Error::new(ruby.exception_arg_error(), message));
+        }
+        Err(ReparentError::Refused) => {
+            return Err(Error::new(
+                ruby.exception_runtime_error(),
+                "Could not reparent node",
+            ));
+        }
+        Err(ReparentError::Cycle) => {
+            let name = reparentee.with_arena(ruby, |arena, id| {
+                String::from_utf8_lossy(arena.node_name(id).unwrap_or_default()).into_owned()
+            })?;
+            let message = format!("cycle detected: node '{name}' is an ancestor of itself");
+            return Err(Error::new(ruby.exception_runtime_error(), message));
+        }
+    };
+
+    if is_text {
+        let cache: RArray = Obj::<Node>::try_convert(source)?.ivar_get("@node_cache")?;
+        cache.store(cache_index(id), ruby.qnil())?;
+    }
+    reparentee.repoint(document, reparented);
+    let reparented = wrap(ruby, document, reparented)?;
+    reparented.funcall::<_, _, Value>("decorate!", ())?;
+    Ok(reparented)
 }
 
 /// A string argument as [`c_string`] reads it, or `None` for `nil`.
@@ -513,19 +713,10 @@ fn element_name(ruby: &Ruby, name: Vec<u8>) -> Result<String, Error> {
         .map_err(|_| Error::new(ruby.exception_arg_error(), "invalid byte sequence in UTF-8"))
 }
 
-/// Ruby's default copy would allocate an empty node and share the
-/// original's instance variables, `@node_cache` included. Refused until
-/// Nokogiri's native `dup` lands (plan.md, phase 2 step 4).
-fn initialize_copy(ruby: &Ruby, rb_self: Value, _original: Value) -> Result<(), Error> {
-    let message = format!("{} can't be copied yet", obj_class(rb_self).inspect());
-    Err(Error::new(ruby.exception_not_imp_error(), message))
-}
-
 pub fn init(ruby: &Ruby) -> Result<(), Error> {
     let class = ruby.get_inner(&NODE);
     class.define_alloc_func::<Node>();
     class.define_singleton_method("new", method!(new, -1))?;
-    class.define_method("initialize_copy", method!(initialize_copy, 1))?;
     class.define_method("data_ptr?", method!(Node::data_ptr_p, 0))?;
     class.define_method("document", method!(Node::document_method, 0))?;
     class.define_method("node_name", method!(Node::node_name, 0))?;
@@ -561,6 +752,29 @@ pub fn init(ruby: &Ruby) -> Result<(), Error> {
         method!(Node::namespace_definitions, 0),
     )?;
     class.define_method("namespace_scopes", method!(Node::namespace_scopes, 0))?;
+    class.define_method("unlink", method!(Node::unlink, 0))?;
+    class.define_method("native_content=", method!(Node::set_native_content, 1))?;
+    class.define_method("node_name=", method!(Node::set_name, 1))?;
+    class.define_method("lang=", method!(Node::set_lang, 1))?;
+    class.define_method(
+        "create_internal_subset",
+        method!(Node::create_internal_subset, 3),
+    )?;
+    class.define_protected_method(
+        "initialize_copy_with_args",
+        method!(Node::initialize_copy_with_args, 3),
+    )?;
+    class.define_private_method("add_child_node", method!(Node::add_child_node, 1))?;
+    class.define_private_method(
+        "add_previous_sibling_node",
+        method!(Node::add_previous_sibling_node, 1),
+    )?;
+    class.define_private_method(
+        "add_next_sibling_node",
+        method!(Node::add_next_sibling_node, 1),
+    )?;
+    class.define_private_method("replace_node", method!(Node::replace_node, 1))?;
+    class.define_private_method("set", method!(Node::set, 2))?;
     class.define_private_method("compare", method!(Node::compare, 1))?;
     class.define_private_method("get", method!(Node::get, 1))?;
     class.define_private_method("prepend_newline?", method!(Node::prepend_newline_p, 0))?;

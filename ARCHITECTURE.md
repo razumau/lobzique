@@ -113,7 +113,18 @@ What Nokogiri guarantees, and how lobzique keeps it:
   document and its object repointed at the copy. The original keeps its
   cache slot, so its old descendants, which keep their objects, still get
   the moved object from `parent`, as in Nokogiri
-  (`test_a_node_moved_to_another_document`).
+  (`test_a_node_moved_to_another_document`). The copy gets an object of
+  its own, which the native method returns.
+- **Reparenting text.** A text node is always copied, as Nokogiri copies
+  it before libxml2 can merge it, and the original loses its cache slot.
+  If the copy merges into neighboring text, the object is pointed at the
+  node it merged into, which keeps its own object; both are `==`.
+- **Copies.** `dup` and `clone` run `Object#dup`/`#clone`, so the copy
+  gets the original's instance variables (and, for `clone`, singleton
+  modules), then native `initialize_copy_with_args` fills in the copied
+  node, caches and decorates it. `Document#dup` copies the arena's tree
+  into a new one, with a new `@node_cache`; other instance variables,
+  `@decorators` and `@errors` included, are shared, as in Nokogiri.
 - **Lifetime.**
   - A node object marks its document, and the document owns every node it
     ever created.
@@ -162,8 +173,9 @@ assemble it.
 | module | holds | status |
 |---|---|---|
 | `dom` | `Document`, an arena of nodes addressed by `NodeId`; `NodeType` numbered as libxml2 numbers node types; `tree` (linking, unlinking, iterators, libxml2's sibling walks and document order); `attribute` (lookup by name, as each libxml2 reader does it); `namespace` (namespaces, definitions and scopes); `path` (`xmlGetNodePath`); `check` (invariants for tests and fuzzing) | built |
-| `dom::reparent` | Nokogiri's `reparent_node_with` rules: hierarchy checks, copying text and cross-document nodes, merging adjacent text | planned |
-| `dom::text` | content and editing character data; `blank?`, `encode_special_chars` | built, except editing |
+| `dom::reparent` | Nokogiri's `reparent_node_with` over libxml2 2.13: hierarchy checks, copying text and cross-document nodes, merging adjacent text (`xmlAddChild` and `replace` only), `relink_namespace` | built |
+| `dom::copy` | `xmlDocCopyNode` at Nokogiri's three `dup` levels, `xmlCopyDoc`; a copy defines the foreign namespaces it uses on its root | built |
+| `dom::text` | content, `native_content=` (`xmlNodeSetContent`); `blank?`, `encode_special_chars` | built |
 | `html5::parse` | html5ever `TreeSink` into the arena: documents, fragments with a context node, `max_tree_depth`/`max_attributes`, quirks mode, errors; gumbo's text and CDATA nodes | built |
 | `html5::serialize` | `html_standard_serialize`, byte for byte with Nokogiri::HTML5 | built |
 | `xml::serialize` | `native_write_to` for `to_xhtml` | planned, late in phase 2 |
@@ -188,7 +200,11 @@ assemble it.
 | what | Nokogiri | lobzique | why |
 |---|---|---|---|
 | `NodeSet` storage | C methods over libxml2's `xmlNodeSet` | the same methods in Ruby over an Array (`xml/node_set.rb`); native results come through `NodeSet.wrap`, Nokogiri's `noko_xml_node_set_wrap` | nothing native is needed, and Ruby's GC already handles an Array |
-| attribute values | text node children of the `Attr` node | bytes on the `Attr` node, which has no children | nothing in the contract reads an attribute's children; one fewer node per attribute |
+| attribute values | text node children of the `Attr` node | bytes on the `Attr` node, which has no children; reparenting into an attribute raises "cannot reparent" | nothing in the contract reads an attribute's children; one fewer node per attribute |
+| cycles | `reparent_node_with` raises after libxml2 has linked the cycle, leaving both nodes out of the document | raises the same error before changing anything | a corrupt tree helps nobody |
+| a NodeSet after text is reparented | holds the original libxml2 node, which gets a new object, unlinked | holds the object, now pointing at the copy in the tree | a NodeSet holds objects, not nodes (`NodeSet` storage above) |
+| `native_content=` with an entity reference other than the predefined five | an entity reference node, which `to_html` can't serialize | text, as written | no entity reference nodes; `content=` escapes `&`, so only a direct call reaches this |
+| `create_element` with an `xmlns` key | a namespace definition | `NotImplementedError` | adding namespace definitions is out of scope |
 | names that aren't UTF-8 | kept as bytes | `ArgumentError` | names are atoms shared with the parser and selector engine; only `Node.new` can be given one |
 | CSS | Ruby parser → XPath → libxml2 | native selector engine behind `Searchable#css` | no XPath engine to compile to; `CSS.xpath_for` stays out of scope (decision 2) |
 | XPath | full XPath 1.0 in libxml2 | a native location-path subset behind the same `XPathContext` shape | decision 2 |

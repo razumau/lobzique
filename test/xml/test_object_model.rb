@@ -152,8 +152,6 @@ module ObjectModelContract
   # the copy. The original's descendants keep their objects, and their
   # parent is still the moved object.
   def test_a_node_moved_to_another_document
-    skip "reparenting lands in plan.md phase 2, step 4" unless root::XML::Node.method_defined?(:add_child)
-
     a = root::HTML5::Document.new
     b = root::HTML5::Document.new
     div = root::XML::Node.new("div", a)
@@ -183,6 +181,10 @@ module ObjectModelContract
     doc = root::HTML5::Document.new
     dtd = doc.internal_subset
     nodes = Array.new(100) { |i| root::XML::Node.new("p#{i}", doc) }
+    # Objects repointed at another document, and copies made for one
+    other = root::HTML5::Document.new
+    moved = Array.new(100) { |i| root::XML::Node.new("p#{i}", other).tap { |node| nodes[i].add_child(node) } }
+    copies = nodes.first(10).map { |node| node.dup(1, other) }
     begin
       GC.verify_compaction_references(expand_heap: true, toward: :empty)
     rescue NotImplementedError
@@ -192,7 +194,10 @@ module ObjectModelContract
     nodes.each_with_index do |node, i|
       assert_same doc, node.document
       assert_equal "p#{i}", node.name
+      assert_same doc, moved[i].document
+      assert_equal node, moved[i].parent
     end
+    copies.each { |copy| assert_same other, copy.document }
   end
 
   private
@@ -212,15 +217,6 @@ class TestObjectModelLobzique < Minitest::Test
   include ObjectModelContract
 
   def root = Lobzique
-
-  # Until Nokogiri's native dup lands (plan.md, phase 2 step 4)
-  def test_copying_is_refused
-    doc = Lobzique::HTML5::Document.new
-    node = Lobzique::XML::Node.new("p", doc)
-    [-> { node.dup }, -> { node.clone }, -> { doc.dup }].each do |copy|
-      assert_raises(NotImplementedError, &copy)
-    end
-  end
 
   def test_memsize_counts_the_arena
     doc = Lobzique::HTML5::Document.new

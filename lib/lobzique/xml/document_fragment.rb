@@ -39,6 +39,16 @@ module Lobzique
         children.each { |child| child.parent = self }
       end
 
+      # A copy in a copy of the document.
+      def dup
+        new_document = document.dup
+        new_fragment = self.class.new(new_document)
+        children.each do |child|
+          child.dup(1, new_document).parent = new_fragment
+        end
+        new_fragment
+      end
+
       def name
         "#document-fragment"
       end
@@ -60,6 +70,10 @@ module Lobzique
 
       def errors=(things) # :nodoc:
         document.errors = things
+      end
+
+      def fragment(data)
+        document.fragment(data)
       end
 
       def deconstruct

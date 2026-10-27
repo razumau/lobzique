@@ -49,6 +49,15 @@ module Lobzique
 
         DocumentFragment.new(document, tags, self)
       end
+
+      private
+
+      # HTML5 documents keep a prefixed attribute's name as parsed.
+      def add_child_node_and_reparent_attrs(node)
+        return super unless document.is_a?(HTML4::Document) # lobzique: as in #inner_html
+
+        add_child_node(node)
+      end
     end
 
     XML::Node.prepend(HTML5::Node)

@@ -10,17 +10,21 @@
 
 mod attribute;
 mod check;
+mod copy;
 mod namespace;
 mod node;
 mod path;
+mod reparent;
 #[cfg(test)]
 mod tests;
 mod text;
 mod tree;
 
+pub use copy::CopyDepth;
 pub use html5ever::{LocalName, Namespace, Prefix, QualName};
 pub use namespace::{NamespaceDefinition, NamespaceRef};
 pub use node::{Attribute, Doctype, Element, NodeKind, NodeType, ProcessingInstruction};
+pub use reparent::{Position, ReparentError};
 pub use text::encode_special_chars;
 pub use tree::{Ancestors, Children, Descendants, HierarchyError};
 
@@ -143,6 +147,23 @@ impl Document {
         }
     }
 
+    /// libxml2's `xmlNodeSetName`: renames an element or attribute,
+    /// keeping its namespace, or a doctype or processing instruction.
+    /// Other nodes keep their fixed names.
+    pub fn set_name(&mut self, id: NodeId, name: &str) {
+        match &mut self.node_mut(id).kind {
+            NodeKind::Element(Element {
+                name: qual_name, ..
+            })
+            | NodeKind::Attribute(Attribute {
+                name: qual_name, ..
+            }) => qual_name.local = LocalName::from(name),
+            NodeKind::Doctype(doctype) => doctype.name = name.into(),
+            NodeKind::ProcessingInstruction(pi) => pi.target = name.into(),
+            _ => {}
+        }
+    }
+
     pub fn create_element(&mut self, name: QualName) -> NodeId {
         self.create(NodeKind::Element(Element {
             name,
@@ -154,10 +175,7 @@ impl Document {
     /// An element as `Node.new` makes one: the name taken as is, in the HTML
     /// namespace in HTML documents and in none in XML ones.
     pub fn create_element_named(&mut self, name: &str) -> NodeId {
-        let namespace = match self.kind {
-            DocumentKind::Html => html5ever::ns!(html),
-            DocumentKind::Xml => html5ever::ns!(),
-        };
+        let namespace = self.default_namespace();
         self.create_element(QualName::new(None, namespace, LocalName::from(name)))
     }
 
@@ -165,6 +183,38 @@ impl Document {
     pub fn doctype(&self) -> Option<NodeId> {
         self.children(NodeId::DOCUMENT)
             .find(|&child| matches!(self.node_kind(child), NodeKind::Doctype(_)))
+    }
+
+    /// `Document#root=`, libxml2's `xmlDocSetRootElement`: the root element
+    /// is unlinked, and the new one, if any, appended to the document.
+    pub fn set_root(&mut self, root: Option<NodeId>) -> Result<(), HierarchyError> {
+        if root.is_some_and(|root| !matches!(self.node_kind(root), NodeKind::Element(_))) {
+            return Err(HierarchyError::NotAnElement);
+        }
+        let current = self.element_children(NodeId::DOCUMENT).next();
+        if let Some(current) = current {
+            self.detach(current);
+        }
+        root.map_or(Ok(()), |root| self.append_child(NodeId::DOCUMENT, root))
+    }
+
+    /// libxml2's `xmlCreateIntSubset`: first in an HTML document, before
+    /// the root element in an XML one. `None` if there is a doctype already.
+    pub fn create_internal_subset(&mut self, doctype: Doctype) -> Option<NodeId> {
+        if self.doctype().is_some() {
+            return None;
+        }
+        let next = match self.kind {
+            DocumentKind::Html => self.first_child(NodeId::DOCUMENT),
+            DocumentKind::Xml => self.element_children(NodeId::DOCUMENT).next(),
+        };
+        let doctype = self.create_doctype(doctype);
+        match next {
+            Some(next) => self.insert_before(next, doctype),
+            None => self.append_child(NodeId::DOCUMENT, doctype),
+        }
+        .expect("a document takes a doctype");
+        Some(doctype)
     }
 
     pub fn create_attribute(&mut self, name: QualName, value: Vec<u8>) -> NodeId {
