@@ -55,7 +55,8 @@ module Differential
     def ok? = @failures.empty?
 
     # What a caller can see of one parse: the serialized HTML (with its
-    # encoding) and the tree, or the error raised.
+    # encoding), the tree and what read-only methods answer about it, or
+    # the error raised.
     def observe(root, kase)
       node = if kase.kind == :document
         root::HTML5.parse(kase.input)
@@ -63,7 +64,7 @@ module Differential
         root::HTML5::DocumentFragment.parse(kase.input, context: kase.context || "body")
       end
       html = node.to_html
-      {html: html.b, encoding: html.encoding.name, tree: dump(root, node)}
+      {html: html.b, encoding: html.encoding.name, tree: dump(root, node), queries: queries(node)}
     rescue => e
       {error: "#{e.class.name.sub(ROOT_NAME, "")}: #{e.message}"}
     end
@@ -84,6 +85,21 @@ module Differential
           end
         end
         node.children.to_a.reverse_each { |child| stack << [child, depth + 1] }
+      end
+      lines
+    end
+
+    # Each node's path, and the namespaces in scope and language of each
+    # element, in document order and without recursion.
+    def queries(top)
+      lines = []
+      stack = top.children.to_a.reverse
+      until stack.empty?
+        node = stack.pop
+        line = node.path
+        line += " #{node.namespaces.keys.join(",")} lang=#{node.lang.inspect}" if node.element?
+        lines << line
+        node.children.to_a.reverse_each { |child| stack << child }
       end
       lines
     end
@@ -131,6 +147,11 @@ module Differential
         out << "  tree differs at line #{index + 1}:"
         out.concat(expected[:tree][[index - 2, 0].max, 5].map { |l| "    nokogiri #{l}" })
         out.concat(actual[:tree][[index - 2, 0].max, 5].map { |l| "    lobzique #{l}" })
+      end
+      if expected[:tree] == actual[:tree] && expected[:queries] != actual[:queries]
+        index = expected[:queries].zip(actual[:queries]).index { |a, b| a != b }
+        out << "  node #{index + 1} answers differently:"
+        out << "    nokogiri #{expected[:queries][index]}" << "    lobzique #{actual[:queries][index]}"
       end
       if expected[:encoding] != actual[:encoding]
         out << "  encoding: nokogiri #{expected[:encoding]}, lobzique #{actual[:encoding]}"

@@ -1,9 +1,9 @@
 //! `XML::Document`: the node object that owns its document's arena.
 
-use super::node::{utf8_string, Node, NODE};
+use super::node::{utf8_string, wrap, Node, NODE};
 use crate::support::{c_string, call_initialize, displayed_class};
 use crate::XML;
-use lobzique_core::dom::{self, DocumentKind};
+use lobzique_core::dom::{self, DocumentKind, NodeId};
 use magnus::{method, prelude::*, value::Lazy, Error, RClass, RString, Ruby, Value};
 
 pub static DOCUMENT: Lazy<RClass> = Lazy::new(|ruby| {
@@ -92,6 +92,14 @@ fn busy(ruby: &Ruby) -> Error {
     )
 }
 
+/// libxml2's `xmlDocGetRootElement`: the first element child.
+fn root(ruby: &Ruby, rb_self: Value) -> Result<Option<Value>, Error> {
+    let root = with_arena(ruby, rb_self, |arena| {
+        arena.element_children(NodeId::DOCUMENT).next()
+    })?;
+    root.map(|id| wrap(ruby, rb_self, id)).transpose()
+}
+
 fn encoding(ruby: &Ruby, rb_self: Value) -> Result<Option<RString>, Error> {
     let encoding = with_arena(ruby, rb_self, |arena| arena.encoding().map(<[u8]>::to_vec))?;
     Ok(encoding.map(|encoding| utf8_string(ruby, encoding)))
@@ -106,6 +114,7 @@ fn set_encoding(ruby: &Ruby, rb_self: Value, encoding: Value) -> Result<Value, E
 pub fn init(ruby: &Ruby) -> Result<(), Error> {
     let class = ruby.get_inner(&DOCUMENT);
     class.define_singleton_method("new", method!(new, -1))?;
+    class.define_method("root", method!(root, 0))?;
     class.define_method("encoding", method!(encoding, 0))?;
     class.define_method("encoding=", method!(set_encoding, 1))?;
     Ok(())

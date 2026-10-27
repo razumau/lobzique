@@ -297,3 +297,37 @@ fn invalid_utf8_is_replaced() {
         "\u{fffd}".as_bytes()
     );
 }
+
+fn definitions(document: &Document, id: NodeId) -> Vec<&str> {
+    document
+        .namespace_definitions(id)
+        .iter()
+        .map(|definition| NamespaceRef::from(definition).prefix.unwrap())
+        .collect()
+}
+
+#[test]
+fn foreign_namespaces_are_defined_on_the_html_element() {
+    let document = parse(
+        "<p><svg xmlns=\"http://www.w3.org/2000/svg\"><a xlink:href=x xml:lang=en/></svg><math></math>",
+    );
+    let html = find(&document, "html");
+    assert_eq!(
+        definitions(&document, html),
+        ["svg", "xmlns", "xlink", "math"]
+    );
+    assert!(definitions(&document, find(&document, "svg")).is_empty());
+    assert!(definitions(&parse("<p>"), NodeId::DOCUMENT).is_empty());
+}
+
+#[test]
+fn fragment_namespaces_are_defined_on_each_top_level_element() {
+    let context = Context::new(ContextNamespace::Html, "body");
+    let (document, fragment) = fragment("<div><svg/></div>text<math/><p></p>", &context);
+    let elements: Vec<_> = document.element_children(fragment).collect();
+    let defined: Vec<_> = elements
+        .iter()
+        .map(|&element| definitions(&document, element))
+        .collect();
+    assert_eq!(defined, [vec!["svg"], vec!["math"], vec![]]);
+}

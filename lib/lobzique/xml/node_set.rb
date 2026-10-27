@@ -147,6 +147,14 @@ module Lobzique
         true
       end
 
+      def children
+        node_set = NodeSet.new(document)
+        each do |node|
+          node.children.each { |n| node_set.push(n) }
+        end
+        node_set
+      end
+
       def reverse
         node_set = NodeSet.new(document)
         (length - 1).downto(0) do |x|
@@ -160,6 +168,11 @@ module Lobzique
       end
 
       alias_method :+, :|
+
+      def inner_text
+        collect(&:inner_text).join("")
+      end
+      alias_method :text, :inner_text
 
       def inner_html(*args)
         collect { |j| j.inner_html(*args) }.join("")

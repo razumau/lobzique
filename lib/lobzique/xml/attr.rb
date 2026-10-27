@@ -8,6 +8,10 @@ module Lobzique
       alias_method :value, :content
       alias_method :to_s, :content
 
+      def deconstruct_keys(keys)
+        {name: name, value: value, namespace: namespace}
+      end
+
       private
 
       def inspect_attributes

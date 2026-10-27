@@ -99,7 +99,12 @@ html5lib tokenizer inputs.
       `parent`). Fixtures and the crawl sample match except for the cases
       `test/differential/known.yml` explains.
    3. Read-only DOM: traversal, attributes and content, porting the rest of
-      `node.rb` that needs no mutation.
+      `node.rb` that needs no mutation. Done, and the differential harness
+      compares each node's `path`, namespaces in scope and `lang`. Left
+      out: `line` (html5ever reports lines per token, not per node),
+      `external_subset` (with `create_external_subset`), `description`
+      (libxml2's HTML4 element table), and `matches?` and
+      `ancestors(selector)`, which wait for CSS.
    4. Mutation: `reparent`, `coerce`, `inner_html=`, `replace`, `dup`.
    5. CSS: selectors, Nokogiri's dialect, custom pseudo-class handlers.
    6. XPath subset (decision 2).

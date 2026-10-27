@@ -53,6 +53,19 @@ module Lobzique
         end
       end
 
+      def namespaces
+        root ? root.namespaces : {}
+      end
+
+      # lobzique: Nokogiri also undefines swap, default_namespace=,
+      # add_namespace_definition, line and add_namespace, which aren't
+      # defined yet
+      undef_method :parent, :namespace, :attributes, :namespace_definitions
+
+      def deconstruct_keys(keys)
+        {root: root}
+      end
+
       private
 
       def inspect_attributes

@@ -5,11 +5,14 @@
 module Lobzique
   module XML
     class DTD < Node
-      # lobzique: Nokogiri also undefines values, namespace_definitions and
-      # line, which aren't defined yet
       undef_method :attribute_nodes
+      undef_method :values
       undef_method :content
       undef_method :namespace
+      undef_method :namespace_definitions
+      # lobzique: Nokogiri also undefines line, which isn't defined yet, and
+      # defines keys and each over the DTD's attribute declarations, which
+      # are out of scope
 
       def html_dtd?
         name.casecmp("html").zero?

@@ -8,18 +8,22 @@
 //! engine. Everything else (text, attribute values, doctype fields) is bytes
 //! kept exactly as given, as libxml2 keeps what Nokogiri passes it.
 
+mod attribute;
 mod check;
+mod namespace;
 mod node;
+mod path;
 #[cfg(test)]
 mod tests;
 mod text;
 mod tree;
 
 pub use html5ever::{LocalName, Namespace, Prefix, QualName};
+pub use namespace::{NamespaceDefinition, NamespaceRef};
 pub use node::{Attribute, Doctype, Element, NodeKind, NodeType, ProcessingInstruction};
+pub use text::encode_special_chars;
 pub use tree::{Ancestors, Children, Descendants, HierarchyError};
 
-use html5ever::ns;
 use node::Node;
 use std::mem::size_of;
 use std::num::NonZeroU32;
@@ -44,13 +48,6 @@ impl NodeId {
             .map(NodeId)
             .expect("a document holds fewer than 2^32 nodes")
     }
-}
-
-/// A namespace as libxml2 records it on a node: Nokogiri's `XML::Namespace`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct NamespaceRef<'a> {
-    pub prefix: Option<&'a str>,
-    pub href: &'a str,
 }
 
 /// Whether a document came from the HTML or the XML side, which decides its
@@ -150,6 +147,7 @@ impl Document {
         self.create(NodeKind::Element(Element {
             name,
             attributes: Vec::new(),
+            namespace_definitions: Vec::new(),
         }))
     }
 
@@ -198,37 +196,6 @@ impl Document {
             target,
             data,
         }))
-    }
-
-    /// The node's namespace as Nokogiri shows it after an HTML5 parse: none
-    /// for HTML elements, and the prefix gumbo gives each foreign namespace.
-    pub fn namespace(&self, id: NodeId) -> Option<NamespaceRef<'_>> {
-        let (name, prefixes): (_, &[(Namespace, &str)]) = match self.node_kind(id) {
-            NodeKind::Element(element) => {
-                (&element.name, &[(ns!(svg), "svg"), (ns!(mathml), "math")])
-            }
-            NodeKind::Attribute(attribute) => (
-                &attribute.name,
-                &[
-                    (ns!(xlink), "xlink"),
-                    (ns!(xml), "xml"),
-                    (ns!(xmlns), "xmlns"),
-                ],
-            ),
-            _ => return None,
-        };
-        if name.ns == ns!() || name.ns == ns!(html) {
-            return None;
-        }
-        let prefix = prefixes
-            .iter()
-            .find(|(namespace, _)| *namespace == name.ns)
-            .map(|&(_, prefix)| prefix)
-            .or(name.prefix.as_deref());
-        Some(NamespaceRef {
-            prefix,
-            href: &name.ns,
-        })
     }
 
     /// Bytes the arena holds on the heap, for `ObjectSpace.memsize_of`.

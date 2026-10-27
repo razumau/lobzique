@@ -61,6 +61,10 @@ module Lobzique
       def errors=(things) # :nodoc:
         document.errors = things
       end
+
+      def deconstruct
+        children.to_a
+      end
     end
   end
 end

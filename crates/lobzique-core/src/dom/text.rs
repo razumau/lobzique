@@ -25,6 +25,17 @@ impl Document {
         }
     }
 
+    /// libxml2's `xmlIsBlankNode`: a text or CDATA node of nothing but
+    /// spaces, tabs and line breaks.
+    pub fn is_blank(&self, id: NodeId) -> bool {
+        match self.node_kind(id) {
+            NodeKind::Text(text) | NodeKind::CData(text) => text
+                .iter()
+                .all(|byte| matches!(byte, b' ' | b'\t' | b'\n' | b'\r')),
+            _ => false,
+        }
+    }
+
     /// The bytes of a text, CDATA or comment node, to change in place.
     pub fn character_data_mut(&mut self, id: NodeId) -> Option<&mut Vec<u8>> {
         match &mut self.node_mut(id).kind {
@@ -43,4 +54,21 @@ impl Document {
             other => other,
         };
     }
+}
+
+/// libxml2's `xmlEncodeSpecialChars`, behind Nokogiri's
+/// `Node#encode_special_chars` and `Node#content=`.
+pub fn encode_special_chars(input: &[u8]) -> Vec<u8> {
+    let mut encoded = Vec::with_capacity(input.len());
+    for &byte in input {
+        match byte {
+            b'<' => encoded.extend_from_slice(b"&lt;"),
+            b'>' => encoded.extend_from_slice(b"&gt;"),
+            b'&' => encoded.extend_from_slice(b"&amp;"),
+            b'"' => encoded.extend_from_slice(b"&quot;"),
+            b'\r' => encoded.extend_from_slice(b"&#13;"),
+            _ => encoded.push(byte),
+        }
+    }
+    encoded
 }

@@ -30,7 +30,7 @@ and native halves of `XML::Node`. Every class follows the same path scheme.
   exist. That covers every such method, not just the inventory's contract
   entries, because gems reach Nokogiri methods through each other.
 - A method is left out only when it needs something out of scope: XML
-  parsing, namespace definitions, XInclude, C14N, SAX, XSLT.
+  parsing, adding namespace definitions, XInclude, C14N, SAX, XSLT.
 - JRuby branches are dropped.
 
 **Departures are marked.** Every change to ported code has a comment starting
@@ -161,9 +161,9 @@ assemble it.
 
 | module | holds | status |
 |---|---|---|
-| `dom` | `Document`, an arena of nodes addressed by `NodeId`; `NodeType` numbered as libxml2 numbers node types; `tree` (linking, unlinking, iterators); `check` (invariants for tests and fuzzing) | built |
+| `dom` | `Document`, an arena of nodes addressed by `NodeId`; `NodeType` numbered as libxml2 numbers node types; `tree` (linking, unlinking, iterators, libxml2's sibling walks and document order); `attribute` (lookup by name, as each libxml2 reader does it); `namespace` (namespaces, definitions and scopes); `path` (`xmlGetNodePath`); `check` (invariants for tests and fuzzing) | built |
 | `dom::reparent` | Nokogiri's `reparent_node_with` rules: hierarchy checks, copying text and cross-document nodes, merging adjacent text | planned |
-| `dom::text` | content and editing character data; `blank?`, `encode_special_chars` | content built |
+| `dom::text` | content and editing character data; `blank?`, `encode_special_chars` | built, except editing |
 | `html5::parse` | html5ever `TreeSink` into the arena: documents, fragments with a context node, `max_tree_depth`/`max_attributes`, quirks mode, errors; gumbo's text and CDATA nodes | built |
 | `html5::serialize` | `html_standard_serialize`, byte for byte with Nokogiri::HTML5 | built |
 | `xml::serialize` | `native_write_to` for `to_xhtml` | planned, late in phase 2 |
@@ -176,6 +176,10 @@ assemble it.
   attribute values, doctype fields) is bytes.
 - HTML elements are in the HTML namespace, following the HTML standard.
   `Node#namespace` shows that namespace as `nil`, as Nokogiri does.
+- A parse defines each foreign namespace it uses on the top-level element
+  above it (the `html` element of a document), as gumbo's binding does. So
+  `namespaces` and prefixed lookups with `[]` answer as in Nokogiri. Nothing
+  else defines namespaces.
 - An element made with `Node.new` takes the document's namespace: HTML in
   HTML documents, none in XML documents.
 
@@ -184,7 +188,7 @@ assemble it.
 | what | Nokogiri | lobzique | why |
 |---|---|---|---|
 | `NodeSet` storage | C methods over libxml2's `xmlNodeSet` | the same methods in Ruby over an Array (`xml/node_set.rb`); native results come through `NodeSet.wrap`, Nokogiri's `noko_xml_node_set_wrap` | nothing native is needed, and Ruby's GC already handles an Array |
-| attribute values | text node children of the `Attr` node | bytes on the `Attr` node | nothing in the contract reads an attribute's children; one fewer node per attribute |
+| attribute values | text node children of the `Attr` node | bytes on the `Attr` node, which has no children | nothing in the contract reads an attribute's children; one fewer node per attribute |
 | names that aren't UTF-8 | kept as bytes | `ArgumentError` | names are atoms shared with the parser and selector engine; only `Node.new` can be given one |
 | CSS | Ruby parser → XPath → libxml2 | native selector engine behind `Searchable#css` | no XPath engine to compile to; `CSS.xpath_for` stays out of scope (decision 2) |
 | XPath | full XPath 1.0 in libxml2 | a native location-path subset behind the same `XPathContext` shape | decision 2 |
@@ -194,7 +198,8 @@ assemble it.
 | parse error text | gumbo's, with line and column | html5ever's, with line only | different parsers; listed in `test/differential/known.yml` if compared |
 | `<select>` contents | dropped, as the HTML standard did before 2025 | kept, as the standard and browsers now do (customizable select) | html5ever implements the current standard; `known.yml` lists the cases |
 | `max_tree_depth` | counted on gumbo's stack of open elements | each element's depth where it is inserted, void elements excepted | html5ever doesn't expose its stack; the two agree on ordinary nesting and can differ after the adoption agency moves elements |
-| `XML::Namespace` objects | one per libxml2 `xmlNs`, shared by the nodes that use it | a new object per `Node#namespace` call | namespace definitions are out of scope; Loofah and rails-html-sanitizer read only `prefix` and `href` |
+| `XML::Namespace` objects | one per libxml2 `xmlNs`, shared by the nodes that use it | a new object per call to `namespace`, `namespace_definitions` or `namespace_scopes` | the arena keeps namespaces as names, not objects; Loofah and rails-html-sanitizer read only `prefix` and `href` |
+| `Node#pointer_id` | the libxml2 node's address | the address of the document's data, which doesn't move, and the node id | arena nodes have no address of their own; the value is still unique among live nodes, which is what `==` needs |
 | native parser module | `Gumbo` | `Html5ever` | named after the engine it binds |
 
 ## How a call flows

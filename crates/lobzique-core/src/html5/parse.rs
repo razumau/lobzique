@@ -10,7 +10,7 @@ use html5ever::tokenizer::{
 use html5ever::tree_builder::{
     create_element, ElemName, ElementFlags, NodeOrText, TreeBuilder, TreeBuilderOpts, TreeSink,
 };
-use html5ever::{local_name, ns, Attribute, LocalName, Namespace, TokenizerResult};
+use html5ever::{local_name, ns, Attribute, LocalName, Namespace, Prefix, TokenizerResult};
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
@@ -99,6 +99,10 @@ pub fn parse_document(input: &[u8], options: &Options) -> Result<(Document, Pars
     );
     let builder = TreeBuilder::new(sink, tree_builder_options(options, QuirksMode::NoQuirks));
     let parsed = run(builder, input, options, None)?;
+    let roots: Vec<_> = document.element_children(NodeId::DOCUMENT).collect();
+    for root in roots {
+        define_namespaces(&mut document, root);
+    }
     Ok((document, parsed))
 }
 
@@ -201,9 +205,40 @@ pub fn parse_fragment(
             if document.append_child(fragment, child).is_err() {
                 break;
             }
+            if matches!(document.node_kind(child), NodeKind::Element(_)) {
+                define_namespaces(document, child);
+            }
         }
     }
     Ok(parsed)
+}
+
+/// Gumbo's binding defines the foreign namespaces a top-level element and
+/// its descendants use on that element, so they are in scope as libxml2
+/// needs them to be.
+fn define_namespaces(document: &mut Document, root: NodeId) {
+    let mut used = Vec::new();
+    for element in std::iter::once(root).chain(document.descendants(root)) {
+        let attributes = document.attributes(element).iter().copied();
+        for node in std::iter::once(element).chain(attributes) {
+            let Some(namespace) = document.namespace(node) else {
+                continue;
+            };
+            // libxml2 binds `xml` without a definition
+            let Some(prefix) = namespace.prefix.filter(|&prefix| prefix != "xml") else {
+                continue;
+            };
+            if used
+                .iter()
+                .all(|(defined, _): &(Prefix, _)| **defined != *prefix)
+            {
+                used.push((Prefix::from(prefix), Namespace::from(namespace.href)));
+            }
+        }
+    }
+    for (prefix, href) in used {
+        document.define_namespace(root, Some(prefix), href);
+    }
 }
 
 /// The quirks mode a doctype selects, which Nokogiri computes for a

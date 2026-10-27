@@ -1,8 +1,9 @@
 #![no_main]
 
 //! Parsing any input, as a document or as a fragment in one of several
-//! contexts, must leave a consistent tree that serializes without panicking.
-//! The first byte picks how the rest is parsed.
+//! contexts, must leave a consistent tree that serializes and answers
+//! Nokogiri's read-only queries without panicking. The first byte picks how
+//! the rest is parsed.
 
 use libfuzzer_sys::fuzz_target;
 use lobzique_core::dom::{Document, DocumentKind, NodeId};
@@ -58,4 +59,32 @@ fuzz_target!(|data: &[u8]| {
         panic!("{violation}");
     }
     serialize(&document, root, selector & 0x10 != 0);
+    query(&document, root);
 });
+
+/// A sample of nodes, since a path or a document order costs as much as the
+/// node's depth and its preceding siblings.
+fn query(document: &Document, root: NodeId) {
+    let ids: Vec<NodeId> = document.node_ids().collect();
+    let sample: Vec<NodeId> = ids.iter().copied().step_by(ids.len() / 64 + 1).collect();
+    for &id in &sample {
+        document.path(id);
+        document.namespace_scopes(id);
+        document.lang(id);
+        document.attribute_value(id, b"xlink:href");
+        document.next_in_parent(id);
+        document.previous_element_sibling(id);
+        let order = document.document_order(id, root);
+        assert_eq!(
+            order.map(|o| o.reverse()),
+            document.document_order(root, id)
+        );
+    }
+    for pair in sample.windows(2) {
+        let order = document.document_order(pair[0], pair[1]);
+        assert_eq!(
+            order.map(|o| o.reverse()),
+            document.document_order(pair[1], pair[0])
+        );
+    }
+}

@@ -67,8 +67,8 @@ module Lobzique
         XML::Node.instance_method(:serialize).bind_call(self, options, &block)
       end
 
-      # lobzique: extract_params waits for namespace definitions, which are
-      # out of scope (ARCHITECTURE.md, port rule)
+      # lobzique: extract_params comes with the search methods it serves
+      # (plan.md, phase 2 step 5)
     end
   end
 end

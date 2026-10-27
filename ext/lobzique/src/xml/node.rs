@@ -7,11 +7,12 @@ use super::{
 };
 use crate::support::{c_string, call_initialize, obj_class, warn_deprecated, yield_to_block};
 use crate::XML;
-use lobzique_core::dom::{self, NodeId, NodeType};
+use lobzique_core::dom::{self, NamespaceRef, NodeId, NodeType};
 use lobzique_core::html5;
 use magnus::{
     gc, method,
     prelude::*,
+    rb_sys::AsRawValue,
     typed_data::Obj,
     value::{Lazy, Opaque},
     DataTypeFunctions, Error, RArray, RClass, RString, Ruby, TypedData, Value,
@@ -124,18 +125,51 @@ impl Node {
         rb_self.document(ruby)
     }
 
-    fn internal_subset(ruby: &Ruby, rb_self: &Self) -> Result<Option<Value>, Error> {
-        let doctype = rb_self.with_arena(ruby, |arena, _| arena.doctype())?;
-        doctype
-            .map(|id| wrap(ruby, rb_self.document(ruby)?, id))
+    /// The node object for the node `f` finds from this one, if any.
+    fn wrap_found(
+        &self,
+        ruby: &Ruby,
+        f: impl FnOnce(&dom::Document, NodeId) -> Option<NodeId> + Send,
+    ) -> Result<Option<Value>, Error> {
+        self.with_arena(ruby, f)?
+            .map(|id| wrap(ruby, self.document(ruby)?, id))
             .transpose()
     }
 
+    fn internal_subset(ruby: &Ruby, rb_self: &Self) -> Result<Option<Value>, Error> {
+        rb_self.wrap_found(ruby, |arena, _| arena.doctype())
+    }
+
     fn parent(ruby: &Ruby, rb_self: &Self) -> Result<Option<Value>, Error> {
-        let parent = rb_self.with_arena(ruby, |arena, id| arena.parent(id))?;
-        parent
-            .map(|id| wrap(ruby, rb_self.document(ruby)?, id))
-            .transpose()
+        rb_self.wrap_found(ruby, |arena, id| arena.parent(id))
+    }
+
+    fn child(ruby: &Ruby, rb_self: &Self) -> Result<Option<Value>, Error> {
+        rb_self.wrap_found(ruby, |arena, id| arena.first_child(id))
+    }
+
+    fn next_sibling(ruby: &Ruby, rb_self: &Self) -> Result<Option<Value>, Error> {
+        rb_self.wrap_found(ruby, |arena, id| arena.next_in_parent(id))
+    }
+
+    fn previous_sibling(ruby: &Ruby, rb_self: &Self) -> Result<Option<Value>, Error> {
+        rb_self.wrap_found(ruby, |arena, id| arena.previous_in_parent(id))
+    }
+
+    fn next_element(ruby: &Ruby, rb_self: &Self) -> Result<Option<Value>, Error> {
+        rb_self.wrap_found(ruby, |arena, id| arena.next_element_sibling(id))
+    }
+
+    fn previous_element(ruby: &Ruby, rb_self: &Self) -> Result<Option<Value>, Error> {
+        rb_self.wrap_found(ruby, |arena, id| arena.previous_element_sibling(id))
+    }
+
+    fn first_element_child(ruby: &Ruby, rb_self: &Self) -> Result<Option<Value>, Error> {
+        rb_self.wrap_found(ruby, |arena, id| arena.element_children(id).next())
+    }
+
+    fn last_element_child(ruby: &Ruby, rb_self: &Self) -> Result<Option<Value>, Error> {
+        rb_self.wrap_found(ruby, |arena, id| arena.last_element_child(id))
     }
 
     fn children(ruby: &Ruby, rb_self: &Self) -> Result<Value, Error> {
@@ -143,7 +177,117 @@ impl Node {
         node_set(ruby, rb_self.document(ruby)?, ids)
     }
 
-    /// An Array, not a NodeSet, as in Nokogiri.
+    fn element_children(ruby: &Ruby, rb_self: &Self) -> Result<Value, Error> {
+        let ids = rb_self.with_arena(ruby, |arena, id| arena.element_children(id).collect())?;
+        node_set(ruby, rb_self.document(ruby)?, ids)
+    }
+
+    fn attribute(ruby: &Ruby, rb_self: &Self, name: Value) -> Result<Option<Value>, Error> {
+        let name = c_string(name)?;
+        rb_self.wrap_found(ruby, move |arena, id| arena.attribute_named(id, &name))
+    }
+
+    fn attribute_with_ns(
+        ruby: &Ruby,
+        rb_self: &Self,
+        name: Value,
+        namespace: Value,
+    ) -> Result<Option<Value>, Error> {
+        let (name, href) = (c_string(name)?, optional_c_string(namespace)?);
+        rb_self.wrap_found(ruby, move |arena, id| {
+            arena.attribute_in_namespace(id, &name, href.as_deref())
+        })
+    }
+
+    fn key_p(ruby: &Ruby, rb_self: &Self, name: Value) -> Result<bool, Error> {
+        let name = c_string(name)?;
+        rb_self.with_arena(ruby, move |arena, id| {
+            arena.attribute_named(id, &name).is_some()
+        })
+    }
+
+    fn namespaced_key_p(
+        ruby: &Ruby,
+        rb_self: &Self,
+        name: Value,
+        namespace: Value,
+    ) -> Result<bool, Error> {
+        let (name, href) = (c_string(name)?, optional_c_string(namespace)?);
+        rb_self.with_arena(ruby, move |arena, id| {
+            arena
+                .attribute_in_namespace(id, &name, href.as_deref())
+                .is_some()
+        })
+    }
+
+    /// `Node#[]`'s native half.
+    fn get(ruby: &Ruby, rb_self: &Self, name: Value) -> Result<Option<RString>, Error> {
+        let Some(name) = optional_c_string(name)? else {
+            return Ok(None);
+        };
+        let value = rb_self.with_arena(ruby, move |arena, id| {
+            arena.attribute_value(id, &name).map(<[u8]>::to_vec)
+        })?;
+        Ok(value.map(|value| utf8_string(ruby, value)))
+    }
+
+    fn lang(ruby: &Ruby, rb_self: &Self) -> Result<Option<RString>, Error> {
+        let lang = rb_self.with_arena(ruby, |arena, id| arena.lang(id).map(<[u8]>::to_vec))?;
+        Ok(lang.map(|lang| utf8_string(ruby, lang)))
+    }
+
+    fn blank_p(ruby: &Ruby, rb_self: &Self) -> Result<bool, Error> {
+        rb_self.with_arena(ruby, |arena, id| arena.is_blank(id))
+    }
+
+    fn path(ruby: &Ruby, rb_self: &Self) -> Result<RString, Error> {
+        let path = rb_self.with_arena(ruby, |arena, id| arena.path(id))?;
+        Ok(utf8_string(ruby, path.as_deref().unwrap_or(b"?")))
+    }
+
+    /// Unique among live nodes, as libxml2's node address is: the address
+    /// of the document's data, which doesn't move, and the node's id.
+    fn pointer_id(ruby: &Ruby, rb_self: &Self) -> Result<u128, Error> {
+        let document = document::unwrap(ruby, rb_self.document(ruby)?)?;
+        let address = document as *const Node as usize;
+        Ok((address as u128) << 32 | rb_self.id(ruby)?.index() as u128)
+    }
+
+    /// `xmlXPathCmpNodes(other, self)`: 1 if this node comes after `other`,
+    /// -1 if before, 0 if they are the same, -2 if they are in different
+    /// trees.
+    fn compare(ruby: &Ruby, rb_self: &Self, other: Value) -> Result<i8, Error> {
+        let other = <&Node>::try_convert(other)?;
+        let document = rb_self.document(ruby)?;
+        if document.as_raw() != other.document(ruby)?.as_raw() {
+            return Ok(-2);
+        }
+        let other = other.id(ruby)?;
+        let order = rb_self.with_arena(ruby, move |arena, id| arena.document_order(id, other))?;
+        Ok(order.map_or(-2, |order| order as i8))
+    }
+
+    fn namespace_definitions(ruby: &Ruby, rb_self: &Self) -> Result<RArray, Error> {
+        let definitions = rb_self.with_arena(ruby, |arena, id| {
+            owned_namespaces(arena.namespace_definitions(id).iter().map(Into::into))
+        })?;
+        wrap_namespaces(ruby, rb_self.document(ruby)?, definitions)
+    }
+
+    fn namespace_scopes(ruby: &Ruby, rb_self: &Self) -> Result<RArray, Error> {
+        let scopes = rb_self.with_arena(ruby, |arena, id| {
+            owned_namespaces(arena.namespace_scopes(id).into_iter())
+        })?;
+        wrap_namespaces(ruby, rb_self.document(ruby)?, scopes)
+    }
+
+    fn encode_special_chars(ruby: &Ruby, _rb_self: &Self, string: Value) -> Result<RString, Error> {
+        Ok(utf8_string(
+            ruby,
+            dom::encode_special_chars(&c_string(string)?),
+        ))
+    }
+
     fn attribute_nodes(ruby: &Ruby, rb_self: &Self) -> Result<RArray, Error> {
         let ids = rb_self.with_arena(ruby, |arena, id| arena.attributes(id).to_vec())?;
         wrap_all(ruby, rb_self.document(ruby)?, ids)
@@ -180,6 +324,40 @@ impl Node {
     fn prepend_newline_p(ruby: &Ruby, rb_self: &Self) -> Result<bool, Error> {
         rb_self.with_arena(ruby, html5::prepend_newline)
     }
+}
+
+/// A string argument as [`c_string`] reads it, or `None` for `nil`.
+fn optional_c_string(value: Value) -> Result<Option<Vec<u8>>, Error> {
+    if value.is_nil() {
+        Ok(None)
+    } else {
+        c_string(value).map(Some)
+    }
+}
+
+type OwnedNamespace = (Option<String>, String);
+
+fn owned_namespaces<'a>(namespaces: impl Iterator<Item = NamespaceRef<'a>>) -> Vec<OwnedNamespace> {
+    namespaces
+        .map(|namespace| {
+            (
+                namespace.prefix.map(str::to_owned),
+                namespace.href.to_owned(),
+            )
+        })
+        .collect()
+}
+
+fn wrap_namespaces(
+    ruby: &Ruby,
+    document: Value,
+    namespaces: Vec<OwnedNamespace>,
+) -> Result<RArray, Error> {
+    let array = ruby.ary_new_capa(namespaces.len());
+    for (prefix, href) in namespaces {
+        array.push(namespace::wrap(ruby, document, prefix, href)?)?;
+    }
+    Ok(array)
 }
 
 /// The node objects for `ids`, in an Array.
@@ -354,10 +532,37 @@ pub fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("node_type", method!(Node::node_type, 0))?;
     class.define_method("internal_subset", method!(Node::internal_subset, 0))?;
     class.define_method("parent", method!(Node::parent, 0))?;
+    class.define_method("child", method!(Node::child, 0))?;
     class.define_method("children", method!(Node::children, 0))?;
+    class.define_method("element_children", method!(Node::element_children, 0))?;
+    class.define_method("first_element_child", method!(Node::first_element_child, 0))?;
+    class.define_method("last_element_child", method!(Node::last_element_child, 0))?;
+    class.define_method("next_sibling", method!(Node::next_sibling, 0))?;
+    class.define_method("previous_sibling", method!(Node::previous_sibling, 0))?;
+    class.define_method("next_element", method!(Node::next_element, 0))?;
+    class.define_method("previous_element", method!(Node::previous_element, 0))?;
+    class.define_method("attribute", method!(Node::attribute, 1))?;
+    class.define_method("attribute_with_ns", method!(Node::attribute_with_ns, 2))?;
+    class.define_method("key?", method!(Node::key_p, 1))?;
+    class.define_method("namespaced_key?", method!(Node::namespaced_key_p, 2))?;
+    class.define_method("blank?", method!(Node::blank_p, 0))?;
+    class.define_method("lang", method!(Node::lang, 0))?;
+    class.define_method("path", method!(Node::path, 0))?;
+    class.define_method("pointer_id", method!(Node::pointer_id, 0))?;
+    class.define_method(
+        "encode_special_chars",
+        method!(Node::encode_special_chars, 1),
+    )?;
     class.define_method("attribute_nodes", method!(Node::attribute_nodes, 0))?;
     class.define_method("content", method!(Node::content, 0))?;
     class.define_method("namespace", method!(Node::namespace, 0))?;
+    class.define_method(
+        "namespace_definitions",
+        method!(Node::namespace_definitions, 0),
+    )?;
+    class.define_method("namespace_scopes", method!(Node::namespace_scopes, 0))?;
+    class.define_private_method("compare", method!(Node::compare, 1))?;
+    class.define_private_method("get", method!(Node::get, 1))?;
     class.define_private_method("prepend_newline?", method!(Node::prepend_newline_p, 0))?;
     class.define_private_method(
         "html_standard_serialize",

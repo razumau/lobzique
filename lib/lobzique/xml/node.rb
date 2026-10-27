@@ -44,11 +44,67 @@ module Lobzique
         document.decorate(self)
       end
 
+      alias_method :next, :next_sibling
+      alias_method :previous, :previous_sibling
+      alias_method :inner_text, :content
+      alias_method :text, :content
+      alias_method :to_str, :content
       alias_method :name, :node_name
       alias_method :type, :node_type
+      alias_method :elements, :element_children
+
+      # :section: Working With Node Attributes
+
+      def [](name)
+        get(name.to_s)
+      end
+
+      def attributes
+        attribute_nodes.each_with_object({}) do |node, hash|
+          hash[node.node_name] = node
+        end
+      end
+
+      def values
+        attribute_nodes.map(&:value)
+      end
+
+      def value?(value)
+        values.include?(value)
+      end
+
+      def keys
+        attribute_nodes.map(&:node_name)
+      end
+
+      def each
+        attribute_nodes.each do |node|
+          yield [node.node_name, node.value]
+        end
+      end
+
+      def classes
+        kwattr_values("class")
+      end
+
+      def kwattr_values(attribute_name)
+        keywordify(get_attribute(attribute_name) || [])
+      end
+
+      alias_method :get_attribute, :[]
+      alias_method :attr, :[]
+      alias_method :has_attribute?, :key?
 
       def fragment(tags)
         document.related_class("DocumentFragment").new(document, tags, self)
+      end
+
+      def namespaces
+        namespace_scopes.each_with_object({}) do |ns, hash|
+          prefix = ns.prefix
+          key = prefix ? "xmlns:#{prefix}" : "xmlns"
+          hash[key] = ns.href
+        end
       end
 
       def comment?
@@ -101,6 +157,57 @@ module Lobzique
         children.map { |x| x.to_html(*args) }.join
       end
 
+      def css_path
+        path.split(%r{/}).filter_map do |part|
+          part.empty? ? nil : part.gsub(/\[(\d+)\]/, ':nth-of-type(\1)')
+        end.join(" > ")
+      end
+
+      def ancestors(selector = nil)
+        return NodeSet.new(document) unless respond_to?(:parent)
+        return NodeSet.new(document) unless parent
+
+        parents = [parent]
+
+        while parents.last.respond_to?(:parent)
+          break unless (ctx_parent = parents.last.parent)
+
+          parents << ctx_parent
+        end
+
+        return NodeSet.new(document, parents) unless selector
+
+        root = parents.last
+        search_results = root.search(selector)
+
+        NodeSet.new(document, parents.find_all do |parent|
+          search_results.include?(parent)
+        end)
+      end
+
+      def traverse(&block)
+        children.each { |j| j.traverse(&block) }
+        yield(self)
+      end
+
+      def accept(visitor)
+        visitor.visit(self)
+      end
+
+      def ==(other)
+        return false unless other
+        return false unless other.respond_to?(:pointer_id)
+
+        pointer_id == other.pointer_id
+      end
+
+      def <=>(other)
+        return unless other.is_a?(XML::Node)
+        return unless document == other.document
+
+        compare(other)
+      end
+
       # :section: Serialization and Generating Output
 
       # Save options can also be set with a block, which gets a SaveOptions.
@@ -134,7 +241,32 @@ module Lobzique
         write_format_to(SaveOptions::DEFAULT_HTML, io, options)
       end
 
+      DECONSTRUCT_KEYS = [:name, :attributes, :children, :namespace, :content, :elements, :inner_html].freeze # :nodoc:
+      DECONSTRUCT_METHODS = {attributes: :attribute_nodes}.freeze # :nodoc:
+
+      def deconstruct_keys(keys)
+        requested_keys = DECONSTRUCT_KEYS & keys
+        {}.tap do |values|
+          requested_keys.each do |key|
+            method = DECONSTRUCT_METHODS[key] || key
+            values[key] = send(method)
+          end
+        end
+      end
+
       private
+
+      def keywordify(keywords)
+        case keywords
+        when Enumerable
+          keywords
+        when String
+          keywords.scan(/\S+/)
+        else
+          raise ArgumentError,
+            "Keyword attributes must be passed as either a String or an Enumerable, but received #{keywords.class}"
+        end
+      end
 
       def to_format(save_option, options)
         options[:save_with] = save_option unless options[:save_with]

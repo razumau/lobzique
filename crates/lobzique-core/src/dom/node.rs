@@ -1,4 +1,4 @@
-use super::{NodeId, QualName};
+use super::{NamespaceDefinition, NodeId, QualName};
 use std::mem::size_of;
 
 /// Node types numbered as libxml2 numbers them, which is what Nokogiri's
@@ -52,7 +52,10 @@ impl NodeKind {
     pub(super) fn heap_size(&self) -> usize {
         match self {
             NodeKind::Document | NodeKind::DocumentFragment => 0,
-            NodeKind::Element(element) => element.attributes.capacity() * size_of::<NodeId>(),
+            NodeKind::Element(element) => {
+                element.attributes.capacity() * size_of::<NodeId>()
+                    + element.namespace_definitions.capacity() * size_of::<NamespaceDefinition>()
+            }
             NodeKind::Attribute(attribute) => attribute.value.capacity(),
             NodeKind::Text(text) | NodeKind::CData(text) | NodeKind::Comment(text) => {
                 text.capacity()
@@ -80,6 +83,7 @@ pub struct Element {
     /// Attribute nodes in source order. Each one's parent is this element,
     /// but it is not among the element's children.
     pub attributes: Vec<NodeId>,
+    pub namespace_definitions: Vec<NamespaceDefinition>,
 }
 
 #[derive(Clone, Debug)]
