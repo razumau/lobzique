@@ -23,6 +23,8 @@ run = "bundle exec rake test:gc_stress"
 
 [tasks.miri]
 description = "Run the core crate's tests under Miri"
+# tendril (html5ever's strings) casts integers to pointers
+env = { MIRIFLAGS = "-Zmiri-permissive-provenance" }
 run = "cargo +nightly miri test -p lobzique-core"
 
 [tasks.asan]
