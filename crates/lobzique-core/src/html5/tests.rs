@@ -243,10 +243,11 @@ fn depth_counts_open_elements() {
 #[test]
 fn deep_trees_cost_no_stack() {
     // Deeper input is slow rather than dangerous: html5ever's scope checks
-    // walk the stack of open elements, so time grows with depth squared
-    const DEPTH: usize = 5_000;
-    let parse_and_serialize = || {
-        let input = "<div>".repeat(DEPTH);
+    // walk the stack of open elements, so time grows with depth squared.
+    // Miri would take hours at full depth
+    let depth = if cfg!(miri) { 100 } else { 5_000 };
+    let parse_and_serialize = move || {
+        let input = "<div>".repeat(depth);
         let (document, _) = parse_document(input.as_bytes(), &Options::default()).unwrap();
         serialize(&document, NodeId::DOCUMENT, false).len()
     };
@@ -256,7 +257,7 @@ fn deep_trees_cost_no_stack() {
         .unwrap()
         .join()
         .unwrap();
-    assert_eq!(length, 11 * DEPTH + 39);
+    assert_eq!(length, 11 * depth + 39);
 }
 
 #[test]
