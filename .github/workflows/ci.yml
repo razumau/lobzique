@@ -120,51 +120,9 @@ jobs:
         run: bundle exec rake test
 
   fuzz:
-    name: Fuzz
-    runs-on: ubuntu-latest
-    env:
-      FUZZ_SECONDS: 60
-      # The prebuilt cargo-fuzz is a musl binary and defaults to its own target, which ASan can't link
-      FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@nightly
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-fuzz
-      # Each run starts from the corpus the previous run grew
-      - uses: actions/cache@v6
-        with:
-          path: fuzz/corpus
-          key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: fuzz-corpus-
-      - name: Fuzz each target for ${{ env.FUZZ_SECONDS }}s
-        # The parser starts from the html5lib and WPT inputs, read-only after the
-        # target's own corpus. Seed files are long, so inputs are capped; a slow
-        # input fails rather than stalling the run.
-        run: |
-          for target in $(cargo fuzz list); do
-            seeds=()
-            if [ "$target" = html5 ]; then
-              seeds=(test/fixtures/wpt-parsing/tree-construction test/fixtures/html5lib-tests/tokenizer)
-            fi
-            mkdir -p "fuzz/corpus/$target"
-            cargo fuzz run --target "$FUZZ_TARGET_TRIPLE" "$target" "fuzz/corpus/$target" "${seeds[@]}" -- \
-              -max_total_time="$FUZZ_SECONDS" -max_len=65536 -timeout=10
-          done
-      - name: Minimize the corpus
-        run: |
-          for target in $(cargo fuzz list); do
-            cargo fuzz cmin --target "$FUZZ_TARGET_TRIPLE" "$target"
-          done
-      - name: Upload crashing inputs
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: fuzz-artifacts
-          path: fuzz/artifacts/
+    uses: ./.github/workflows/fuzz.yml
+    with:
+      seconds: 60
 
   ci-data:
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'

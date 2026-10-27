@@ -20,7 +20,7 @@ The CI workflow runs these checks on every PR and daily. Locally they need night
 
 `rake test:gc_stress` leaves a slow debug build in `lib/`; `rake compile` replaces it.
 
-Every entry point that takes untrusted input gets a fuzz target in `fuzz/fuzz_targets/`, plus a `[[bin]]` entry in `fuzz/Cargo.toml`. CI fuzzes each target for 60 seconds on PRs.
+Every entry point that takes untrusted input gets a fuzz target in `fuzz/fuzz_targets/`, plus a `[[bin]]` entry in `fuzz/Cargo.toml`. CI fuzzes each target for 60 seconds on PRs; for a long run, dispatch the Fuzz workflow (`gh workflow run fuzz.yml -f seconds=7200`). A target's libFuzzer dictionary goes in `fuzz/<target>.dict`.
 
 ### Differential test against Nokogiri::HTML5
 
