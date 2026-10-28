@@ -85,6 +85,39 @@ fn reverse_axes_count_from_the_context_node() {
 }
 
 #[test]
+fn constant_positions_stop_the_axis_early() {
+    let document = parse(SIBLINGS);
+    let d = element(&document, "d");
+    let children = |predicates| path(vec![step(Axis::Child, NodeTest::Any, predicates)]);
+    assert_eq!(run(&document, d, children(vec![number(2.0)])), ["b"]);
+    assert_eq!(run(&document, d, children(vec![number(4.0)])), [""; 0]);
+    assert_eq!(run(&document, d, children(vec![number(0.0)])), [""; 0]);
+    assert_eq!(run(&document, d, children(vec![number(1.5)])), [""; 0]);
+    // the next predicate counts what the first one kept
+    let last = Expr::compare(
+        Comparison::Equal,
+        Expr::Call(Function::Position, Vec::new()),
+        Expr::Call(Function::Last, Vec::new()),
+    );
+    assert_eq!(run(&document, d, children(vec![number(2.0), last])), ["b"]);
+    let from_c = |predicates| {
+        path(vec![step(
+            Axis::PrecedingSibling,
+            NodeTest::Any,
+            predicates,
+        )])
+    };
+    assert_eq!(
+        run(
+            &document,
+            element(&document, "c"),
+            from_c(vec![number(2.0)])
+        ),
+        ["a"]
+    );
+}
+
+#[test]
 fn steps_from_several_nodes_merge_in_document_order() {
     let document = parse(SIBLINGS);
     let expr = path(vec![

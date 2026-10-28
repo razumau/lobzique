@@ -390,6 +390,13 @@ impl<'a> Evaluator<'a> {
         let subsumes = matches!(step.axis, Axis::Descendant | Axis::DescendantOrSelf)
             && !step.predicates.iter().any(Expr::is_positional)
             && !input.iter().any(|&node| self.is_attribute(node));
+        // `[k]` keeps the k-th candidate at most, so the axis is walked no
+        // further, as libxml2 does for `following-sibling::*[1]` (`a + b`)
+        let limit = match step.predicates.first() {
+            Some(&Expr::Number(k)) if k >= 1.0 && k.fract() == 0.0 => k as usize,
+            Some(Expr::Number(_)) => 0,
+            _ => usize::MAX,
+        };
         let mut output = Vec::new();
         let mut searched: Option<NodeId> = None;
         for &node in input {
@@ -402,6 +409,7 @@ impl<'a> Evaluator<'a> {
             let mut candidates: Vec<NodeId> = self
                 .axis(step.axis, node)
                 .filter(|&candidate| self.passes(&step.test, step.axis, candidate))
+                .take(limit)
                 .collect();
             for predicate in &step.predicates {
                 candidates = self.filter(candidates, predicate);
