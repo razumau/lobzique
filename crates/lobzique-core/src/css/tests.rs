@@ -182,6 +182,10 @@ fn invalid_xpath_waits_for_evaluation() {
     assert!(invalid("#a\\'b"));
     assert!(invalid("p:not(.a:first-of-type)"));
     assert!(invalid("eq(1)"));
+    // an unescaped value of one quote opens a literal
+    assert!(invalid(r#"p[x=\"]"#));
+    assert!(invalid(r"p[x=\']"));
+    assert!(!invalid(r#"p[x="\""]"#));
     assert!(!invalid("has(a)"));
     assert!(!invalid("p:checked"));
 }

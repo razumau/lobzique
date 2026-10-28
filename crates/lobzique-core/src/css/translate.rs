@@ -736,19 +736,15 @@ struct AttributeValue {
 impl AttributeValue {
     fn new(value: &str) -> Result<AttributeValue> {
         // Unquoted values get `'…'`; a value whose first and last
-        // characters are the same quote is taken as quoted
+        // characters are the same quote is taken as quoted. A lone quote
+        // (`[x=\"]`) passes that test, and opens a literal it never closes.
         let first = value.chars().next();
         let (text, quote) = match first {
             Some(quote @ ('\'' | '"')) => {
-                if !value.ends_with(quote) {
+                if value.len() < 2 || !value.ends_with(quote) {
                     return Err(Failure::Invalid);
                 }
-                let inner = if value.len() == 1 {
-                    ""
-                } else {
-                    &value[1..value.len() - 1]
-                };
-                (inner, quote)
+                (&value[1..value.len() - 1], quote)
             }
             _ => (value, '\''),
         };
