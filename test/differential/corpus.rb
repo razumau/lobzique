@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "digest"
 require "json"
 require "ripper"
 require "yaml"
@@ -118,8 +119,8 @@ module Differential
     def each_wpt_selector
       document = File.binread(File.join(FIXTURES, "wpt-selectors", "ParentNode-querySelector-All-content.html"))
       source = File.read(File.join(FIXTURES, "wpt-selectors", "selectors.js"))
-      source.scan(/selector:\s*"((?:[^"\\]|\\.)*)"/).map { |(literal)| js_unescape(literal) }.uniq.each_with_index do |selector, index|
-        yield Case.new(id: "wpt-selectors/selectors.js##{index + 1}", source: "wpt-selectors",
+      source.scan(/selector:\s*"((?:[^"\\]|\\.)*)"/).map { |(literal)| js_unescape(literal) }.uniq.each do |selector|
+        yield Case.new(id: selector_id("wpt-selectors/selectors.js", selector), source: "wpt-selectors",
           kind: :document, input: document, note: selector, selectors: [selector])
       end
     end
@@ -131,10 +132,17 @@ module Differential
     def each_nokogiri_selector
       document = File.binread(File.join(FIXTURES, "nokogiri", "files", "tlm.html"))
       path = File.join(FIXTURES, "nokogiri", "css", "test_xpath_visitor.rb")
-      ruby_selectors(path).uniq.each_with_index do |selector, index|
-        yield Case.new(id: "#{relative(path)}##{index + 1}", source: "nokogiri-css",
+      ruby_selectors(path).uniq.each do |selector|
+        yield Case.new(id: selector_id(relative(path), selector), source: "nokogiri-css",
           kind: :document, input: document, note: selector, selectors: [selector])
       end
+    end
+
+    # A selector's case id: its digest rather than its place in the file, so
+    # known.yml entries keep pointing at the same selector when the fixture
+    # is updated. The selector itself is the case's note.
+    def selector_id(file, selector)
+      "#{file}##{Digest::SHA256.hexdigest(selector)[0, 12]}"
     end
 
     def ruby_selectors(path)
