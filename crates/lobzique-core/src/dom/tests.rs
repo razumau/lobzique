@@ -892,3 +892,23 @@ fn names_with_an_empty_side_of_the_colon_are_not_qualified() {
     assert_eq!(attribute.name, plain("xlink:"));
     doc.check_invariants().unwrap();
 }
+
+#[test]
+fn decoding_references_is_linear() {
+    // Quadratic decoding would take minutes here
+    let length = if cfg!(miri) { 1_000 } else { 1_000_000 };
+    let mut doc = html();
+    let p = doc.create_element(html_name("p"));
+    let mut content = vec![b'&'; length];
+    content.extend_from_slice(b"amp;");
+    doc.set_content(p, content);
+    assert_eq!(doc.content(p).map(|content| content.len()), Some(length));
+}
+
+#[test]
+fn references_end_at_the_first_semicolon_before_another_ampersand() {
+    let mut doc = html();
+    let p = doc.create_element(html_name("p"));
+    doc.set_content(p, b"&am&amp;&#65&#66;&;&".to_vec());
+    assert_eq!(doc.content(p), Some(b"&am&&#65B&;&".to_vec()));
+}

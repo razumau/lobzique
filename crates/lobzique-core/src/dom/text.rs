@@ -99,9 +99,13 @@ fn decode_references(input: &[u8]) -> Vec<u8> {
     while let Some(start) = rest.iter().position(|&byte| byte == b'&') {
         decoded.extend_from_slice(&rest[..start]);
         rest = &rest[start..];
+        // A name never holds `&`, so stopping there keeps decoding linear
         let reference = rest
             .iter()
-            .position(|&byte| byte == b';')
+            .skip(1)
+            .position(|&byte| byte == b';' || byte == b'&')
+            .map(|offset| offset + 1)
+            .filter(|&end| rest[end] == b';')
             .and_then(|end| Some((decode_reference(&rest[1..end])?, end)));
         match reference {
             Some((character, end)) => {
