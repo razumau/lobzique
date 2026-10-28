@@ -1,6 +1,14 @@
 //! Ruby bindings: the native classes and methods Nokogiri's C extension
 //! defines, with the same names, each a thin call into lobzique-core. Files
 //! mirror `lib/lobzique/`; see ARCHITECTURE.md.
+//!
+//! No code borrowing an arena can reach Ruby (ARCHITECTURE.md, "No borrow
+//! across Ruby"). The borrow closures must be `Send`, which keeps out Ruby
+//! handles and values, and the other ways in are closed here and in
+//! `clippy.toml`: `unsafe` (raw rb-sys calls) only in `support`, no
+//! deprecated magnus API (it fetches a handle itself), and none of the
+//! calls that fetch a handle, which `clippy.toml` lists.
+#![deny(unsafe_code, deprecated)]
 
 mod html4;
 mod html5;

@@ -64,9 +64,10 @@ fn arena<'a>(
 /// Runs `f` on the document's arena; the borrow ends when `f` returns.
 ///
 /// `f` can't reach Ruby while the arena is borrowed: Ruby handles and
-/// values aren't `Send`, so `f` can neither capture nor return one. A Ruby
-/// exception can therefore never unwind past the borrow and leave the
-/// document locked.
+/// values aren't `Send`, so `f` can neither capture nor return one, and
+/// the lints in `lib.rs` and `clippy.toml` close the ways to get a handle
+/// inside it. A Ruby exception can therefore never unwind past the borrow
+/// and leave the document locked.
 pub fn with_arena<R: Send>(
     ruby: &Ruby,
     document: Value,

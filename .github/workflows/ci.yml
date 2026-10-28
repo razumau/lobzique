@@ -23,14 +23,19 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # Ruby version comes from .ruby-version
-      - uses: ruby/setup-ruby@v1
+      # Ruby version comes from .ruby-version; Rust for clippy, which
+      # builds the extension's dependencies against Ruby's headers
+      - uses: oxidize-rb/actions/setup-ruby-and-rust@v1
         with:
           bundler-cache: true
+          cargo-cache: true
       - name: Verify test fixtures
         run: script/fetch_fixtures --verify
       - name: Lint
         run: bundle exec rake standard
+      # Enforces what code borrowing an arena may call (ext/lobzique/clippy.toml)
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
     name: Ruby ${{ matrix.ruby }}

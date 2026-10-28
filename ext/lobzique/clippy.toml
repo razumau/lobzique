@@ -1,0 +1,15 @@
+# Ways to reach Ruby without a handle, which code borrowing an arena must
+# not have (lib.rs). `support` is the one module allowed `protect`.
+disallowed-methods = [
+    { path = "magnus::Ruby::get", reason = "take `&Ruby` as an argument instead" },
+    { path = "magnus::Ruby::get_with", reason = "take `&Ruby` as an argument instead" },
+    { path = "magnus::eval", reason = "use `Ruby::eval`" },
+    { path = "magnus::rb_sys::protect", reason = "calls Ruby without a handle; wrap the call in `support`" },
+]
+disallowed-macros = [
+    { path = "magnus::eval", reason = "fetches a handle itself" },
+    { path = "magnus::rb_assert", reason = "fetches a handle itself" },
+]
+disallowed-types = [
+    { path = "magnus::value::LazyId", reason = "`Send`, and calls Ruby without a handle" },
+]

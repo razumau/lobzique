@@ -1,4 +1,7 @@
-//! Calls into Ruby that magnus has no direct helper for.
+//! Calls into Ruby that magnus has no direct helper for. The only module
+//! allowed `unsafe` and `rb_sys::protect` (see `lib.rs`).
+#![allow(unsafe_code)]
+#![allow(clippy::disallowed_methods)]
 
 use magnus::{
     prelude::*,
@@ -103,9 +106,14 @@ pub fn c_string_with_length(value: Value) -> Result<Vec<u8>, Error> {
         rb_sys::rb_string_value_cstr(&mut raw);
         raw
     })?;
-    // SAFETY: the converted string is a live String on the stack, and its
-    // bytes are copied before any Ruby code could change it.
+    // SAFETY: the converted string is a live String on the stack.
     let string = RString::from_value(unsafe { Value::from_raw(string) })
         .expect("rb_string_value_cstr returns a String");
-    Ok(unsafe { string.as_slice() }.to_vec())
+    Ok(string_bytes(string))
+}
+
+/// A copy of the string's bytes.
+pub fn string_bytes(string: RString) -> Vec<u8> {
+    // SAFETY: the bytes are copied before any Ruby code could change them.
+    unsafe { string.as_slice() }.to_vec()
 }

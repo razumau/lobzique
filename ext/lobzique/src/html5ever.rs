@@ -2,7 +2,7 @@
 //! parser's entry points behind `HTML5::Document.parse` and
 //! `HTML5::DocumentFragment#initialize`.
 
-use crate::support::{c_string, c_string_with_length, call_initialize, check_string};
+use crate::support::{c_string, c_string_with_length, call_initialize, check_string, string_bytes};
 use crate::xml::document::{self, wrap_document};
 use crate::xml::node::{utf8_string, Node};
 use crate::{HTML5EVER, XML};
@@ -89,8 +89,7 @@ fn options(keywords: RHash) -> Result<Options, Error> {
 fn input_bytes(ruby: &Ruby, input: Value) -> Result<Vec<u8>, Error> {
     check_string(ruby, input)?;
     let input = RString::from_value(input).expect("checked to be a String");
-    // SAFETY: the bytes are copied before any Ruby code could change them.
-    Ok(unsafe { input.as_slice() }.to_vec())
+    Ok(string_bytes(input))
 }
 
 fn limit_error(ruby: &Ruby, error: LimitError) -> Error {

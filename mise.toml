@@ -3,7 +3,7 @@ ruby = "3.3"
 
 [tasks.check]
 description = "Compile, run the Ruby and core crate tests, and lint"
-run = ["bundle exec rake", "cargo test -p lobzique-core"]
+run = ["bundle exec rake", "cargo test -p lobzique-core", "cargo clippy --workspace --all-targets -- -D warnings"]
 
 [tasks.compile]
 description = "Build the extension into lib/lobzique/"
@@ -53,8 +53,8 @@ description = "Download the pinned Common Crawl sample into tmp/crawl/"
 run = "script/fetch_crawl"
 
 [tasks.lint]
-description = "Lint the Ruby code with standard"
-run = "bundle exec rake standard"
+description = "Lint the Ruby code with standard and the Rust code with clippy"
+run = ["bundle exec rake standard", "cargo clippy --workspace --all-targets -- -D warnings"]
 
 [tasks."lint:fix"]
 description = "Lint and autofix the Ruby code with standard"

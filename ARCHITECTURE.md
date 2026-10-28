@@ -134,11 +134,21 @@ What Nokogiri guarantees, and how lobzique keeps it:
   - A document reports its arena's heap size to `ObjectSpace.memsize_of`.
 - **No borrow across Ruby.** The arena's `RefCell` is borrowed inside
   `with_arena`/`with_arena_mut` and released before any call into Ruby:
-  decorate, `initialize`, blocks, CSS handlers. The closures must be
-  `Send`, and Ruby handles and values aren't, so the compiler rejects a
-  closure that calls Ruby or returns a Ruby object. A Ruby exception
-  therefore never unwinds past a held borrow, and a re-entrant call can't
-  hit one. If one ever did, it would raise instead of panicking.
+  decorate, `initialize`, blocks, CSS handlers. The closures can't reach
+  Ruby:
+  - they must be `Send`, and Ruby handles and values aren't, so they can
+    neither capture nor return one;
+  - the extension denies `unsafe` outside `support.rs`, which rules out
+    raw rb-sys calls, and denies deprecated magnus API, which fetches a
+    handle itself;
+  - `ext/lobzique/clippy.toml` bans the rest: `Ruby::get`,
+    `Ruby::get_with`, `eval` and the `eval!` and `rb_assert!` macros,
+    `rb_sys::protect` outside `support.rs`, and `LazyId`, which is `Send`.
+    CI runs clippy with warnings as errors.
+
+  A Ruby exception therefore never unwinds past a held borrow, and a
+  re-entrant call can't hit one. If one ever did, it would raise instead
+  of panicking.
 - **Strings.** Native methods take strings as Nokogiri hands them to
   libxml2 (`StringValueCStr`): converted with `to_str`, refused if they
   contain a NUL character, and stored as bytes without transcoding. They

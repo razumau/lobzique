@@ -12,11 +12,11 @@ Ruby 3.3 (`mise.toml`, `.ruby-version`); CI also tests 3.4 and 4.0.
 `mise.toml` wraps the rake and cargo commands as tasks (`mise tasks` lists them):
 
 ```sh
-mise run check            # compile, Ruby tests, standard, core crate tests
+mise run check            # compile, Ruby tests, standard, core crate tests, clippy
 mise run test             # compile + Minitest
 TEST=test/test_lobzique.rb TESTOPTS="-n test_name" mise run test   # one Ruby test
 mise run test:rust        # core crate tests; one test: cargo test -p lobzique-core <name>
-mise run lint             # standard (lint:fix to autofix)
+mise run lint             # standard and clippy (lint:fix autofixes standard)
 mise run test:gc-stress   # dev build with rb-sys gc-stress + GC.stress per test
 mise run miri             # nightly
 mise run asan             # nightly, core crate only
