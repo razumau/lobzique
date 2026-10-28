@@ -435,6 +435,14 @@ impl Node {
             let message = format!("argument must be a kind of {}", node_class.inspect());
             return Err(Error::new(ruby.exception_type_error(), message));
         }
+        // `Object#dup` hands over a fresh object; repointing a live one
+        // would leave it in its old node's cache slot
+        if rb_self.data_ptr_p() {
+            return Err(Error::new(
+                ruby.exception_runtime_error(),
+                "node is already initialized",
+            ));
+        }
         let other = <&Node>::try_convert(other)?;
         let (source, id) = (other.document(ruby)?, other.id(ruby)?);
         document::unwrap(ruby, new_parent_doc)?;

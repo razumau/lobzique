@@ -602,6 +602,16 @@ class TestNodeReparentingLobzique < Minitest::Test
     assert_equal "b", i.parent.name
   end
 
+  # Nokogiri repoints a live node; repointing would leave its object in the
+  # old node's cache slot
+  def test_copying_into_a_live_node_is_refused
+    doc = document
+    b, i = at(doc, "b"), at(doc, "i")
+    error = assert_raises(RuntimeError) { b.send(:initialize_copy_with_args, i, 1, doc) }
+    assert_equal "node is already initialized", error.message
+    assert_equal "b", b.name
+  end
+
   # A departure: attribute values are bytes, so attributes take no children
   def test_attributes_take_no_children
     doc = document
