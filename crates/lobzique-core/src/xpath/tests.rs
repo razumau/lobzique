@@ -271,10 +271,33 @@ fn numbers_convert_as_libxml2_converts_them() {
     for not_a_number in [&b""[..], b"1 2", b"+1", b"x", b"1.2.3", b"-"] {
         assert!(string_to_number(not_a_number).is_nan(), "{not_a_number:?}");
     }
-    assert_eq!(number_to_string(3.0), "3");
-    assert_eq!(number_to_string(-0.5), "-0.5");
-    assert_eq!(number_to_string(f64::NAN), "NaN");
-    assert_eq!(number_to_string(f64::NEG_INFINITY), "-Infinity");
+    // what Nokogiri 1.19.4's libxml2 returns for `string(…)` of each
+    for (number, string) in [
+        (3.0, "3"),
+        (-0.5, "-0.5"),
+        (-0.0, "0"),
+        (f64::NAN, "NaN"),
+        (f64::NEG_INFINITY, "-Infinity"),
+        (1e9, "1000000000"),
+        (2147483646.0, "2147483646"),
+        (2147483647.0, "2.147483647e+09"),
+        (-2147483648.0, "-2.147483648e+09"),
+        (1e10, "1e+10"),
+        (1000000000.5, "1.0000000005e+09"),
+        (999999999.5, "999999999.5"),
+        (123456789012345678.0, "1.23456789012346e+17"),
+        (0.30000000000000004, "0.3"),
+        (1.0 / 3.0, "0.333333333333333"),
+        (100.0 / 3.0, "33.3333333333333"),
+        (123456789.12345679, "123456789.123457"),
+        (0.00001, "0.00001"),
+        (0.0000123, "0.0000123"),
+        (0.000009999, "9.999e-06"),
+        (0.000001, "1e-06"),
+        (5e-7, "5e-07"),
+    ] {
+        assert_eq!(number_to_string(number), string, "{number}");
+    }
 }
 
 #[test]

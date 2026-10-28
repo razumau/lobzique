@@ -646,15 +646,51 @@ pub fn string_to_number(s: &[u8]) -> f64 {
         .unwrap_or(f64::NAN)
 }
 
-/// XPath's `string()` of a number: integers without a fraction.
+/// libxml2's `xmlXPathFormatNumber`: integers strictly inside C's `int`
+/// range as they are, others below 1e-5 or above 1e9 as `%.14e`, the rest
+/// as `%f` with 15 significant digits; trailing zeros of the fraction go.
 pub fn number_to_string(n: f64) -> String {
+    const INT_MIN: f64 = i32::MIN as f64;
+    const INT_MAX: f64 = i32::MAX as f64;
     if n.is_nan() {
-        "NaN".into()
-    } else if n.is_infinite() {
-        if n > 0.0 { "Infinity" } else { "-Infinity" }.into()
-    } else if n == n.trunc() && n.abs() < 1e15 {
-        format!("{}", n as i64)
+        return "NaN".into();
+    }
+    if n.is_infinite() {
+        return if n > 0.0 { "Infinity" } else { "-Infinity" }.into();
+    }
+    if n == 0.0 {
+        return "0".into();
+    }
+    if n > INT_MIN && n < INT_MAX && n == n.trunc() {
+        return format!("{}", n as i32);
+    }
+    let absolute = n.abs();
+    if !(1e-5..=1e9).contains(&absolute) {
+        // Rust writes `1.5e9` where C writes `1.5e+09`
+        let formatted = format!("{n:.14e}");
+        let (mantissa, exponent) = formatted.split_once('e').expect("an exponent");
+        let exponent: i32 = exponent.parse().expect("a decimal exponent");
+        let sign = if exponent < 0 { '-' } else { '+' };
+        return format!(
+            "{}e{sign}{:02}",
+            trim_fraction(mantissa),
+            exponent.unsigned_abs()
+        );
+    }
+    let integer_place = absolute.log10() as i32;
+    let fraction_place = if integer_place > 0 {
+        15 - integer_place - 1
     } else {
-        format!("{n}")
+        15 - integer_place
+    };
+    let precision = usize::try_from(fraction_place).expect("at most 20");
+    trim_fraction(&format!("{n:.precision$}")).into()
+}
+
+fn trim_fraction(number: &str) -> &str {
+    if number.contains('.') {
+        number.trim_end_matches('0').trim_end_matches('.')
+    } else {
+        number
     }
 }
