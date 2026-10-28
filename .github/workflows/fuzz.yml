@@ -47,14 +47,15 @@ jobs:
           key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: fuzz-corpus-
       - name: Fuzz each target for ${{ env.FUZZ_SECONDS }}s
-        # The parser starts from the html5lib and WPT inputs, read-only after the
+        # The parser and DOM targets start from the html5lib and WPT inputs (dom
+        # reads each as markup with no operations), read-only after the
         # target's own corpus. Seed files are long, so inputs are capped; a slow
         # input fails rather than stalling the run. A target's dictionary is
         # fuzz/<target>.dict.
         run: |
           for target in $(cargo fuzz list); do
             seeds=()
-            if [ "$target" = html5 ]; then
+            if [ "$target" = html5 ] || [ "$target" = dom ]; then
               seeds=(test/fixtures/wpt-parsing/tree-construction test/fixtures/html5lib-tests/tokenizer)
             fi
             dict=()

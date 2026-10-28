@@ -1023,3 +1023,12 @@ fn invariants_catch_elements_in_the_other_kind_of_documents_no_namespace() {
     let error = doc.check_invariants().unwrap_err();
     assert!(error.contains("not this document's"), "{error}");
 }
+
+#[test]
+fn invariants_catch_prefixes_without_a_local_name() {
+    let mut doc = html();
+    let a = doc.create_element(html_name("a"));
+    attribute(&mut doc, a, xlink(""), "v");
+    let error = doc.check_invariants().unwrap_err();
+    assert!(error.contains("no local name"), "{error}");
+}

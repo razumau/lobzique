@@ -34,20 +34,28 @@ impl Document {
     }
 
     /// An element in no namespace, in libxml2's terms, is in the namespace
-    /// that stands for none in this kind of document.
+    /// that stands for none in this kind of document, and a name with a
+    /// prefix has a local part.
     fn check_names(&self) -> Result<(), String> {
         let default_namespace = self.default_namespace();
         for id in self.node_ids() {
-            let NodeKind::Element(element) = self.node_kind(id) else {
-                continue;
+            let name = match self.node_kind(id) {
+                NodeKind::Element(element) => {
+                    let unqualified = element.name.prefix.is_none()
+                        && (element.name.ns == ns!() || element.name.ns == ns!(html));
+                    if unqualified && element.name.ns != default_namespace {
+                        return Err(format!(
+                            "element {id:?} is in {:?}, not this document's {default_namespace:?}",
+                            element.name.ns
+                        ));
+                    }
+                    &element.name
+                }
+                NodeKind::Attribute(attribute) => &attribute.name,
+                _ => continue,
             };
-            let unqualified = element.name.prefix.is_none()
-                && (element.name.ns == ns!() || element.name.ns == ns!(html));
-            if unqualified && element.name.ns != default_namespace {
-                return Err(format!(
-                    "element {id:?} is in {:?}, not this document's {default_namespace:?}",
-                    element.name.ns
-                ));
+            if name.prefix.is_some() && name.local.is_empty() {
+                return Err(format!("{id:?} has a prefix but no local name"));
             }
         }
         Ok(())
