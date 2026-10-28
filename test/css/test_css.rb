@@ -266,6 +266,8 @@ module CSSContract
     assert_empty paragraph.css("p")
     assert_equal ["b"], paragraph.css("b").map(&:name)
     assert_equal ["b"], (paragraph > "b").map(&:name)
+    assert_equal ["b"], (paragraph > "b, a + text()").map(&:name)
+    assert_raises(root::CSS::SyntaxError) { paragraph > "b, :-x" }
     assert_equal ["div"], doc.at_css("b").ancestors("div").map(&:name)
   end
 

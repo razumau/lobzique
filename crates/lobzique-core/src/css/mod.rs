@@ -70,7 +70,8 @@ pub struct Options {
     /// names without a prefix (outside HTML).
     pub default_namespace: bool,
     pub prefixes: Vec<Prefix>,
-    /// Only the first selector of a list, as `Searchable#>` takes it.
+    /// Only the first selector of a list, as `Searchable#>` takes it. The
+    /// others are still translated, so their syntax errors are raised.
     pub first_only: bool,
 }
 
@@ -87,19 +88,19 @@ pub fn compile(rule: &str, options: &Options) -> Result<Selector, SyntaxError> {
     if rule.is_empty() {
         return Err(SyntaxError("empty CSS selector".into()));
     }
-    let mut selectors = parser::parse(rule)?;
-    if options.first_only {
-        selectors.truncate(1);
-    }
+    let selectors = parser::parse(rule)?;
     let mut translator = Translator::new(options);
     let mut paths = Vec::new();
     let mut invalid = false;
     for prefix in &options.prefixes {
-        for selector in &selectors {
+        for (index, selector) in selectors.iter().enumerate() {
+            // `.first` comes after the visitor has translated every selector
+            let kept = index == 0 || !options.first_only;
             match translator.selector(selector, *prefix) {
-                Ok(path) => paths.push(path),
+                Ok(path) if kept => paths.push(path),
                 Err(Failure::Syntax(error)) => return Err(error),
-                Err(Failure::Invalid) => invalid = true,
+                Err(Failure::Invalid) if kept => invalid = true,
+                Ok(_) | Err(Failure::Invalid) => {}
             }
         }
     }
