@@ -93,9 +93,10 @@ impl XPathContext {
     }
 
     /// `evaluate(expression, handler = nil)`. Custom functions are the
-    /// handler's methods, called once per context node with that node in a
-    /// NodeSet, as libxml2 calls them, but before matching rather than
-    /// during it (ARCHITECTURE.md, departures).
+    /// handler's methods, called with the arguments libxml2 would pass, but
+    /// between evaluations rather than during one: each evaluation notes
+    /// the calls it has no answer for, and runs again once they are made
+    /// (ARCHITECTURE.md, departures).
     fn evaluate(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<Value, Error> {
         ruby.check_arity(args.len(), 1..=2)?;
         let handler = optional_arg(ruby, args, 1);
