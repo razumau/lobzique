@@ -27,7 +27,8 @@ module Differential
 
     # Errors that only the translators raise differently: Nokogiri's
     # visitor fails with Ruby errors where lobzique raises CSS::SyntaxError
-    # (ARCHITECTURE.md, departures)
+    # (ARCHITECTURE.md, departures). Only the oracle's are renamed, so the
+    # same error from lobzique stays a failure.
     SELECTOR_ERRORS = {"Racc::ParseError" => "CSS::SyntaxError", "NoMethodError" => "CSS::SyntaxError",
                        "ZeroDivisionError" => "CSS::SyntaxError"}.freeze
 
@@ -84,7 +85,7 @@ module Differential
       end
       html = node.to_html
       {html: html.b, encoding: html.encoding.name, tree: dump(root, node), queries: queries(node),
-       selected: select(node, kase.selectors || SELECTORS)}
+       selected: select(root, node, kase.selectors || SELECTORS)}
     rescue => e
       {error: "#{e.class.name.sub(ROOT_NAME, "")}: #{e.message}"}
     end
@@ -126,7 +127,7 @@ module Differential
 
     # What each selector finds from the top node and from its first element,
     # as node paths, or the class of the error it raises.
-    def select(top, selectors)
+    def select(root, top, selectors)
       element = top.children.find(&:element?)
       selectors.flat_map do |selector|
         [top, element].compact.map do |from|
@@ -134,7 +135,8 @@ module Differential
           "#{selector} from #{from.name}: #{found}"
         rescue => e
           name = e.class.name.sub(ROOT_NAME, "")
-          "#{selector} from #{from.name}: raises #{SELECTOR_ERRORS.fetch(name, name)}"
+          name = SELECTOR_ERRORS.fetch(name, name) if root.equal?(@oracle)
+          "#{selector} from #{from.name}: raises #{name}"
         end
       end
     end
