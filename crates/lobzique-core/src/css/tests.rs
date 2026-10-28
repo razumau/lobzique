@@ -274,3 +274,8 @@ fn unescaping() {
     assert_eq!(parser::unescape_identifier(r"a\31 b\.c"), "a1b.c");
     assert_eq!(parser::unescape_string("'a\\\nb'"), "'ab'");
 }
+
+#[test]
+fn reduce_handles_the_rules_the_tables_number() {
+    assert_eq!(parser::REDUCED_RULES, tables::GRAMMAR);
+}

@@ -397,6 +397,11 @@ class TestCSSLobzique < Minitest::Test
     contexts.each { |context| assert_equal ["p"], context.evaluate(selector).map(&:name) }
   end
 
+  def test_parser_tables_come_from_the_locked_nokogiri
+    tables = File.read(File.expand_path("../../crates/lobzique-core/src/css/tables.rs", __dir__))
+    assert_equal Nokogiri::VERSION, tables[/NOKOGIRI_VERSION: &str = "(.*)"/, 1], "run script/generate_css_tables"
+  end
+
   def test_parentheses_nest_32_deep
     doc = Lobzique::HTML5::Document.parse("<p></p>")
     assert_equal 1, doc.css(":not(" * 32 + "p" + ")" * 32).size

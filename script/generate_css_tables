@@ -4,11 +4,13 @@
 # Writes crates/lobzique-core/src/css/tables.rs from the racc tables of the
 # Nokogiri in Gemfile.lock, so the native CSS parser makes the same shift and
 # reduce decisions as Nokogiri's (lib/nokogiri/css/parser.y). Rerun it when
-# that version moves, and check that the rule list below still matches
-# parser.y.
+# that version moves. `GRAMMAR` names each rule as racc numbers it; the core's
+# tests fail until `reduce` in css/parser.rs handles the same rules, and the
+# Ruby tests fail until the version here matches Gemfile.lock.
 
 require "bundler/setup"
 require "nokogiri"
+require "racc/static"
 
 OUTPUT = File.expand_path("../crates/lobzique-core/src/css/tables.rs", __dir__)
 
@@ -24,6 +26,20 @@ def table(name, values)
 end
 
 rules = reduce_table.each_slice(3).map { |length, lhs, _| [length, lhs] }
+
+grammar_path = File.join(Gem.loaded_specs["nokogiri"].full_gem_path, "lib/nokogiri/css/parser.y")
+grammar = Racc::GrammarFileParser.new.parse(File.read(grammar_path), grammar_path).grammar
+abort "parser.y has #{grammar.size} rules, the tables #{rules.size}" if grammar.size != rules.size
+symbol_names = parser::Racc_token_to_s_table
+grammar = grammar.each_with_index.map do |rule, index|
+  next "" if index.zero? # racc's error rule
+
+  length, lhs = rules[index]
+  if rule.symbols.size != length || rule.target.to_s != symbol_names[lhs]
+    abort "rule #{index} of parser.y doesn't match the tables"
+  end
+  "#{rule.target}: #{rule.symbols.join(" ")}".strip
+end
 tokens = token_table.map do |symbol, id|
   name = case symbol
   when false then "END"
@@ -45,6 +61,8 @@ File.write(OUTPUT, <<~RUST)
 
   #![allow(clippy::unreadable_literal, dead_code)]
 
+  pub const NOKOGIRI_VERSION: &str = "#{Nokogiri::VERSION}";
+
   /// An empty cell.
   pub const N: i16 = i16::MIN;
 
@@ -58,6 +76,11 @@ File.write(OUTPUT, <<~RUST)
   /// rule 0 is racc's error rule.
   pub const RULES: [(u8, i16); #{rules.size}] = [
   #{rules.map { |length, lhs| "    (#{length}, #{lhs})," }.join("\n")}
+  ];
+
+  /// Each rule of parser.y, by the same numbers.
+  pub const GRAMMAR: [&str; #{grammar.size}] = [
+  #{grammar.map { |rule| "    #{rule.dump}," }.join("\n")}
   ];
 
   #{table("ACTION_TABLE", action_table)}
