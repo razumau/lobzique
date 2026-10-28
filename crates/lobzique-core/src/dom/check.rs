@@ -1,4 +1,5 @@
 use super::{Document, NodeId, NodeKind};
+use html5ever::ns;
 
 impl Document {
     /// Verifies that every link in the arena agrees with its counterpart.
@@ -28,7 +29,28 @@ impl Document {
             }
         }
         self.check_acyclic()?;
+        self.check_names()?;
         self.check_order()
+    }
+
+    /// An element in no namespace, in libxml2's terms, is in the namespace
+    /// that stands for none in this kind of document.
+    fn check_names(&self) -> Result<(), String> {
+        let default_namespace = self.default_namespace();
+        for id in self.node_ids() {
+            let NodeKind::Element(element) = self.node_kind(id) else {
+                continue;
+            };
+            let unqualified = element.name.prefix.is_none()
+                && (element.name.ns == ns!() || element.name.ns == ns!(html));
+            if unqualified && element.name.ns != default_namespace {
+                return Err(format!(
+                    "element {id:?} is in {:?}, not this document's {default_namespace:?}",
+                    element.name.ns
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Document order numbered by comparisons is what numbering now gives.

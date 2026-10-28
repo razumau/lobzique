@@ -134,6 +134,7 @@ impl Document {
                     .collect();
                 let mut copy = element.clone();
                 copy.attributes.clear();
+                copy.name = adopt_name(copy.name, src.kind, self.kind);
                 NodeKind::Element(copy)
             }
             kind => kind.clone(),
@@ -190,9 +191,17 @@ impl Document {
     /// The namespace of an element with none in libxml2's terms: HTML in
     /// HTML documents, as for `Node.new`.
     pub(super) fn default_namespace(&self) -> Namespace {
-        match self.kind {
-            DocumentKind::Html => ns!(html),
-            DocumentKind::Xml => ns!(),
+        no_namespace(self.kind)
+    }
+
+    /// Elements made from `first` on by the HTML parser, which names them
+    /// in the HTML namespace, renamed as this document writes no namespace.
+    pub fn adopt_parsed_names(&mut self, first: NodeId) {
+        let kind = self.kind;
+        for node in &mut self.nodes[first.index()..] {
+            if let NodeKind::Element(element) = &mut node.kind {
+                element.name = adopt_name(element.name.clone(), DocumentKind::Html, kind);
+            }
         }
     }
 
@@ -211,5 +220,23 @@ impl Document {
             NodeKind::Attribute(attribute) => Some(&attribute.name.local),
             _ => None,
         }
+    }
+}
+
+/// What stands for no namespace in libxml2's terms in a kind of document.
+fn no_namespace(kind: DocumentKind) -> Namespace {
+    match kind {
+        DocumentKind::Html => ns!(html),
+        DocumentKind::Xml => ns!(),
+    }
+}
+
+/// An element name from a document of kind `from`, as a document of kind
+/// `to` writes it.
+fn adopt_name(name: QualName, from: DocumentKind, to: DocumentKind) -> QualName {
+    if name.prefix.is_none() && name.ns == no_namespace(from) {
+        QualName::new(None, no_namespace(to), name.local)
+    } else {
+        name
     }
 }

@@ -210,6 +210,7 @@ pub fn parse_fragment(
             }
         }
     }
+    document.adopt_parsed_names(scratch);
     Ok(parsed)
 }
 

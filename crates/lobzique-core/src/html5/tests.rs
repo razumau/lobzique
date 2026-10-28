@@ -331,3 +331,27 @@ fn fragment_namespaces_are_defined_on_each_top_level_element() {
         .collect();
     assert_eq!(defined, [vec!["svg"], vec!["math"], vec![]]);
 }
+
+#[test]
+fn fragments_in_xml_documents_have_no_namespace() {
+    let mut document = Document::new(DocumentKind::Xml);
+    let fragment = document.create_fragment();
+    let context = Context::new(ContextNamespace::Html, "body");
+    parse_fragment(
+        &mut document,
+        fragment,
+        b"<p>a<svg></svg></p>",
+        &context,
+        &Options::default(),
+    )
+    .unwrap();
+    document.check_invariants().unwrap();
+    let p = document.first_child(fragment).unwrap();
+    let svg = document.last_child(p).unwrap();
+    let namespace = |id| match document.node_kind(id) {
+        NodeKind::Element(element) => element.name.ns.clone(),
+        _ => unreachable!(),
+    };
+    assert_eq!((namespace(p), namespace(svg)), (ns!(), ns!(svg)));
+    assert_eq!(html(&document, fragment), "<p>a<svg></svg></p>");
+}

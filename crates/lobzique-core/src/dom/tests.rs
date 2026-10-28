@@ -986,3 +986,40 @@ fn invariants_catch_stale_document_order() {
     });
     assert!(error.contains("stale"), "{error}");
 }
+
+#[test]
+fn copies_write_no_namespace_as_their_new_document_does() {
+    let mut xml = Document::new(DocumentKind::Xml);
+    let root = xml.create_element_named("div");
+    let child = xml.create_element_named("span");
+    xml.append_child(root, child).unwrap();
+    let svg = xml.create_element(QualName::new(None, ns!(svg), local_name!("svg")));
+    xml.append_child(root, svg).unwrap();
+
+    let mut doc = html();
+    let copy = doc.import(&xml, root, CopyDepth::Deep).unwrap();
+    let names: Vec<_> = std::iter::once(copy)
+        .chain(doc.descendants(copy))
+        .map(|id| match doc.node_kind(id) {
+            NodeKind::Element(element) => element.name.ns.clone(),
+            _ => unreachable!(),
+        })
+        .collect();
+    assert_eq!(names, [ns!(html), ns!(html), ns!(svg)]);
+    doc.check_invariants().unwrap();
+
+    let back = xml.import(&doc, copy, CopyDepth::Attributes).unwrap();
+    let NodeKind::Element(element) = xml.node_kind(back) else {
+        unreachable!()
+    };
+    assert_eq!(element.name.ns, ns!());
+    xml.check_invariants().unwrap();
+}
+
+#[test]
+fn invariants_catch_elements_in_the_other_kind_of_documents_no_namespace() {
+    let mut doc = html();
+    doc.create_element(plain("div"));
+    let error = doc.check_invariants().unwrap_err();
+    assert!(error.contains("not this document's"), "{error}");
+}

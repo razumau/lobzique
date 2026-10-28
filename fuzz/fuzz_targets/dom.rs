@@ -36,7 +36,7 @@ fuzz_target!(|ops: &[u8]| {
         let position = POSITIONS[(flags >> 1) as usize % POSITIONS.len()];
         let depth = CopyDepth::from_level(i32::from(flags >> 3) % 3);
         match kind % 16 {
-            0 => _ = doc.create_element(name("e")),
+            0 => _ = doc.create_element_named("e"),
             1 => _ = doc.create_element_named("svg:e"),
             2 => _ = doc.create_text("t".into()),
             3 => _ = doc.create_attribute(name("a"), Vec::new()),
