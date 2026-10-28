@@ -469,7 +469,7 @@ fn reduce(rule: usize, values: Vec<Value<'_>>) -> Result<Value<'_>, SyntaxError>
         // class: '.' IDENT
         21 => {
             next();
-            V::Condition(Condition::Class(unescape_identifier(token(next()))))
+            V::Condition(Condition::Class(unescape_identifier(token(next()))?))
         }
         // element_name: namespaced_ident | '*'
         22 => next(),
@@ -637,15 +637,15 @@ fn reduce(rule: usize, values: Vec<Value<'_>>) -> Result<Value<'_>, SyntaxError>
             _ => unreachable!(),
         },
         // attribute_id: HASH
-        64 => V::Condition(Condition::Id(unescape_identifier(token(next())))),
+        64 => V::Condition(Condition::Id(unescape_identifier(token(next()))?)),
         // attrib_val_0or1: eql_incl_dash (IDENT | STRING | NUMBER) | (empty)
         65..=67 => {
             let (V::Operator(operator), value) = (next(), token(next())) else {
                 unreachable!()
             };
             let value = match rule {
-                65 => unescape_identifier(value),
-                66 => unescape_string(value),
+                65 => unescape_identifier(value)?,
+                66 => unescape_string(value)?,
                 _ => value.into(),
             };
             V::AttributeTest(operator, value)
@@ -738,20 +738,20 @@ fn ruby_strip(text: &str) -> &str {
 }
 
 /// Nokogiri's `unescape_css_identifier`.
-pub fn unescape_identifier(text: &str) -> String {
+pub fn unescape_identifier(text: &str) -> Result<String, SyntaxError> {
     unescape(text, false)
 }
 
 /// Nokogiri's `unescape_css_string`, which also drops escaped newlines.
 /// The quotes stay.
-pub fn unescape_string(text: &str) -> String {
+pub fn unescape_string(text: &str) -> Result<String, SyntaxError> {
     unescape(text, true)
 }
 
 /// `gsub(/\\(?:([^0-9a-fA-F])|([0-9a-fA-F]{1,6})\s?)/)`: a code point from
 /// up to six hex digits and one optional whitespace character, or the
 /// escaped character itself.
-fn unescape(text: &str, in_string: bool) -> String {
+fn unescape(text: &str, in_string: bool) -> Result<String, SyntaxError> {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(backslash) = rest.find('\\') {
@@ -769,9 +769,15 @@ fn unescape(text: &str, in_string: bool) -> String {
                 .take_while(u8::is_ascii_hexdigit)
                 .count();
             let code = u32::from_str_radix(&after[..digits], 16).expect("hex digits");
-            // Ruby's pack('U') makes invalid UTF-8 for surrogates and raises
-            // past U+10FFFF
-            out.push(char::from_u32(code).unwrap_or(char::REPLACEMENT_CHARACTER));
+            // Ruby's pack('U') makes invalid UTF-8 for surrogates and past
+            // U+10FFFF, which Nokogiri fails on later, as it fails on NUL
+            let Some(c) = char::from_u32(code).filter(|&c| c != '\0') else {
+                return Err(SyntaxError(format!(
+                    "escape '\\{}' isn't a character",
+                    &after[..digits]
+                )));
+            };
+            out.push(c);
             let tail = &after[digits..];
             let space = tail
                 .chars()
@@ -787,5 +793,5 @@ fn unescape(text: &str, in_string: bool) -> String {
         }
     }
     out.push_str(rest);
-    out
+    Ok(out)
 }

@@ -30,7 +30,7 @@ module Differential
     # (ARCHITECTURE.md, departures). Only the oracle's are renamed, so the
     # same error from lobzique stays a failure.
     SELECTOR_ERRORS = {"Racc::ParseError" => "CSS::SyntaxError", "NoMethodError" => "CSS::SyntaxError",
-                       "ZeroDivisionError" => "CSS::SyntaxError"}.freeze
+                       "ZeroDivisionError" => "CSS::SyntaxError", "ArgumentError" => "CSS::SyntaxError"}.freeze
 
     Result = Data.define(:kase, :expected, :actual, :known)
 

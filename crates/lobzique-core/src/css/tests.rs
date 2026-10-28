@@ -278,8 +278,15 @@ fn prefixes_must_be_bound() {
 
 #[test]
 fn unescaping() {
-    assert_eq!(parser::unescape_identifier(r"a\31 b\.c"), "a1b.c");
-    assert_eq!(parser::unescape_string("'a\\\nb'"), "'ab'");
+    assert_eq!(parser::unescape_identifier(r"a\31 b\.c").unwrap(), "a1b.c");
+    assert_eq!(parser::unescape_string("'a\\\nb'").unwrap(), "'ab'");
+    // Nokogiri goes on with invalid UTF-8 or a NUL, and fails later
+    for selector in [r".\110000", r"#\D800", r"p[x=\0]", r"p[x='\dfff']"] {
+        assert!(
+            compile(selector, &options(&[Prefix::Global])).is_err(),
+            "{selector}"
+        );
+    }
 }
 
 #[test]
