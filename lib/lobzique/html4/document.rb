@@ -9,6 +9,11 @@ module Lobzique
         options[:save_with] ||= XML::Node::SaveOptions::DEFAULT_HTML
         super
       end
+
+      # lobzique: CSS::XPathVisitor::DoctypeConfig::HTML4 in Nokogiri
+      def xpath_doctype
+        :html4
+      end
     end
   end
 end

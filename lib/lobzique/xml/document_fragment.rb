@@ -64,6 +64,26 @@ module Lobzique
       # lobzique: to_xhtml and to_xml wait for native_write_to (plan.md,
       # phase 2 step 8)
 
+      def css(*args)
+        if children.any?
+          children.css(*args) # 'children' is a smell here
+        else
+          NodeSet.new(document)
+        end
+      end
+
+      def search(*rules)
+        rules, handler, ns, binds = extract_params(rules)
+
+        rules.inject(NodeSet.new(document)) do |set, rule|
+          set + if Searchable::LOOKS_LIKE_XPATH.match?(rule)
+            xpath(*[rule, ns, handler, binds].compact)
+          else
+            children.css(*[rule, ns, handler].compact) # 'children' is a smell here
+          end
+        end
+      end
+
       def errors
         document.errors
       end

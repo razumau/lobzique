@@ -7,6 +7,7 @@ pub mod dtd;
 pub mod namespace;
 pub mod node;
 pub mod text;
+pub mod xpath_context;
 
 use crate::XML;
 use magnus::{value::Lazy, Error, Module, RClass, Ruby};
@@ -36,5 +37,6 @@ pub fn init(ruby: &Ruby) -> Result<(), Error> {
     cdata::init(ruby)?;
     document_fragment::init(ruby)?;
     document::init(ruby)?;
+    xpath_context::init(ruby)?;
     Ok(())
 }

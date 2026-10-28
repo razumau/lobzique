@@ -23,7 +23,8 @@ Sanitizing user HTML is exactly that use. Build a Rust-based gem covering only w
 ## Scope
 
 In: HTML5 parsing of documents and fragments (html5ever); arena DOM with
-traversal and mutation; CSS selectors (Servo `selectors`); a serializer that
+traversal and mutation; CSS selectors in Nokogiri's dialect, compiled to
+XPath trees as Nokogiri compiles them to XPath strings; a serializer that
 matches Nokogiri::HTML5 byte for byte; a sanitizer with Rails' Full / Link /
 SafeList semantics.
 
@@ -54,7 +55,12 @@ fuzzing (see README). To add once there is real code, roughly by value:
    `-timeout`/`-rss_limit_mb` so slow or memory-hungry inputs fail. Done
    for parsing and serialization: both limits, deep-nesting tests on a
    small stack, and `-timeout` in CI (libFuzzer's default `-rss_limit_mb`
-   is 2 GB).
+   is 2 GB). CSS nests at most 32 parentheses deep. Selector evaluation
+   costs what the XPath costs, as in Nokogiri: nested `:has(…)` grows with
+   the document's size to the power of the depth, so the `css` fuzz target
+   evaluates only shallow selectors on small documents. The contract's
+   callers write their selectors in code; creek and mechanize interpolate
+   values from the document into theirs.
 3. **`cargo-deny`**: RustSec advisories, licenses, allowed sources.
    html5ever pulls in `tendril`, which is heavy on `unsafe` and has had
    advisories.
@@ -113,7 +119,17 @@ html5lib tokenizer inputs.
       `matches?` (CSS), and `namespace=`, `default_namespace=` and
       `add_namespace_definition` (adding namespace definitions).
    5. CSS: selectors, Nokogiri's dialect, custom pseudo-class handlers.
-   6. XPath subset (decision 2).
+      Done: `css`, `at_css`, `search`, `at`, `>`, `matches?`,
+      `ancestors(selector)` and `NodeSet#filter`. Nokogiri's CSS means
+      whatever the XPath it compiles to means (`a:first` is a position
+      among siblings, `node.css("div p")` stays inside `node`), so instead
+      of Servo's `selectors` the core ports Nokogiri's tokenizer, parser
+      tables and visitor and evaluates the XPath tree it builds as libxml2
+      would. The differential harness compares what 38 contract selectors
+      find in every case, WPT's selectors on their test document, and the
+      selectors of Nokogiri's visitor tests on its test page.
+   6. XPath subset (decision 2). The evaluator exists (step 5); this step
+      adds the parser for the subset, behind `XPathContext#evaluate`.
    7. HTML4 names on the HTML5 parser (decision 3).
    8. XHTML output (`native_write_to`) for premailer.
 
@@ -299,12 +315,14 @@ are in `inventory/raw/src`.
    input (the namespaces don't collide in seam mode). The pinned
    `Gemfile.lock` version is the oracle; bumping it is a reviewed change.
    - **Compared.** `to_html` bytes, plus a tree dump (node type, name,
-     namespace, attributes, text) that locates a difference. Selector and
-     XPath results get added as those land.
+     namespace, attributes, text) that locates a difference, and the paths
+     of what selectors find from the top node and its first element.
+     XPath results get added with the subset.
    - **Corpus.**
      - Every push: inputs from `test/fixtures` (WPT tree-construction and
        sanitizer `.dat`, html5lib tokenizer inputs, DOMPurify payloads,
-       Loofah, Nokogiri and Action Text assets).
+       Loofah, Nokogiri and Action Text assets, the selectors of WPT and of
+       Nokogiri's visitor tests).
      - A weekly job: a pinned Common Crawl sample, a byte range of one WARC
        file per entry, checked by SHA-256. It is downloaded, never
        committed. A divergence found there is minimized into a small case

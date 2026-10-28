@@ -37,9 +37,10 @@ and native halves of `XML::Node`. Every class follows the same path scheme.
 with `# lobzique:`. `grep -rn "lobzique:" lib` lists everything to recheck
 when the Nokogiri version in `Gemfile.lock` moves.
 
-**Not ported.**
-- `css/parser`, `tokenizer`, `xpath_visitor` and `css/node`: CSS is matched
-  natively instead of being translated to XPath.
+**Not ported to Ruby.**
+- `css/parser`, `tokenizer`, `xpath_visitor` and `css/node`: ported to the
+  core instead (`css`), so `Searchable` gets a compiled `CSS::Selector`
+  where Nokogiri gets an XPath string.
 - `html4/encoding_reader`: the HTML4 names use the HTML5 parser's encoding
   rules.
 - SAX, XSLT, Builder, Reader, Schema and RelaxNG.
@@ -160,8 +161,8 @@ What Nokogiri guarantees, and how lobzique keeps it:
 |---|---|---|---|
 | `Lobzique::Html5ever` | `parse(input, url, klass, **limits)`, `fragment(fragment, input, context, **limits)` and the `DEFAULT_MAX_*` limits | `Nokogiri::Gumbo` | built |
 | `XML::Namespace` | a node's namespace: `prefix`, `href` | same | built |
-| `XML::XPathContext` | `new(node)`, `evaluate(path, handler)` for the XPath subset | same | planned |
-| `CSS::Selector` | a compiled selector list: `search(node, include_self, resolved_handlers)` | none; Nokogiri compiles CSS to XPath | planned |
+| `XML::XPathContext` | `new(node)`, `node=`, `register_ns`, `register_variable`, `evaluate(path, handler)` | same | built for `CSS::Selector`; XPath strings raise `NotImplementedError` until the subset (step 6) |
+| `CSS::Selector` | `new(rule, prefixes:, doctype:, namespaces:, builtins:, first:)`: a selector list compiled for the implied XPath contexts of the searching class, as Nokogiri's `XPathVisitor` is configured | none; Nokogiri translates CSS into XPath strings | built |
 
 Each arrives with the phase 2 step that needs it (plan.md).
 
@@ -189,12 +190,12 @@ assemble it.
 | `html5::parse` | html5ever `TreeSink` into the arena: documents, fragments with a context node, `max_tree_depth`/`max_attributes`, quirks mode, errors; gumbo's text and CDATA nodes | built |
 | `html5::serialize` | `html_standard_serialize`, byte for byte with Nokogiri::HTML5 | built |
 | `xml::serialize` | `native_write_to` for `to_xhtml` | planned, late in phase 2 |
-| `css` | Servo `selectors` over the arena; `dialect` for Nokogiri's extensions (`[@attr]`, `:first`, …) | planned |
-| `xpath` | parser and evaluator for the location-path subset; everything else is an error naming the construct (plan.md decision 2) | planned |
+| `css` | Nokogiri's CSS front end, ported: `tokenizer` (rex rules in order), `parser` (racc's parse loop over `tables`, which `script/generate_css_tables` generates from Nokogiri's parser, and the grammar's actions), `translate` (`XPathVisitor`, building `xpath` trees where it writes strings) | built |
+| `xpath` | `ast` (expressions as trees, `and`/`or` as lists), `eval` (libxml2's evaluation: XPath 1.0 values and comparisons, node sets in document order, positions per step, custom calls answered in rounds); `XML::XPathContext` errors | built; the parser for the location-path subset (plan.md decision 2) comes with step 6 |
 
 **Names.**
 - Elements and attributes use html5ever's `QualName`, shared by the parser
-  and the selector engine, so names are UTF-8. Everything else (text,
+  and the XPath engine, so names are UTF-8. Everything else (text,
   attribute values, doctype fields) is bytes.
 - HTML elements are in the HTML namespace, following the HTML standard.
   `Node#namespace` shows that namespace as `nil`, as Nokogiri does.
@@ -215,10 +216,15 @@ assemble it.
 | a NodeSet after text is reparented | holds the original libxml2 node, which gets a new object, unlinked | holds the object, now pointing at the copy in the tree | a NodeSet holds objects, not nodes (`NodeSet` storage above) |
 | `native_content=` with an entity reference other than the predefined five | an entity reference node, which `to_html` can't serialize | text, as written | no entity reference nodes; `content=` escapes `&`, so only a direct call reaches this |
 | `create_element` with an `xmlns` key | a namespace definition | `NotImplementedError` | adding namespace definitions is out of scope |
-| names that aren't UTF-8 | kept as bytes | `ArgumentError` | names are atoms shared with the parser and selector engine; only `Node.new` can be given one |
-| CSS | Ruby parser → XPath → libxml2 | native selector engine behind `Searchable#css` | no XPath engine to compile to; `CSS.xpath_for` stays out of scope (decision 2) |
+| names that aren't UTF-8 | kept as bytes | `ArgumentError` | names are atoms shared with the parser and XPath engine; only `Node.new` can be given one |
+| CSS | Ruby parser → XPath string → libxml2 | the same parser and visitor in the core, building an XPath tree (`CSS::Selector`) that the core evaluates as libxml2 would; `Searchable#extract_params` takes a `CSS::Selector` for a query, not a handler | no XPath string parser for the visitor's output; `CSS.xpath_for` stays out of scope (decision 2) |
 | XPath | full XPath 1.0 in libxml2 | a native location-path subset behind the same `XPathContext` shape | decision 2 |
-| custom pseudo-class handlers | called per node from inside XPath evaluation | called once per pseudo-class with the candidate NodeSet, before matching; the id sets go into the match | no Ruby call while the arena is borrowed; the handlers in rails-dom-testing and Capybara filter sets either way |
+| custom pseudo-class handlers | called per node from inside XPath evaluation | called per node with the same arguments, but in rounds between evaluations: an evaluation that reaches an unanswered call counts it as an empty node set and notes it, the noted calls run with the arena released, and evaluation starts again until none are left | no Ruby call while the arena is borrowed; a handler may run for a few nodes Nokogiri wouldn't call it for, which only side effects can tell |
+| errors in the visitor | `Racc::ParseError` (`:nth-child(2x)`), `ZeroDivisionError` (`0n-1`), `NoMethodError` (`:foo(2n)`) | `CSS::SyntaxError` | the core has no Ruby errors to raise |
+| `XPath::SyntaxError` text | quotes the XPath Nokogiri built, in the message and `str1` | quotes the CSS rule; class, domain, code and level as Nokogiri's | there is no XPath string |
+| undefined namespace prefix | raised when libxml2 reaches the step | raised before evaluating | the same unless the step is never reached |
+| nested parentheses in CSS | unlimited | at most 32 deep, else `CSS::SyntaxError` | the tree is recursive to translate and evaluate, about 4 KB of stack a level; real selectors nest two or three deep |
+| CSS on HTML4 documents | names without a prefix match elements in no namespace, which is every element of an HTML4 parse | they match in any namespace, as in HTML5 documents | HTML4 names parse as HTML5 (decision 3), so `svg` has a namespace |
 | HTML4 names | libxml2's HTML4 parser and serializer | the HTML5 parser and serializer; `HTML5::Node`'s overrides apply to any `HTML4::Document` | decision 3 |
 | `Node#parse` / `in_context` | libxml2's HTML4 parser, even in HTML5 documents | the HTML5 fragment parser with the node as context | one parser |
 | parse error text | gumbo's, with line and column | html5ever's, with line only | different parsers; listed in `test/differential/known.yml` if compared |
@@ -244,8 +250,11 @@ assemble it.
   string, encoded into the document's encoding with `&#x…;` for unmappable
   characters.
 - **Search.** `node.css("p.x", handler)` → `Searchable#css` →
-  `CSS::Selector` (compiled once, cached) → the handler resolves custom
-  pseudo-classes → native `search` → ids → `wrap` → `NodeSet`.
+  `xpath_query_from_css_rule` → `CSS::Selector.new` (the core parses and
+  translates it for the class's `IMPLIED_XPATH_CONTEXTS`) →
+  `xpath_internal` → `XPathContext#evaluate(selector, handler)` → the core
+  evaluates, and handler calls run between rounds → ids → `wrap` →
+  `NodeSet`.
 
 ## Keeping the architecture honest
 
@@ -259,4 +268,5 @@ assemble it.
   module is included in a `…Nokogiri` and a `…Lobzique` test case, as in
   `test/xml/test_object_model.rb`. An assertion that fails only on Nokogiri
   is a wrong test, not a pass.
-- The differential harness compares whole documents (plan.md decision 6).
+- The differential harness compares whole documents and what selectors
+  find in them (plan.md decision 6).

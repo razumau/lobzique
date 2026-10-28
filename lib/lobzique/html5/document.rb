@@ -81,8 +81,12 @@ module Lobzique
         DocumentFragment.new(self, markup)
       end
 
-      # lobzique: to_xml waits for native_write_to (plan.md, phase 2 step 8),
-      # xpath_doctype for XPath (step 6)
+      # lobzique: CSS::XPathVisitor::DoctypeConfig::HTML5 in Nokogiri
+      def xpath_doctype
+        :html5
+      end
+
+      # lobzique: to_xml waits for native_write_to (plan.md, phase 2 step 8)
     end
   end
 end

@@ -15,6 +15,8 @@ class TestClassTree < Minitest::Test
   RENAMED = {"Lobzique::Html5ever" => "Nokogiri::Gumbo"}
   # Constants whose values differ by design
   OWN_VALUE = ["Lobzique::VERSION"]
+  # Ours, with no counterpart: compiled CSS, where Nokogiri has XPath strings
+  OWN = ["Lobzique::CSS::Selector"]
 
   def self.counterpart(path)
     RENAMED.reduce(path) { |p, (ours, theirs)| p.sub(/\A#{ours}\b/, theirs) }.sub(ROOT, "Nokogiri")
@@ -34,7 +36,7 @@ class TestClassTree < Minitest::Test
   def self.test_name(path) = "test_#{path.gsub("::", "__")}"
 
   each_constant(Lobzique) do |path, value|
-    next if OWN_VALUE.include?(path)
+    next if OWN_VALUE.include?(path) || OWN.include?(path)
 
     define_method(test_name(path)) do
       theirs = Object.const_get(self.class.counterpart(path))

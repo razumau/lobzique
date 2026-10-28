@@ -12,6 +12,25 @@ module Differential
     KNOWN = File.join(__dir__, "known.yml")
     ROOT_NAME = /\A(Nokogiri|Lobzique)::/
 
+    # Run on every case: the selectors runtime callers in the inventory use
+    # (inventory/contract.yml), and the parts of the dialect they rely on
+    SELECTORS = [
+      "*", "p", "a[href]", "img", "pre", "form", "input", "option", "title", "svg", "math",
+      "[data-trix-attachment]", "action-text-attachment[presentation=gallery]",
+      "div:has(action-text-attachment[presentation=gallery] + action-text-attachment[presentation=gallery])",
+      "h1, h2, h3, h4, h5, h6", "*[@style]", "*[@id]", "a[@href^='#']", "a, area",
+      "link[@rel='stylesheet']:not([@data-premailer='ignore']), style:not([@data-premailer='ignore'])",
+      "div p", "div > p", "p + p", "p ~ p", "body *", "table tr td", "li:nth-child(2n+1)",
+      "p:first", "td:last-child", "a:not([href])", ":root", "p:empty", "[class~=x]", "[lang|=en]",
+      "svg|svg", "* > text()", "p:contains('a')"
+    ].freeze
+
+    # Errors that only the translators raise differently: Nokogiri's
+    # visitor fails with Ruby errors where lobzique raises CSS::SyntaxError
+    # (ARCHITECTURE.md, departures)
+    SELECTOR_ERRORS = {"Racc::ParseError" => "CSS::SyntaxError", "NoMethodError" => "CSS::SyntaxError",
+                       "ZeroDivisionError" => "CSS::SyntaxError"}.freeze
+
     Result = Data.define(:kase, :expected, :actual, :known)
 
     attr_reader :counts, :failures, :stale
@@ -64,7 +83,8 @@ module Differential
         root::HTML5::DocumentFragment.parse(kase.input, context: kase.context || "body")
       end
       html = node.to_html
-      {html: html.b, encoding: html.encoding.name, tree: dump(root, node), queries: queries(node)}
+      {html: html.b, encoding: html.encoding.name, tree: dump(root, node), queries: queries(node),
+       selected: select(node, kase.selectors || SELECTORS)}
     rescue => e
       {error: "#{e.class.name.sub(ROOT_NAME, "")}: #{e.message}"}
     end
@@ -102,6 +122,21 @@ module Differential
         node.children.to_a.reverse_each { |child| stack << child }
       end
       lines
+    end
+
+    # What each selector finds from the top node and from its first element,
+    # as node paths, or the class of the error it raises.
+    def select(top, selectors)
+      element = top.children.find(&:element?)
+      selectors.flat_map do |selector|
+        [top, element].compact.map do |from|
+          found = from.css(selector).map(&:path).join(" ")
+          "#{selector} from #{from.name}: #{found}"
+        rescue => e
+          name = e.class.name.sub(ROOT_NAME, "")
+          "#{selector} from #{from.name}: raises #{SELECTOR_ERRORS.fetch(name, name)}"
+        end
+      end
     end
 
     def describe(root, node)
@@ -152,6 +187,11 @@ module Differential
         index = expected[:queries].zip(actual[:queries]).index { |a, b| a != b }
         out << "  node #{index + 1} answers differently:"
         out << "    nokogiri #{expected[:queries][index]}" << "    lobzique #{actual[:queries][index]}"
+      end
+      if expected[:tree] == actual[:tree] && expected[:selected] != actual[:selected]
+        expected[:selected].zip(actual[:selected]).reject { |a, b| a == b }.first(3).each do |a, b|
+          out << "  selects differently:" << "    nokogiri #{truncate(a, 300)}" << "    lobzique #{truncate(b, 300)}"
+        end
       end
       if expected[:encoding] != actual[:encoding]
         out << "  encoding: nokogiri #{expected[:encoding]}, lobzique #{actual[:encoding]}"

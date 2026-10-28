@@ -1,15 +1,16 @@
 # frozen_string_literal: true
 
 require "json"
+require "ripper"
 require "yaml"
 require_relative "warc"
 
 module Differential
   # One input to parse with both implementations. `context` is nil for a
   # document, or a fragment context in Nokogiri's string form ("body",
-  # "svg:path").
-  Case = Data.define(:id, :source, :kind, :input, :context, :note) do
-    def initialize(id:, source:, kind:, input:, context: nil, note: nil) = super
+  # "svg:path"). `selectors` replaces the harness's default selectors.
+  Case = Data.define(:id, :source, :kind, :input, :context, :note, :selectors) do
+    def initialize(id:, source:, kind:, input:, context: nil, note: nil, selectors: nil) = super
   end
 
   # Inputs for the differential harness (plan.md decision 6). Everything is
@@ -48,6 +49,8 @@ module Differential
       fixture_glob("wpt-sanitizer-api/*.dat").each { |path| each_dat(path, "wpt-sanitizer-api", &block) }
       fixture_glob("html5lib-tests/tokenizer/*.test").each { |path| each_tokenizer(path, &block) }
       each_dompurify(&block)
+      each_wpt_selector(&block)
+      each_nokogiri_selector(&block)
       %w[wpt-parsing/serializing-reference/*.html loofah/assets/*.html nokogiri/files/*.html].each do |glob|
         fixture_glob(glob).each do |path|
           yield Case.new(id: relative(path), source: glob[%r{\A[^/]+}], kind: :document, input: File.binread(path))
@@ -106,6 +109,81 @@ module Differential
       JSON.parse(File.read(path)).each_with_index do |test, index|
         yield Case.new(id: "dompurify/expect.json##{index + 1}", source: "dompurify",
           kind: :fragment, input: test.fetch("payload"), context: nil, note: test["title"])
+      end
+    end
+
+    # Every selector of WPT's Selectors API tests, valid or not, on their
+    # test document. selectors.js is JavaScript, so the double-quoted
+    # `selector:` literals are read out of it, never evaluated.
+    def each_wpt_selector
+      document = File.binread(File.join(FIXTURES, "wpt-selectors", "ParentNode-querySelector-All-content.html"))
+      source = File.read(File.join(FIXTURES, "wpt-selectors", "selectors.js"))
+      source.scan(/selector:\s*"((?:[^"\\]|\\.)*)"/).map { |(literal)| js_unescape(literal) }.uniq.each_with_index do |selector, index|
+        yield Case.new(id: "wpt-selectors/selectors.js##{index + 1}", source: "wpt-selectors",
+          kind: :document, input: document, note: selector, selectors: [selector])
+      end
+    end
+
+    # The selectors Nokogiri's visitor tests translate, on Nokogiri's HTML
+    # test page. Ripper reads the `assert_xpath(xpath, selector)` calls out of
+    # the test file without running it; selectors that aren't plain literals
+    # are left out.
+    def each_nokogiri_selector
+      document = File.binread(File.join(FIXTURES, "nokogiri", "files", "tlm.html"))
+      path = File.join(FIXTURES, "nokogiri", "css", "test_xpath_visitor.rb")
+      ruby_selectors(path).uniq.each_with_index do |selector, index|
+        yield Case.new(id: "#{relative(path)}##{index + 1}", source: "nokogiri-css",
+          kind: :document, input: document, note: selector, selectors: [selector])
+      end
+    end
+
+    def ruby_selectors(path)
+      source = File.read(path)
+      tokens = Ripper::Lexer.new(source).scan
+      arguments = []
+      walk = lambda do |node|
+        next unless node.is_a?(Array)
+
+        case node
+        in [:method_add_arg, [:fcall, [:@ident, "assert_xpath", _]], [:arg_paren, [:args_add_block, args, _]]]
+          arguments << args.last
+        in [:command, [:@ident, "assert_xpath", _], [:args_add_block, args, _]]
+          arguments << args.last
+        else
+        end
+        node.each { |child| walk[child] }
+      end
+      walk[Ripper.sexp(source)]
+      arguments.filter_map do |argument|
+        next unless argument in [:string_literal, [:string_content, [:@tstring_content, raw, [line, column]]]]
+
+        opening = tokens.find do |token|
+          token.event == :on_tstring_beg && token.pos == [line, column - token.tok.length]
+        end
+        ruby_unescape(raw, opening&.tok)
+      end
+    end
+
+    # A literal's source as the string it makes, for the quotes the visitor
+    # tests use
+    def ruby_unescape(raw, opening)
+      case opening
+      when '"' then "\"#{raw}\"".undump
+      when "'", "%q{" then raw.gsub(/\\([\\'{}])/, '\1')
+      end
+    rescue RuntimeError
+      nil
+    end
+
+    def js_unescape(literal)
+      literal.gsub(/\\(u\h{4}|x\h{2}|.)/m) do
+        escape = Regexp.last_match(1)
+        case escape[0]
+        when "u", "x" then escape[1..].hex.chr(Encoding::UTF_8)
+        when "n" then "\n"
+        when "t" then "\t"
+        else escape
+        end
       end
     end
 

@@ -4,5 +4,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod css;
 pub mod dom;
 pub mod html5;
+pub mod xpath;

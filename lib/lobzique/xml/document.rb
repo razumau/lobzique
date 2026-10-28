@@ -121,11 +121,19 @@ module Lobzique
       end
       alias_method :<<, :add_child
 
+      # lobzique: Nokogiri returns CSS::XPathVisitor::DoctypeConfig::XML,
+      # which is this symbol; CSS::Selector takes it
+      def xpath_doctype
+        :xml
+      end
+
       def deconstruct_keys(keys)
         {root: root}
       end
 
       private
+
+      IMPLIED_XPATH_CONTEXTS = ["//"].freeze # :nodoc:
 
       def inspect_attributes
         [:name, :children]

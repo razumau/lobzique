@@ -299,6 +299,10 @@ module Lobzique
       alias_method :set_attribute, :[]=
       alias_method :has_attribute?, :key?
 
+      def matches?(selector)
+        ancestors.last.search(selector).include?(self)
+      end
+
       def fragment(tags)
         document.related_class("DocumentFragment").new(document, tags, self)
       end
@@ -531,6 +535,8 @@ module Lobzique
       def inspect_attributes
         [:name, :namespace, :attribute_nodes, :children]
       end
+
+      IMPLIED_XPATH_CONTEXTS = [".//"].freeze
 
       def add_child_node_and_reparent_attrs(node)
         add_child_node(node)

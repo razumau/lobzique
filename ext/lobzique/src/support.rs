@@ -5,8 +5,8 @@
 
 use magnus::{
     prelude::*,
-    rb_sys::{protect, AsRawValue, FromRawValue},
-    Error, KwArgs, RClass, RString, Ruby, Value,
+    rb_sys::{protect, AsRawId, AsRawValue, FromRawValue},
+    Error, KwArgs, RArray, RClass, RString, Ruby, Value,
 };
 
 /// Ruby's `rb_obj_call_init`: runs `initialize` with the arguments and block
@@ -21,6 +21,24 @@ pub fn call_initialize(object: Value, args: &[Value]) -> Result<(), Error> {
         rb_sys::Qnil as rb_sys::VALUE
     })?;
     Ok(())
+}
+
+/// Ruby's `rb_apply`: calls `method` on `receiver`, private or not, as
+/// `rb_funcall2` does, with the elements of `arguments`. An Array keeps the
+/// arguments where the GC sees them; magnus has no call that takes one.
+pub fn apply(
+    ruby: &Ruby,
+    receiver: Value,
+    method: &str,
+    arguments: RArray,
+) -> Result<Value, Error> {
+    let id = ruby.intern(method).as_raw();
+    // SAFETY: `receiver` and `arguments` are live values on the stack, and
+    // `protect` turns an exception raised by the method into an `Err`.
+    let result =
+        protect(|| unsafe { rb_sys::rb_apply(receiver.as_raw(), id, arguments.as_raw()) })?;
+    // SAFETY: `rb_apply` returns a live value.
+    Ok(unsafe { Value::from_raw(result) })
 }
 
 /// Yields the new object to the constructor's block, if it was given one.

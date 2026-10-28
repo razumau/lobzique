@@ -67,8 +67,29 @@ module Lobzique
         XML::Node.instance_method(:serialize).bind_call(self, options, &block)
       end
 
-      # lobzique: extract_params comes with the search methods it serves
-      # (plan.md, phase 2 step 5)
+      def extract_params(params) # :nodoc:
+        handler = params.find do |param|
+          # lobzique: as in Searchable#extract_params
+          ![Hash, String, Symbol, CSS::Selector].include?(param.class)
+        end
+        params -= [handler] if handler
+
+        hashes = []
+        while Hash === params.last || params.last.nil?
+          hashes << params.pop
+          break if params.empty?
+        end
+        ns, binds = hashes.reverse
+
+        ns ||=
+          begin
+            ns = {}
+            children.each { |child| ns.merge!(child.namespaces) }
+            ns
+          end
+
+        [params, handler, ns, binds]
+      end
     end
   end
 end

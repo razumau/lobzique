@@ -160,6 +160,21 @@ impl Document {
         ordering
     }
 
+    /// Sorts nodes into document order and drops duplicates, as libxml2
+    /// keeps XPath node sets. Nodes of different trees go by their roots'
+    /// ids, so the order stays total.
+    pub fn sort_in_document_order(&self, nodes: &mut Vec<NodeId>) {
+        let root = |id: NodeId| self.ancestors(id).last().unwrap_or(id);
+        let mut keyed: Vec<(NodeId, NodeId)> = nodes.iter().map(|&id| (root(id), id)).collect();
+        keyed.sort_by(|&(a_root, a), &(b_root, b)| {
+            a_root
+                .cmp(&b_root)
+                .then_with(|| self.document_order(a, b).unwrap_or(Ordering::Equal))
+        });
+        keyed.dedup_by_key(|&mut (_, id)| id);
+        *nodes = keyed.into_iter().map(|(_, id)| id).collect();
+    }
+
     /// [`Document::document_order`] by following links, with the number of
     /// links followed.
     pub(super) fn walk_order(&self, a: NodeId, b: NodeId) -> (Option<Ordering>, usize) {

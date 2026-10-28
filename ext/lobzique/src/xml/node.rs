@@ -577,7 +577,7 @@ pub fn wrap_all(ruby: &Ruby, document: Value, ids: Vec<NodeId>) -> Result<RArray
     Ok(nodes)
 }
 
-static NODE_SET: Lazy<RClass> = Lazy::new(|ruby| {
+pub static NODE_SET: Lazy<RClass> = Lazy::new(|ruby| {
     ruby.get_inner(&XML)
         .const_get("NodeSet")
         .expect("lib/lobzique/xml/node_set.rb defines XML::NodeSet")

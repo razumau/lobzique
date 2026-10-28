@@ -121,6 +121,36 @@ module Lobzique
 
       alias_method :<<, :push
 
+      def css(*args)
+        rules, handler, ns, _ = extract_params(args)
+        paths = css_rules_to_xpath(rules, ns)
+
+        inject(NodeSet.new(document)) do |set, node|
+          set + xpath_internal(node, paths, handler, ns, nil)
+        end
+      end
+
+      def xpath(*args)
+        paths, handler, ns, binds = extract_params(args)
+
+        inject(NodeSet.new(document)) do |set, node|
+          set + xpath_internal(node, paths, handler, ns, binds)
+        end
+      end
+
+      def at(*args)
+        if args.length == 1 && args.first.is_a?(Numeric)
+          return self[args.first]
+        end
+
+        super
+      end
+      alias_method :%, :at
+
+      def filter(expr)
+        find_all { |node| node.matches?(expr) }
+      end
+
       # lobzique: native in Nokogiri, which also calls each node's #unlink
       def unlink
         each { |node| node.unlink unless node.is_a?(XML::Namespace) }
@@ -261,6 +291,8 @@ module Lobzique
       def deconstruct
         to_a
       end
+
+      IMPLIED_XPATH_CONTEXTS = [".//", "self::"].freeze # :nodoc:
 
       private
 
