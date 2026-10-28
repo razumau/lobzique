@@ -219,6 +219,18 @@ module NodeReparentingContract
     assert_equal "Could not reparent node", error.message
   end
 
+  def test_text_next_to_itself_is_unlinked
+    [:add_previous_sibling, :add_next_sibling].each do |method|
+      doc = root::HTML5("<p>a<b>x</b>c</p>")
+      paragraph = at(doc, "p")
+      text = paragraph.children.first
+      text.public_send(method, text)
+      assert_nil text.parent, method
+      assert_equal "a", text.content
+      assert_equal "<b>x</b>c", paragraph.inner_html
+    end
+  end
+
   def test_cycles_are_refused
     doc = document
     div, i = at(doc, "div"), at(doc, "i")

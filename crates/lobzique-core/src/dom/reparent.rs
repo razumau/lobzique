@@ -84,6 +84,7 @@ impl Document {
             _ => self.parent(pivot),
         };
         let node_type = source.as_deref().unwrap_or(self).node_type(node);
+        let is_self = source.is_none() && pivot == node;
         if let Some(parent) = parent {
             if !may_contain(self.node_type(parent), node_type) {
                 return Err(ReparentError::NotAllowed);
@@ -112,6 +113,12 @@ impl Document {
         match source {
             Some(source) => source.detach(node),
             None => self.detach(node),
+        }
+        if is_self && matches!(position, Position::Before | Position::After) {
+            // Text next to itself: Nokogiri links the copy beside the
+            // unlinked original, outside any tree, and siblings here need a
+            // parent, so the copy stays detached
+            return Ok(inserted);
         }
         if position != Position::LastChild && self.parent(pivot).is_none() {
             return Err(ReparentError::Refused);

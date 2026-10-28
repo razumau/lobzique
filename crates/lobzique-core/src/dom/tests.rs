@@ -912,3 +912,16 @@ fn references_end_at_the_first_semicolon_before_another_ampersand() {
     doc.set_content(p, b"&am&amp;&#65&#66;&;&".to_vec());
     assert_eq!(doc.content(p), Some(b"&am&&#65B&;&".to_vec()));
 }
+
+#[test]
+fn text_put_next_to_itself_is_left_detached_as_a_copy() {
+    for position in [Position::Before, Position::After] {
+        let (mut doc, p, _, [a, b, ..]) = paragraph();
+        let copy = doc.reparent(a, position, a, false).unwrap();
+        assert_ne!(copy, a);
+        assert_eq!((doc.parent(a), doc.parent(copy)), (None, None));
+        assert_eq!(text(&doc, copy), b"a");
+        assert_eq!(doc.first_child(p), Some(b));
+        doc.check_invariants().unwrap();
+    }
+}
