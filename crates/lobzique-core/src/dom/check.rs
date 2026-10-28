@@ -27,7 +27,26 @@ impl Document {
                 _ => {}
             }
         }
-        self.check_acyclic()
+        self.check_acyclic()?;
+        self.check_order()
+    }
+
+    /// Document order numbered by comparisons is what numbering now gives.
+    fn check_order(&self) -> Result<(), String> {
+        let Some(order) = self.order.get() else {
+            return Ok(());
+        };
+        let current = self.number_nodes();
+        match order
+            .iter()
+            .zip(&current)
+            .position(|(kept, now)| kept != now)
+        {
+            Some(index) => Err(format!(
+                "the kept document order is stale at node index {index}"
+            )),
+            None => Ok(()),
+        }
     }
 
     fn check_children(&self, id: NodeId, listed: &mut [bool]) -> Result<(), String> {

@@ -925,3 +925,64 @@ fn text_put_next_to_itself_is_left_detached_as_a_copy() {
         doc.check_invariants().unwrap();
     }
 }
+
+#[test]
+fn document_order_from_walking_and_numbering_agree() {
+    let (mut doc, _, [id, _], [_, b, ..]) = paragraph();
+    let inner = doc.create_element(html_name("em"));
+    doc.append_child(b, inner).unwrap();
+    attribute(&mut doc, inner, plain("title"), "t");
+    let loose = doc.create_element(html_name("q"));
+    let loose_child = doc.create_text("q".into());
+    doc.append_child(loose, loose_child).unwrap();
+    doc.create_attribute(plain("x"), Vec::new());
+    doc.detach(id);
+
+    let numbers = doc.number_nodes();
+    for a in doc.node_ids() {
+        for b in doc.node_ids() {
+            let (a_number, b_number) = (numbers[a.index()], numbers[b.index()]);
+            let numbered = (a_number.0 == b_number.0).then(|| a_number.1.cmp(&b_number.1));
+            assert_eq!(doc.walk_order(a, b).0, numbered, "{a:?} {b:?}");
+        }
+    }
+}
+
+#[test]
+fn sorting_siblings_in_document_order_is_not_quadratic() {
+    // Comparing by walking siblings alone would take minutes here
+    let width = if cfg!(miri) { 300 } else { 200_000 };
+    let mut doc = html();
+    let parent = doc.create_element(html_name("ul"));
+    doc.append_child(NodeId::DOCUMENT, parent).unwrap();
+    for _ in 0..width {
+        let child = doc.create_element(html_name("li"));
+        doc.append_child(parent, child).unwrap();
+    }
+    let in_order: Vec<_> = doc.children(parent).collect();
+    // A permutation, since 99991 is a prime that doesn't divide the width
+    let mut items: Vec<_> = (0..width).map(|i| in_order[i * 99_991 % width]).collect();
+    items.sort_by(|&a, &b| doc.document_order(a, b).unwrap());
+    assert_eq!(items, in_order);
+    assert!(doc.order.get().is_some(), "comparisons numbered the nodes");
+    doc.check_invariants().unwrap();
+
+    doc.detach(in_order[0]);
+    assert!(doc.order.get().is_none(), "a change drops the numbers");
+    assert_eq!(doc.document_order(in_order[0], in_order[1]), None);
+}
+
+#[test]
+fn invariants_catch_stale_document_order() {
+    let error = corrupted(|doc, [a, b, c]| {
+        doc.order.get_or_init(|| doc.number_nodes());
+        // Swapped without going through link, which would drop the numbers
+        doc.node_mut(a).first_child = Some(c);
+        doc.node_mut(a).last_child = Some(b);
+        doc.node_mut(c).previous_sibling = None;
+        doc.node_mut(c).next_sibling = Some(b);
+        doc.node_mut(b).previous_sibling = Some(c);
+        doc.node_mut(b).next_sibling = None;
+    });
+    assert!(error.contains("stale"), "{error}");
+}

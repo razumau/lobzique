@@ -138,53 +138,89 @@ impl Document {
     /// `xmlXPathCmpNodes` decides it: an attribute comes after its element
     /// and before the element's children, attributes in their element's
     /// order. `None` for nodes in different trees.
+    ///
+    /// Comparisons walk the tree until they have cost as much as numbering
+    /// every node once, and then use those numbers until the tree changes,
+    /// so sorting n nodes stays O(n log n) however wide the tree is.
     pub fn document_order(&self, a: NodeId, b: NodeId) -> Option<Ordering> {
         if a == b {
             return Some(Ordering::Equal);
         }
-        // Each node as the position of its tree node, then of the attribute
-        let key = |id: NodeId| match self.node_kind(id) {
-            NodeKind::Attribute(_) => match self.parent(id) {
-                Some(element) => {
-                    let index = self.attributes(element).iter().position(|&a| a == id);
-                    (element, index)
-                }
-                None => (id, None),
-            },
+        if let Some(order) = self.order.get() {
+            if let (Some(a), Some(b)) = (order.get(a.index()), order.get(b.index())) {
+                return (a.0 == b.0).then(|| a.1.cmp(&b.1));
+            }
+        }
+        let (ordering, cost) = self.walk_order(a, b);
+        let walked = self.order_walked.get().saturating_add(cost);
+        self.order_walked.set(walked);
+        if walked >= self.nodes.len() {
+            self.order.get_or_init(|| self.number_nodes());
+        }
+        ordering
+    }
+
+    /// [`Document::document_order`] by following links, with the number of
+    /// links followed.
+    pub(super) fn walk_order(&self, a: NodeId, b: NodeId) -> (Option<Ordering>, usize) {
+        // Each node as its tree node, and for an attribute its index there
+        let key = |id: NodeId| match (self.node_kind(id), self.parent(id)) {
+            (NodeKind::Attribute(_), Some(element)) => {
+                let index = self.attributes(element).iter().position(|&a| a == id);
+                (element, index)
+            }
             _ => (id, None),
         };
-        let ((a, a_attribute), (b, b_attribute)) = (key(a), key(b));
+        let ((mut a, a_attribute), (mut b, b_attribute)) = (key(a), key(b));
         if a == b {
-            return Some(a_attribute.cmp(&b_attribute));
+            return (Some(a_attribute.cmp(&b_attribute)), 0);
         }
-        let lineage = |id: NodeId| {
-            let mut lineage: Vec<_> = std::iter::once(id).chain(self.ancestors(id)).collect();
-            lineage.reverse();
-            lineage
+        let (a_depth, b_depth) = (self.ancestors(a).count(), self.ancestors(b).count());
+        let mut cost = a_depth + b_depth;
+        let lift = |mut id: NodeId, steps: usize| {
+            for _ in 0..steps {
+                id = self.parent(id).expect("counted as an ancestor");
+            }
+            id
         };
-        let (a_lineage, b_lineage) = (lineage(a), lineage(b));
-        if a_lineage[0] != b_lineage[0] {
-            return None;
-        }
-        let shared = a_lineage
-            .iter()
-            .zip(&b_lineage)
-            .take_while(|(a, b)| a == b)
-            .count();
-        let (Some(&a_branch), Some(&b_branch)) = (a_lineage.get(shared), b_lineage.get(shared))
-        else {
+        a = lift(a, a_depth.saturating_sub(b_depth));
+        b = lift(b, b_depth.saturating_sub(a_depth));
+        if a == b {
             // One is an ancestor of the other, and comes first
-            return Some(a_lineage.len().cmp(&b_lineage.len()));
-        };
-        let b_follows = std::iter::successors(self.next_sibling(a_branch), |&sibling| {
-            self.next_sibling(sibling)
-        })
-        .any(|sibling| sibling == b_branch);
-        Some(if b_follows {
-            Ordering::Less
-        } else {
-            Ordering::Greater
-        })
+            return (Some(a_depth.cmp(&b_depth)), cost);
+        }
+        loop {
+            match (self.parent(a), self.parent(b)) {
+                (Some(a_parent), Some(b_parent)) if a_parent == b_parent => break,
+                (Some(a_parent), Some(b_parent)) => (a, b) = (a_parent, b_parent),
+                _ => return (None, cost),
+            }
+        }
+        let mut sibling = self.next_sibling(a);
+        while let Some(next) = sibling {
+            cost += 1;
+            if next == b {
+                return (Some(Ordering::Less), cost);
+            }
+            sibling = self.next_sibling(next);
+        }
+        (Some(Ordering::Greater), cost)
+    }
+
+    /// Every node's tree root and position in that tree, in document order.
+    pub(super) fn number_nodes(&self) -> Vec<(NodeId, u32)> {
+        let mut order = vec![(NodeId::DOCUMENT, 0); self.nodes.len()];
+        for root in self.node_ids().filter(|&id| self.parent(id).is_none()) {
+            // No more than the arena's node count, which fits in a u32
+            let mut position = 0;
+            for node in std::iter::once(root).chain(self.descendants(root)) {
+                for &id in std::iter::once(&node).chain(self.attributes(node)) {
+                    order[id.index()] = (root, position);
+                    position += 1;
+                }
+            }
+        }
+        order
     }
 
     pub fn append_child(&mut self, parent: NodeId, child: NodeId) -> Result<(), HierarchyError> {
@@ -225,6 +261,7 @@ impl Document {
             return Err(HierarchyError::NotAnElement);
         }
         self.detach(attribute);
+        self.tree_changed();
         self.node_mut(attribute).parent = Some(element);
         if let NodeKind::Element(e) = &mut self.node_mut(element).kind {
             e.attributes.push(attribute);
@@ -238,6 +275,7 @@ impl Document {
         let Some(parent) = self.node(id).parent else {
             return;
         };
+        self.tree_changed();
         if matches!(self.node_kind(id), NodeKind::Attribute(_)) {
             if let NodeKind::Element(element) = &mut self.node_mut(parent).kind {
                 element.attributes.retain(|&a| a != id);
@@ -257,6 +295,12 @@ impl Document {
             Some(next) => self.node_mut(next).previous_sibling = previous,
             None => self.node_mut(parent).last_child = previous,
         }
+    }
+
+    /// Drops the document order that comparisons built.
+    fn tree_changed(&mut self) {
+        self.order.take();
+        *self.order_walked.get_mut() = 0;
     }
 
     fn attribute_sibling(
@@ -319,6 +363,7 @@ impl Document {
 
     /// Links a detached node between two adjacent children of `parent`.
     fn link(&mut self, id: NodeId, parent: NodeId, previous: Option<NodeId>, next: Option<NodeId>) {
+        self.tree_changed();
         let node = self.node_mut(id);
         node.parent = Some(parent);
         node.previous_sibling = previous;

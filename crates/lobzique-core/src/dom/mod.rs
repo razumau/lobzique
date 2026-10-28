@@ -29,6 +29,7 @@ pub use text::encode_special_chars;
 pub use tree::{Ancestors, Children, Descendants, HierarchyError};
 
 use node::Node;
+use std::cell::{Cell, OnceCell};
 use std::mem::size_of;
 use std::num::NonZeroU32;
 
@@ -68,6 +69,11 @@ pub struct Document {
     nodes: Vec<Node>,
     /// libxml2's `doc->encoding`: a label, kept as given.
     encoding: Option<Vec<u8>>,
+    /// Each node's tree root and position in that tree, built once
+    /// comparisons have walked as many links as there are nodes, and
+    /// dropped when the tree changes (`tree::document_order`).
+    order: OnceCell<Vec<(NodeId, u32)>>,
+    order_walked: Cell<usize>,
 }
 
 impl Document {
@@ -76,6 +82,8 @@ impl Document {
             kind,
             nodes: vec![Node::new(NodeKind::Document)],
             encoding: None,
+            order: OnceCell::new(),
+            order_walked: Cell::new(0),
         }
     }
 
@@ -253,6 +261,10 @@ impl Document {
     pub fn heap_size(&self) -> usize {
         self.nodes.capacity() * size_of::<Node>()
             + self.encoding.as_ref().map_or(0, Vec::capacity)
+            + self
+                .order
+                .get()
+                .map_or(0, |order| order.capacity() * size_of::<(NodeId, u32)>())
             + self
                 .nodes
                 .iter()
