@@ -555,7 +555,7 @@ fn nth(nth: &Nth, child: bool, last: bool) -> Result<Expr> {
             Expr::Number(1.0),
         ),
     };
-    let modulo_is_zero = |expr, modulus: i64| {
+    let modulo_is_zero = |expr, modulus: i128| {
         Expr::compare(
             Comparison::Equal,
             Expr::arithmetic(Arithmetic::Modulo, expr, Expr::Number(modulus as f64)),
@@ -578,7 +578,7 @@ fn nth(nth: &Nth, child: bool, last: bool) -> Result<Expr> {
     Ok(Expr::And(vec![bound, modulo_is_zero(offset, a.abs())]))
 }
 
-fn read_a_and_positive_b(nth: &Nth) -> Result<(i64, i64)> {
+fn read_a_and_positive_b(nth: &Nth) -> Result<(i128, i128)> {
     let a = ruby_to_i(&nth.a);
     match nth.operator.trim() {
         "+" => Ok((a, ruby_to_i(&nth.b))),
@@ -592,7 +592,7 @@ fn read_a_and_positive_b(nth: &Nth) -> Result<(i64, i64)> {
 }
 
 /// Ruby's `%` on integers, whose result takes the divisor's sign.
-fn ruby_modulo(x: i64, divisor: i64) -> i64 {
+fn ruby_modulo(x: i128, divisor: i128) -> i128 {
     let remainder = x.wrapping_rem(divisor);
     if remainder != 0 && (remainder < 0) != (divisor < 0) {
         remainder + divisor
@@ -601,24 +601,36 @@ fn ruby_modulo(x: i64, divisor: i64) -> i64 {
     }
 }
 
-/// Ruby's `String#to_i`: leading whitespace, a sign, digits, and nothing
-/// for anything else.
-fn ruby_to_i(text: &str) -> i64 {
-    let text = text.trim_start();
+/// Ruby's `String#to_i`: leading whitespace, a sign, then digits that
+/// single underscores may separate, and nothing for anything else. Past
+/// i128, where Ruby has bignums, it saturates.
+fn ruby_to_i(text: &str) -> i128 {
+    let text = text.trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r']);
     let (sign, digits) = match text.as_bytes().first() {
         Some(b'-') => (-1, &text[1..]),
         Some(b'+') => (1, &text[1..]),
         _ => (1, text),
     };
-    let end = digits
-        .bytes()
-        .position(|b| !b.is_ascii_digit())
-        .unwrap_or(digits.len());
-    sign * digits[..end].parse::<i64>().unwrap_or(0)
+    let mut value: i128 = 0;
+    let mut bytes = digits.bytes().peekable();
+    let mut started = false;
+    while let Some(byte) = bytes.next() {
+        match byte {
+            b'0'..=b'9' => {
+                started = true;
+                value = value
+                    .saturating_mul(10)
+                    .saturating_add(i128::from(byte - b'0'));
+            }
+            b'_' if started && bytes.peek().is_some_and(u8::is_ascii_digit) => {}
+            _ => break,
+        }
+    }
+    sign * value
 }
 
 /// `.to_i` on a function's first argument, as `:nth-child(3)` takes it.
-fn to_i(argument: Option<&Argument>) -> Result<i64> {
+fn to_i(argument: Option<&Argument>) -> Result<i128> {
     match argument {
         None => Ok(0),
         Some(Argument::Number(text) | Argument::String(text) | Argument::Ident(text)) => {

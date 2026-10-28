@@ -96,6 +96,13 @@ fn positions_count_along_each_step() {
     assert_eq!(select(&document, "p:nth-child(2)"), ["b"]);
     assert_eq!(select(&document, "p:nth-child(odd)"), ["a"]);
     assert_eq!(select(&document, "p:nth-last-child(1)"), ["c"]);
+    // integers as Ruby reads them: bignums, and underscores between digits
+    assert_eq!(
+        select(&document, "p:nth-child(99999999999999999999n+1)"),
+        ["a"]
+    );
+    assert_eq!(select(&document, "p:nth-child(2n-1_0)"), ["b", "c"]);
+    assert_eq!(select(&document, "p:nth-child(2n-1__0)"), ["a"]);
     // `self::` after `+` always counts 1
     assert_eq!(select(&document, "p + p:first"), ["b"]);
     assert_eq!(select(&document, "p[2]"), ["b"]);
