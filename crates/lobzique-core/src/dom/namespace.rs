@@ -28,6 +28,13 @@ impl<'a> From<&'a NamespaceDefinition> for NamespaceRef<'a> {
     }
 }
 
+/// `prefix:local` split at the first colon, as libxml2's `xmlSplitQName2`
+/// splits it: `None` when either side would be empty.
+pub(super) fn split_qualified_name(name: &str) -> Option<(&str, &str)> {
+    name.split_once(':')
+        .filter(|(prefix, local)| !prefix.is_empty() && !local.is_empty())
+}
+
 /// libxml2 binds the `xml` prefix in every document, with no definition.
 const XML: NamespaceRef<'static> = NamespaceRef {
     prefix: Some("xml"),

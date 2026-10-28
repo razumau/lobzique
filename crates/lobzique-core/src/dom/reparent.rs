@@ -2,6 +2,7 @@
 //! where, the copies made of text and of nodes from other documents, text
 //! merging, and the namespace fixes afterwards (`relink_namespace`).
 
+use super::namespace::split_qualified_name;
 use super::{CopyDepth, Document, NodeId, NodeKind, NodeType, QualName};
 use html5ever::{LocalName, Namespace, Prefix};
 use std::fmt;
@@ -245,10 +246,10 @@ impl Document {
         let Some(name) = self.local_name(id) else {
             return;
         };
-        let Some((prefix, local)) = name.split_once(':') else {
+        let Some((prefix, local)) = split_qualified_name(name) else {
             return;
         };
-        if prefix.is_empty() || (!is_element && prefix == "xmlns") {
+        if !is_element && prefix == "xmlns" {
             return;
         }
         let Some(namespace) = self.search_namespace(id, prefix.as_bytes()) else {

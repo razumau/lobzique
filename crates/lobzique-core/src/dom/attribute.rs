@@ -2,6 +2,7 @@
 //! attribute readers do. Names are compared as bytes, since Ruby hands them
 //! over in any encoding.
 
+use super::namespace::split_qualified_name;
 use super::{Attribute, Document, NodeId, NodeKind, QualName};
 use html5ever::{ns, LocalName, Namespace, Prefix};
 use std::iter;
@@ -61,21 +62,18 @@ impl Document {
     }
 
     /// Nokogiri's `Node#[]=`, libxml2's `xmlSetProp`: a name with a colon
-    /// is `prefix:local` when the prefix is in scope and otherwise the
-    /// whole name of an attribute in no namespace. An existing attribute
-    /// keeps its node and gets the new value. `None` for anything but an
-    /// element.
+    /// is `prefix:local` when the prefix is in scope and neither side is
+    /// empty, and otherwise the whole name of an attribute in no namespace.
+    /// An existing attribute keeps its node and gets the new value. `None`
+    /// for anything but an element.
     pub fn set_attribute(&mut self, element: NodeId, name: &str, value: Vec<u8>) -> Option<NodeId> {
         if !matches!(self.node_kind(element), NodeKind::Element(_)) {
             return None;
         }
-        let namespace = name
-            .split_once(':')
-            .filter(|(prefix, _)| !prefix.is_empty())
-            .and_then(|(prefix, local)| {
-                let namespace = self.search_namespace(element, prefix.as_bytes())?;
-                Some((prefix, local, Namespace::from(namespace.href)))
-            });
+        let namespace = split_qualified_name(name).and_then(|(prefix, local)| {
+            let namespace = self.search_namespace(element, prefix.as_bytes())?;
+            Some((prefix, local, Namespace::from(namespace.href)))
+        });
         let name = match namespace {
             Some((prefix, local, href)) => {
                 QualName::new(Some(Prefix::from(prefix)), href, LocalName::from(local))

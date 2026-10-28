@@ -865,3 +865,30 @@ fn roots_and_internal_subsets() {
     assert_eq!(xml.create_internal_subset(doctype), None);
     xml.check_invariants().unwrap();
 }
+
+#[test]
+fn names_with_an_empty_side_of_the_colon_are_not_qualified() {
+    let mut doc = html();
+    let a = doc.create_element(html_name("a"));
+    doc.append_child(NodeId::DOCUMENT, a).unwrap();
+    doc.define_namespace(a, Some(Prefix::from("xlink")), ns!(xlink));
+    for name in ["xlink:", ":href"] {
+        let attribute = doc.set_attribute(a, name, b"v".to_vec()).unwrap();
+        let NodeKind::Attribute(attribute) = doc.node_kind(attribute) else {
+            unreachable!()
+        };
+        assert_eq!(attribute.name, plain(name), "{name}");
+    }
+
+    // Reparenting resolves prefixes the same way
+    let svg = doc.create_element(QualName::new(None, ns!(svg), local_name!("svg")));
+    let g = doc.create_element(QualName::new(None, ns!(svg), local_name!("g")));
+    doc.append_child(svg, g).unwrap();
+    let trailing = attribute(&mut doc, g, plain("xlink:"), "y");
+    doc.reparent(a, Position::LastChild, svg, false).unwrap();
+    let NodeKind::Attribute(attribute) = doc.node_kind(trailing) else {
+        unreachable!()
+    };
+    assert_eq!(attribute.name, plain("xlink:"));
+    doc.check_invariants().unwrap();
+}

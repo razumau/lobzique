@@ -469,6 +469,17 @@ module NodeReparentingContract
     assert_equal "<g><rect></rect><circle></circle></g>", g.to_html
   end
 
+  def test_names_with_an_empty_side_of_the_colon_are_not_prefixed
+    doc = root::HTML5(%(<svg><a xlink:href=x></a></svg><svg><g xlink:=y></g></svg>))
+    first, second = at(doc, "body").children.to_a
+    a = at(first, "a")
+    a["xlink:"] = "v"
+    first.add_previous_sibling(second)
+    names = ->(node) { node.attribute_nodes.map { |attribute| [attribute.name, attribute.namespace&.prefix] } }
+    assert_equal [["href", "xlink"], ["xlink:", nil]], names.call(a)
+    assert_equal [["xlink:", nil]], names.call(at(second, "g"))
+  end
+
   def test_copies_define_the_namespaces_they_use
     doc = root::HTML5(%(<svg xmlns:xlink="http://www.w3.org/1999/xlink"><a xlink:href="h">x</a></svg>))
     svg = at(doc, "svg")
