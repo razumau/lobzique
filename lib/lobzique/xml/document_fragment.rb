@@ -33,7 +33,7 @@ module Lobzique
         else
           # lobzique: XML parsing is out of scope (plan.md decision 4).
           # HTML4::DocumentFragment reaches this branch until its own
-          # #initialize is ported (plan.md, phase 2 step 7).
+          # #initialize is ported with the facade (plan.md decision 3).
           raise NotImplementedError, "#{XML::Document}.parse isn't supported"
         end
         children.each { |child| child.parent = self }

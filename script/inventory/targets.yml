@@ -287,7 +287,9 @@ tier2:
   mechanize:
     version: 2.14.1
     domain: html
+    source: {repo: sparklemotion/mechanize, ref: v2.14.1}
     usage: runtime
+    suite: bundle exec rake test
     why: 42M downloads, released 2026-08-23
   truncato:
     version: 0.7.13
@@ -356,7 +358,9 @@ tier2:
   inky-rb:
     version: 1.4.2.1
     domain: html
+    source: {repo: foundation/inky-rb, ref: v1.4.2.1}
     usage: runtime
+    suite: bundle exec rspec
     why: 12M downloads, released 2023-10-16
   simple_xlsx_reader:
     version: 5.1.0

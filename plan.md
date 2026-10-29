@@ -114,8 +114,8 @@ html5lib tokenizer inputs.
    4. Mutation: `reparent`, `coerce`, `inner_html=`, `replace`, `dup`.
       Done, with attribute and content editing, `root=`,
       `create_internal_subset` and NodeSet's mutators; the departures are
-      in `ARCHITECTURE.md`. Left out: `Node#parse`/`in_context` and
-      `XML::Document#fragment` (HTML4 names, step 7, and XML parsing),
+      in `ARCHITECTURE.md`. Left out: `Node#parse`/`in_context` (step 7),
+      `XML::Document#fragment` (XML parsing),
       `matches?` (CSS), and `namespace=`, `default_namespace=` and
       `add_namespace_definition` (adding namespace definitions).
    5. CSS: selectors, Nokogiri's dialect, custom pseudo-class handlers.
@@ -139,7 +139,9 @@ html5lib tokenizer inputs.
       doctypes nor fragments, `.` is no step at all, and
       `descendant-or-self::node()/x` becomes `descendant::x` only when `x`
       has no predicates, so from a fragment `.//p` and `.//p[@id]` differ.
-   7. HTML4 names on the HTML5 parser (decision 3).
+   7. `Node#parse` and `in_context`: the HTML5 fragment parser with the
+      node as context. Parsing with the HTML4 names (decision 3) waits for
+      the facade, because seam mode never reaches it.
    8. XHTML output (`native_write_to`) for premailer.
 
    Later, once profiling shows where it pays: move hot ported Ruby methods
@@ -150,7 +152,8 @@ html5lib tokenizer inputs.
    `config.action_text.sanitizer_vendor`. It is native: Loofah subclasses
    Nokogiri classes, so it can't run on `Lobzique` objects in seam mode. It
    can still read Loofah's safelist data.
-4. Action Text + assert_select: actiontext and actionview suites green.
+4. Action Text + assert_select: actiontext and actionview suites green, with
+   rails-dom-testing's `default_html_version` set to `:html5` (decision 3).
 
 ## Decisions from the inventory
 
@@ -207,6 +210,7 @@ are in `inventory/raw/src`.
      `Nokogiri::VERSION` to its own gem version before requiring lobzique,
      and `Lobzique::VERSION` is only defined when absent. The core keeps
      `Lobzique::VERSION` until then.
+   - **HTML4 parsing.** Decided in decision 3, built with the facade.
 2. **XPath.** Decided: a location-path subset; anything else raises.
 
    Runtime HTML code uses a fixed set of expressions:
@@ -241,8 +245,9 @@ are in `inventory/raw/src`.
    - Facade mode: real Nokogiri can't sit next to the facade (same gem
      name), so rack_test is unsupported for now. Those apps use a JS driver
      or seam mode for tests. Revisit full XPath after phase 4.
-3. **HTML4 entry points.** Decided: the HTML4 names parse and serialize
-   with the HTML5 parser (facade mode only; seam mode keeps real Nokogiri).
+3. **HTML4 entry points.** Decided: the HTML4 names use the HTML5 parser
+   and serializer but libxml2's encoding handling. This is for facade mode
+   only, and is built with the facade.
 
    The constants have to exist either way:
    - Loofah always subclasses `HTML4::Document`;
@@ -259,19 +264,47 @@ are in `inventory/raw/src`.
    - rails-dom-testing uses HTML4 when `load_defaults` < 7.1;
    - Capybara uses HTML4 unless `use_html5_parsing` is set.
 
+   Seam mode never parses with them, so phase 2 doesn't build it:
+   - Loofah's HTML4 classes subclass real Nokogiri;
+   - Action Text picks `HTML5::Document` whenever `HTML5` is defined, and
+     the seam sets its classes anyway;
+   - the rails-dom-testing patch sends `:html4` to real Nokogiri. Rails'
+     own suites default to `:html4`, so phase 4 runs them with `:html5`,
+     and tests written against libxml2 output need triage.
+
+   Measured with Nokogiri 1.19.4 by `mise run measure:html4`
+   (`script/html4`): the suites of the gems above (Capybara left out) and of
+   Loofah and rails-html-sanitizer, with real Nokogiri's HTML4 names sent
+   through gumbo. Tests that pass on libxml2 and fail this way are below.
+   Not counted: 20 failures in `html5-tree` mode where libxml2's serializer
+   writes gumbo's SVG and MathML namespaces as `svg:`/`math:` prefixes, or
+   writes `</wbr>`, which an HTML4-style serializer for HTML5 trees
+   wouldn't do.
+
+   | cause | tests | what |
+   |---|---|---|
+   | tree building | 31 | table parts outside a table (inky-rb 11, premailer 3), frameset content (mechanize 5), rails-dom-testing's tests of which parser runs (5), the leading newline in `pre`/`textarea` (3), stray `</p>` (2), attributes without a value, empty documents |
+   | encoding | 19 | `document.encoding` is UTF-8 instead of the declared charset (mechanize 13, premailer, roadie); libxml2's encoding aliases (`UTF8`, `ISO_8859-1`); invalid bytes, which libxml2 reads as Latin-1 |
+   | serializer | 11 | decimal character references and no `&nbsp;`, `<` escaped in attributes, URI attributes percent-escaped, the `Content-Type` meta, the HTML 4.0 doctype, formatting newlines |
+
+   So:
+   - **Parser: HTML5.** The tree failures are the cost. inky-rb breaks: it
+     builds its components from `<th>`/`<tr>` strings inserted into custom
+     elements, which HTML5 ignores in any fragment context, `template`
+     included. The facade README lists these differences.
+   - **Serializer: HTML5.** An HTML4-style serializer fixes at most the
+     serializer row, in 4 gems, and none of the tree failures. If app
+     snapshot tests need it, the doctype and decimal references are the
+     cheapest to add.
+   - **Encoding: libxml2's.** Port `html4/encoding_reader`, keep the given
+     or detected encoding as `document.encoding`, accept libxml2's aliases,
+     and decode invalid bytes as libxml2 does. The HTML5 serializer already
+     encodes into `document.encoding`.
+
    `sanitizer_vendor` defaults to `Rails::HTML4::Sanitizer` before
-   `load_defaults 7.1`, so on the facade those apps' `sanitize` output
-   changes. The facade README tells them to use 7.1+ defaults or set
-   `Rails::HTML5::Sanitizer` explicitly.
-
-   Document the libxml2 HTML4 vs HTML5 differences:
-   - tree building: adoption agency, foster parenting, implied end tags,
-     fragment context;
-   - serialization: libxml2 percent-escapes URI attributes and encodes
-     non-ASCII by document encoding.
-
-   Expect Rails suite tests written against libxml2 output to need triage
-   in phase 4.
+   `load_defaults 7.1`, so on the facade those apps sanitize with the HTML5
+   parser. rails-html-sanitizer's suite passes that way. The facade README
+   still recommends 7.1+ defaults or setting `Rails::HTML5::Sanitizer`.
 4. **XML parsing for SVG.** inline_svg calls `XML::Document.parse` on SVG
    files at runtime (5 of 19 apps).
 

@@ -41,8 +41,9 @@ when the Nokogiri version in `Gemfile.lock` moves.
 - `css/parser`, `tokenizer`, `xpath_visitor` and `css/node`: ported to the
   core instead (`css`), so `Searchable` gets a compiled `CSS::Selector`
   where Nokogiri gets an XPath string.
-- `html4/encoding_reader`: the HTML4 names use the HTML5 parser's encoding
-  rules.
+- `html4/encoding_reader`: not yet. HTML4 parsing comes with the facade,
+  which ports it, because the HTML4 names keep libxml2's encoding handling
+  (plan.md decision 3).
 - SAX, XSLT, Builder, Reader, Schema and RelaxNG.
 
 **Facade-safe.**
@@ -228,7 +229,7 @@ assemble it.
 | undefined namespace prefix | raised when libxml2 reaches the step | raised before evaluating | the same unless the step is never reached |
 | nested parentheses in CSS | unlimited | at most 32 deep, else `CSS::SyntaxError` | the tree is recursive to translate and evaluate, about 4 KB of stack a level; real selectors nest two or three deep |
 | CSS on HTML4 documents | names without a prefix match elements in no namespace, which is every element of an HTML4 parse | they match in any namespace, as in HTML5 documents | HTML4 names parse as HTML5 (decision 3), so `svg` has a namespace |
-| HTML4 names | libxml2's HTML4 parser and serializer | the HTML5 parser and serializer; `HTML5::Node`'s overrides apply to any `HTML4::Document` | decision 3 |
+| HTML4 names | libxml2's HTML4 parser and serializer | the HTML5 parser and serializer, with libxml2's encoding handling; `HTML5::Node`'s overrides apply to any `HTML4::Document` | decision 3 |
 | `Node#parse` / `in_context` | libxml2's HTML4 parser, even in HTML5 documents | the HTML5 fragment parser with the node as context | one parser |
 | parse error text | gumbo's, with line and column | html5ever's, with line only | different parsers; listed in `test/differential/known.yml` if compared |
 | `<select>` contents | dropped, as the HTML standard did before 2025 | kept, as the standard and browsers now do (customizable select) | html5ever implements the current standard; `known.yml` lists the cases |

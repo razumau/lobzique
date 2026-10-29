@@ -48,6 +48,13 @@ arg "[args]..." help="Passed to script/differential, e.g. --corpus crawl --only 
 '''
 run = "bundle exec rake compile && bundle exec ruby -Ilib script/differential {{usage.args | default(value=[]) | join(sep=' ')}}"
 
+[tasks."measure:html4"]
+description = "Run HTML4 users' suites with the HTML4 names on gumbo (plan.md decision 3)"
+usage = '''
+arg "[suites]..." help="Suite names from script/html4/run.rb, default all" var=#true
+'''
+run = "ruby script/html4/run.rb {{usage.suites | default(value=[]) | join(sep=' ')}}"
+
 [tasks."crawl:fetch"]
 description = "Download the pinned Common Crawl sample into tmp/crawl/"
 run = "script/fetch_crawl"

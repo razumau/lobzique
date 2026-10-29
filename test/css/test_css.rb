@@ -373,7 +373,7 @@ class TestCSSLobzique < Minitest::Test
 
   def root = Lobzique
 
-  # HTML4 parsing comes with plan.md, phase 2 step 7
+  # HTML4 parsing comes with the facade (plan.md decision 3)
   def doctypes = [Lobzique::HTML5::Document]
 
   def test_contexts_survive_compaction
