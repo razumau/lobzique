@@ -308,7 +308,7 @@ fn descendant_steps_merge_unless_positions_matter() {
         step(Axis::DescendantOrSelf, NodeTest::Node, Vec::new()),
         step(Axis::Child, NodeTest::Any, vec![number(1.0)]),
     ]);
-    expr.merge_descendant_steps();
+    expr.merge_descendant_steps(ast::Merge::UnlessPositional);
     let Expr::Path(path) = expr else {
         unreachable!()
     };
@@ -316,5 +316,190 @@ fn descendant_steps_merge_unless_positions_matter() {
     assert_eq!(
         axes,
         [Axis::Descendant, Axis::DescendantOrSelf, Axis::Child]
+    );
+}
+
+/// The ids, or contents, of what the XPath string `xpath` finds.
+fn find(document: &Document, context: NodeId, xpath: &str) -> Vec<String> {
+    let query = parse_xpath(xpath.as_bytes()).unwrap_or_else(|e| panic!("{xpath}: {e:?}"));
+    run(document, context, query.expr)
+}
+
+fn parse_xpath(xpath: &[u8]) -> Result<Query, ParseError> {
+    super::parse(xpath)
+}
+
+#[test]
+fn xpath_strings_find_what_libxml2_finds() {
+    let document = parse(SIBLINGS);
+    let d = element(&document, "d");
+    let c = element(&document, "c");
+    for (xpath, found) in [
+        ("//p", &["a", "b", "c"][..]),
+        ("/html/body/div/p[2]", &["b"]),
+        ("p", &["a", "b", "c"]),
+        ("./p[b]", &["a"]),
+        ("p[.//i]/following-sibling::*", &[]),
+        ("p[@id='b']/preceding-sibling::p", &["a"]),
+        ("//p[@id = \"c\"]/i", &["ci"]),
+        ("..", &["?"]),
+        ("// p [ 3 ] / i", &["ci"]),
+        ("child :: p[2.]", &["b"]),
+        ("p[--1]", &["a"]),
+        ("p[20e-1]", &["b"]),
+        ("p[1e]", &["a"]),
+        ("p[1.5]", &[]),
+        ("descendant::*[@id][1]", &["a"]),
+        ("*:p[last]", &[]),
+        ("p[3]/descendant-or-self::node()", &["c", "ci"]),
+        ("/ /html/body/div/p[1]", &["a"]),
+        ("/ //i", &["ci"]),
+    ] {
+        assert_eq!(find(&document, d, xpath), found, "{xpath}");
+    }
+    assert_eq!(find(&document, c, "preceding::*[1]"), ["b"]);
+    // libxml2 reads an overlong form in a name as what it encodes
+    let overlong_p = parse_xpath(b"\xC1\xB0[1]").unwrap();
+    assert_eq!(run(&document, d, overlong_p.expr), ["a"]);
+    assert_eq!(find(&document, c, "ancestor::*[1]"), ["d"]);
+}
+
+#[test]
+fn doctypes_pass_no_node_test() {
+    let document = parse("<!DOCTYPE html><p id=p>");
+    // <html>
+    assert_eq!(find(&document, NodeId::DOCUMENT, "/node()"), ["?"]);
+    // <head>
+    let p = element(&document, "p");
+    assert_eq!(find(&document, p, "preceding::node()"), ["?"]);
+}
+
+#[test]
+fn following_an_attribute_starts_after_its_element() {
+    let document = parse("<p id=a class=x><b id=b></b></p><p id=c></p>");
+    let a = element(&document, "a");
+    assert_eq!(find(&document, a, "@class/following::*"), ["c"]);
+    // <head>
+    assert_eq!(find(&document, a, "@class/preceding::*"), ["?"]);
+    // Nokogiri's `*:name` matches elements only
+    assert_eq!(find(&document, a, "@*:id"), [""; 0]);
+}
+
+#[test]
+fn syntax_errors_carry_libxml2_codes() {
+    // each as Nokogiri 1.19.4 reports it
+    for (xpath, error) in [
+        (&b""[..], Error::InvalidExpression),
+        (b"  ", Error::InvalidExpression),
+        (b"..faulty_xpath", Error::InvalidExpression),
+        (b"//", Error::InvalidExpression),
+        (b"//p/", Error::InvalidExpression),
+        (b"//p[", Error::InvalidExpression),
+        (b"//p[]", Error::InvalidExpression),
+        (b"//p]", Error::InvalidExpression),
+        (b"//p@id", Error::InvalidExpression),
+        (b"//p/.[1]", Error::InvalidExpression),
+        (b"child::", Error::InvalidExpression),
+        (b"nosuch-axis::p", Error::InvalidExpression),
+        (b"//svg: svg", Error::InvalidExpression),
+        (b"//* :p", Error::InvalidExpression),
+        (b"//p[string(]", Error::InvalidExpression),
+        (b"(//p", Error::InvalidExpression),
+        (b"//p[@id='a'", Error::InvalidPredicate),
+        (b"//p[1 e1]", Error::InvalidPredicate),
+        (b"//p[@id ! = 'a']", Error::InvalidPredicate),
+        (b"//p[@id='a", Error::UnfinishedLiteral),
+        (b"text(", Error::Unclosed),
+        (b"//p[processing-instruction(]", Error::StartLiteral),
+        (b"//p[$]", Error::VariableReference),
+        (b"//p[$ v]", Error::VariableReference),
+        (b"//p[$a:]", Error::VariableReference),
+        (b"//\xFF", Error::Encoding),
+        (b"//\xC3", Error::Encoding),
+        (b"//p[@id='\xFF']", Error::InvalidChar),
+        (b"//p[@id='\x01']", Error::InvalidChar),
+        // checked before the missing quote
+        (b"//p['\x01", Error::InvalidChar),
+        (b"//p[\"\xFF", Error::InvalidChar),
+        (b"//p[\"a\xC3", Error::InvalidChar),
+        (b"//p['\x82\x80']", Error::InvalidChar),
+        // libxml2 decodes overlong forms, surrogates and code points past
+        // U+10FFFF in names, then finds them out of range
+        (b"//\xC0\x80", Error::InvalidChar),
+        (b"//\xED\xA0\x80", Error::InvalidChar),
+        (b"//p\xF4\x90\x80\x80", Error::InvalidChar),
+        (b"/\xF4\x90\x80\x80", Error::InvalidChar),
+        (b"//\xEF\xBF\xBE", Error::InvalidChar),
+    ] {
+        let result = parse_xpath(xpath).map(|_| ());
+        assert_eq!(result, Err(ParseError::Syntax(error)), "{xpath:?}");
+    }
+}
+
+#[test]
+fn constructs_outside_the_subset_are_named() {
+    for (xpath, construct) in [
+        ("string(//title)", "function string()"),
+        ("//p[nokogiri:thing(.)]", "function nokogiri:thing()"),
+        ("//p | //br", "unions"),
+        ("(//p)[1]", "parentheses"),
+        ("//p[$v]", "variable $v"),
+        ("//p[@a != 'x']", "the != operator"),
+        ("//p[@a and @b]", "the and operator"),
+        ("//p[1 or 2]", "the or operator"),
+        ("//p[1 + 1]", "the + operator"),
+        ("//p[2 div 1]", "the div operator"),
+        ("//p[@a < 1]", "the < operator"),
+        ("//p[-@a]", "unary minus"),
+        ("//p['x']", "literals as predicates"),
+        ("//p[@a = 'x' = 'y']", "chained comparisons"),
+        ("//svg:*", "the node test svg:*"),
+        ("//processing-instruction()", "processing-instruction()"),
+        ("//p/namespace::*", "the namespace axis"),
+        ("'x'[1]", "filter expressions"),
+        ("1 = 1", "expressions that aren't location paths"),
+        ("'x'", "expressions that aren't location paths"),
+    ] {
+        let result = parse_xpath(xpath.as_bytes()).map(|_| ());
+        assert_eq!(
+            result,
+            Err(ParseError::Unsupported(construct.into())),
+            "{xpath}"
+        );
+    }
+    // libxml2 rejects it anyway
+    assert_eq!(
+        parse_xpath(b"string(//p").map(|_| ()),
+        Err(ParseError::Syntax(Error::InvalidExpression))
+    );
+}
+
+#[test]
+fn predicates_nest_32_deep() {
+    let nested = |depth| format!("{}p{}", "p[".repeat(depth), "]".repeat(depth));
+    assert!(parse_xpath(nested(MAX_NESTING).as_bytes()).is_ok());
+    assert_eq!(
+        parse_xpath(nested(MAX_NESTING + 1).as_bytes()).map(|_| ()),
+        Err(ParseError::Unsupported("nesting deeper than 32".into()))
+    );
+    // a syntax error past the limit still wins, as in libxml2
+    let deep = "p[".repeat(MAX_NESTING + 1);
+    for (xpath, error) in [
+        (format!("{deep}x"), Error::InvalidPredicate),
+        (format!("{deep}x)"), Error::InvalidPredicate),
+        (format!("{deep}x(]"), Error::InvalidExpression),
+        (format!("{deep}'x"), Error::UnfinishedLiteral),
+        (format!("{}]", nested(MAX_NESTING + 1)), Error::InvalidExpression),
+    ] {
+        assert_eq!(
+            parse_xpath(xpath.as_bytes()).map(|_| ()),
+            Err(ParseError::Syntax(error)),
+            "{xpath}"
+        );
+    }
+    let quoted = format!("{deep}'])'{}", "]".repeat(MAX_NESTING + 1));
+    assert_eq!(
+        parse_xpath(quoted.as_bytes()).map(|_| ()),
+        Err(ParseError::Unsupported("nesting deeper than 32".into()))
     );
 }

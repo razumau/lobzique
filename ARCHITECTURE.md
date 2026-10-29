@@ -161,7 +161,7 @@ What Nokogiri guarantees, and how lobzique keeps it:
 |---|---|---|---|
 | `Lobzique::Html5ever` | `parse(input, url, klass, **limits)`, `fragment(fragment, input, context, **limits)` and the `DEFAULT_MAX_*` limits | `Nokogiri::Gumbo` | built |
 | `XML::Namespace` | a node's namespace: `prefix`, `href` | same | built |
-| `XML::XPathContext` | `new(node)`, `node=`, `register_ns`, `register_variable`, `evaluate(path, handler)` | same | built for `CSS::Selector`; XPath strings raise `NotImplementedError` until the subset (step 6) |
+| `XML::XPathContext` | `new(node)`, `node=`, `register_ns`, `register_variable`, `evaluate(path, handler)`: a `CSS::Selector` or an XPath string | same | built; XPath outside the subset (plan.md decision 2) raises `XPath::UnsupportedError` |
 | `CSS::Selector` | `new(rule, prefixes:, doctype:, namespaces:, builtins:, first:)`: a selector list compiled for the implied XPath contexts of the searching class, as Nokogiri's `XPathVisitor` is configured | none; Nokogiri translates CSS into XPath strings | built |
 
 Each arrives with the phase 2 step that needs it (plan.md).
@@ -191,7 +191,7 @@ assemble it.
 | `html5::serialize` | `html_standard_serialize`, byte for byte with Nokogiri::HTML5 | built |
 | `xml::serialize` | `native_write_to` for `to_xhtml` | planned, late in phase 2 |
 | `css` | Nokogiri's CSS front end, ported: `tokenizer` (rex rules in order), `parser` (racc's parse loop over `tables`, which `script/generate_css_tables` generates from Nokogiri's parser, and the grammar's actions), `translate` (`XPathVisitor`, building `xpath` trees where it writes strings) | built |
-| `xpath` | `ast` (expressions as trees, `and`/`or` as lists), `eval` (libxml2's evaluation: XPath 1.0 values and comparisons, node sets in document order, positions per step, custom calls answered in rounds); `XML::XPathContext` errors | built; the parser for the location-path subset (plan.md decision 2) comes with step 6 |
+| `xpath` | `ast` (expressions as trees, `and`/`or` as lists), `eval` (libxml2's evaluation: XPath 1.0 values and comparisons, node sets in document order, positions per step, custom calls answered in rounds), `parse` (XPath strings: all of XPath 1.0 read as libxml2 reads it, with its error codes, built into trees for the subset of plan.md decision 2); `XML::XPathContext` errors | built |
 
 **Names.**
 - Elements and attributes use html5ever's `QualName`, shared by the parser
@@ -218,12 +218,13 @@ assemble it.
 | `create_element` with an `xmlns` key | a namespace definition | `NotImplementedError` | adding namespace definitions is out of scope |
 | names that aren't UTF-8 | kept as bytes | `ArgumentError` | names are atoms shared with the parser and XPath engine; only `Node.new` can be given one |
 | CSS | Ruby parser → XPath string → libxml2 | the same parser and visitor in the core, building an XPath tree (`CSS::Selector`) that the core evaluates as libxml2 would; `Searchable#extract_params` takes a `CSS::Selector` for a query, not a handler | no XPath string parser for the visitor's output; `CSS.xpath_for` stays out of scope (decision 2) |
-| XPath | full XPath 1.0 in libxml2 | a native location-path subset behind the same `XPathContext` shape | decision 2 |
+| XPath | full XPath 1.0 in libxml2 | location paths on every axis but `namespace`, with name, `*`, `*:name`, `text()`, `comment()` and `node()` tests, and predicates that are a position, a path, or `=` between paths, literals and numbers; other valid XPath raises `XPath::UnsupportedError` (a `SyntaxError`, code 1207) naming the construct | decision 2 |
+| XPath nesting | unlimited | predicates and parentheses at most 32 deep, else `XPath::UnsupportedError` | as for CSS: each level costs stack to parse and evaluate |
 | custom pseudo-class handlers | called per node from inside XPath evaluation | called per node with the same arguments, but in rounds between evaluations: an evaluation that reaches an unanswered call counts it as an empty node set and notes it, the noted calls run with the arena released, and evaluation starts again until none are left | no Ruby call while the arena is borrowed; a handler may run for a few nodes Nokogiri wouldn't call it for, which only side effects can tell |
 | errors in the visitor | `Racc::ParseError` (`:nth-child(2x)`), `ZeroDivisionError` (`0n-1`), `NoMethodError` (`:foo(2n)`) | `CSS::SyntaxError` | the core has no Ruby errors to raise |
 | escapes of surrogates, code points past U+10FFFF and NUL (`#\D800`, `.\110000`, `[x=\0]`) | pasted into the XPath as invalid UTF-8 or a NUL byte: `ArgumentError` from a regexp or from evaluation, or `XPath::SyntaxError` "Char out of XML range" for a class | `CSS::SyntaxError` while compiling | names and values are Rust strings, which can hold neither; Nokogiri raises on each too, only later and with other classes |
 | `XPath::SyntaxError` text | quotes the XPath Nokogiri built, in the message and `str1` | quotes the CSS rule; class, domain and level as Nokogiri's | there is no XPath string |
-| `XPath::SyntaxError` code for XPath libxml2 can't parse | the parse error libxml2 hits first: 1202 unfinished literal (`[x=\"]`), 1206 invalid predicate (`#a\27`), 1207 invalid expression, … | always 1207, "Invalid expression" | the translator knows the XPath is invalid, not where libxml2's parser would stop; codes for evaluation errors (1209, 1219, 1223) match |
+| `XPath::SyntaxError` code for the XPath CSS becomes, when libxml2 can't parse it | the parse error libxml2 hits first: 1202 unfinished literal (`[x=\"]`), 1206 invalid predicate (`#a\27`), 1207 invalid expression, … | always 1207, "Invalid expression" | the translator knows the XPath is invalid, not where libxml2's parser would stop; codes for evaluation errors (1209, 1219, 1223) match |
 | undefined namespace prefix | raised when libxml2 reaches the step | raised before evaluating | the same unless the step is never reached |
 | nested parentheses in CSS | unlimited | at most 32 deep, else `CSS::SyntaxError` | the tree is recursive to translate and evaluate, about 4 KB of stack a level; real selectors nest two or three deep |
 | CSS on HTML4 documents | names without a prefix match elements in no namespace, which is every element of an HTML4 parse | they match in any namespace, as in HTML5 documents | HTML4 names parse as HTML5 (decision 3), so `svg` has a namespace |
@@ -251,6 +252,9 @@ assemble it.
   `HTML5::Node#write_to` → native `html_standard_serialize` → a UTF-8
   string, encoded into the document's encoding with `&#x…;` for unmappable
   characters.
+- **XPath.** `node.xpath("//p[@id]")` → `Searchable#xpath` →
+  `xpath_internal` → `XPathContext#evaluate(string)` → the core parses
+  the string into the same trees CSS compiles to, then evaluates it.
 - **Search.** `node.css("p.x", handler)` → `Searchable#css` →
   `xpath_query_from_css_rule` → `CSS::Selector.new` (the core parses and
   translates it for the class's `IMPLIED_XPATH_CONTEXTS`) →

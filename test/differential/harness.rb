@@ -25,6 +25,17 @@ module Differential
       "svg|svg", "* > text()", "p:contains('a')"
     ].freeze
 
+    # Run on every case but the selector tests: the XPath runtime callers in
+    # the inventory evaluate (inventory/summary.md), and an axis each
+    XPATHS = [
+      "/html/body", "./body", "./form", "//p[br[following-sibling::br]]", ".//text()", "//comment()", "li",
+      "preceding::text()[1]", "html", "html/head", "html/head/meta", '//head/meta[@http-equiv="Set-Cookie"]',
+      ".//a", ".//script", "//img/@onerror", "//*:svg", "//svg:svg", "/node()", ".//*[@id][1]",
+      "descendant::*[2]/ancestor::*", "descendant::*[3]/preceding::node()[1]", "descendant::*[3]/following::*[1]",
+      "descendant::*[1]/following-sibling::node()", "descendant::*[2]/preceding-sibling::*",
+      "descendant-or-self::node()[@lang]/@*", "//*[@class = 'x']", "..faulty_xpath"
+    ].freeze
+
     # Errors that only the translators raise differently: Nokogiri's
     # visitor fails with Ruby errors where lobzique raises CSS::SyntaxError
     # (ARCHITECTURE.md, departures). Only the oracle's are renamed, so the
@@ -85,7 +96,7 @@ module Differential
       end
       html = node.to_html
       {html: html.b, encoding: html.encoding.name, tree: dump(root, node), queries: queries(node),
-       selected: select(root, node, kase.selectors || SELECTORS)}
+       selected: select(root, node, kase.selectors || SELECTORS) + evaluate(node, kase.selectors ? [] : XPATHS)}
     rescue => e
       {error: "#{e.class.name.sub(ROOT_NAME, "")}: #{e.message}"}
     end
@@ -137,6 +148,20 @@ module Differential
           name = e.class.name.sub(ROOT_NAME, "")
           name = SELECTOR_ERRORS.fetch(name, name) if root.equal?(@oracle)
           "#{selector} from #{from.name}: raises #{name}"
+        end
+      end
+    end
+
+    # What each XPath finds from the top node and from its first element, as
+    # node paths, or the error it raises.
+    def evaluate(top, xpaths)
+      element = top.children.find(&:element?)
+      xpaths.flat_map do |xpath|
+        [top, element].compact.map do |from|
+          "#{xpath} from #{from.name}: #{from.xpath(xpath).map(&:path).join(" ")}"
+        rescue => e
+          code = e.code if e.respond_to?(:code)
+          "#{xpath} from #{from.name}: raises #{[e.class.name.sub(ROOT_NAME, ""), code].compact.join(" ")}"
         end
       end
     end

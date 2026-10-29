@@ -1,6 +1,6 @@
 //! `XML::XPathContext`: a context node, namespace and variable bindings,
 //! and `evaluate`. It evaluates the selectors `Searchable` compiles CSS
-//! into; XPath strings wait for the XPath subset (plan.md, phase 2 step 6).
+//! into, and XPath strings in the subset of plan.md decision 2.
 
 use super::document;
 use super::node::{node_set, utf8_string, Node, NODE_SET};
@@ -8,7 +8,7 @@ use crate::css::selector::Selector;
 use crate::support::{apply, c_string, optional_arg};
 use crate::XML;
 use lobzique_core::dom::NodeId;
-use lobzique_core::xpath::{self, Call, Outcome, Query};
+use lobzique_core::xpath::{self, Call, Outcome, ParseError, Query};
 use magnus::{
     function, gc, method, prelude::*, rb_sys::AsRawValue, typed_data::Obj, value::Lazy,
     value::Opaque, DataTypeFunctions, Error, Exception, Float, Integer, IntoValue, RArray, RClass,
@@ -100,16 +100,26 @@ impl XPathContext {
     fn evaluate(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<Value, Error> {
         ruby.check_arity(args.len(), 1..=2)?;
         let handler = optional_arg(ruby, args, 1);
-        let Ok(selector) = Obj::<Selector>::try_convert(args[0]) else {
-            return Err(Error::new(
-                ruby.exception_not_imp_error(),
-                "XPath strings aren't supported yet",
-            ));
-        };
-        let rule = selector.rule.as_str();
-        let query = match &selector.compiled.query {
-            Ok(query) => query,
-            Err(error) => return Err(xpath_error(ruby, *error, rule)),
+        let (selector, expression, parsed);
+        let (query, rule): (&Query, &[u8]) = match Obj::<Selector>::try_convert(args[0]) {
+            Ok(compiled) => {
+                selector = compiled;
+                let rule = selector.rule.as_bytes();
+                match &selector.compiled.query {
+                    Ok(query) => (query, rule),
+                    Err(error) => return Err(xpath_error(ruby, *error, rule)),
+                }
+            }
+            Err(_) => {
+                expression = c_string(args[0])?;
+                parsed = xpath::parse(&expression).map_err(|error| match error {
+                    ParseError::Syntax(error) => xpath_error(ruby, error, &expression),
+                    ParseError::Unsupported(construct) => {
+                        unsupported_error(ruby, &construct, &expression)
+                    }
+                })?;
+                (&parsed, &expression)
+            }
         };
         let node = <&Node>::try_convert(ruby.get_inner(rb_self.node.get()))?;
         let (document, id) = (node.document(ruby)?, node.id(ruby)?);
@@ -141,7 +151,7 @@ fn call_handler(
     handler: Value,
     query: &Query,
     call: Call,
-    rule: &str,
+    rule: &[u8],
 ) -> Result<xpath::Value<'static>, Error> {
     let name = query.function_name(call.site);
     if handler.is_nil() || !handler.respond_to(name, false)? {
@@ -208,20 +218,32 @@ fn to_ruby(ruby: &Ruby, document: Value, value: xpath::Value<'static>) -> Result
 }
 
 /// An `XPath::SyntaxError` as Nokogiri makes one from libxml2's error:
-/// level ERROR, domain XPath, the expression in `str1`. lobzique quotes the
-/// CSS rule, where Nokogiri quotes the XPath it became.
-fn xpath_error(ruby: &Ruby, error: xpath::Error, rule: &str) -> Error {
+/// level ERROR, domain XPath, the expression in `str1`. For CSS, lobzique
+/// quotes the rule, where Nokogiri quotes the XPath it became.
+fn xpath_error(ruby: &Ruby, error: xpath::Error, rule: &[u8]) -> Error {
+    syntax_error(ruby, "SyntaxError", error.message(), error.code(), rule)
+}
+
+/// `XPath::UnsupportedError`: valid XPath outside the subset, raised as
+/// libxml2 would raise an invalid expression, naming the construct.
+fn unsupported_error(ruby: &Ruby, construct: &str, expression: &[u8]) -> Error {
+    let message = format!("Unsupported XPath: {construct}");
+    let code = xpath::Error::InvalidExpression.code();
+    syntax_error(ruby, "UnsupportedError", &message, code, expression)
+}
+
+fn syntax_error(ruby: &Ruby, class: &str, message: &str, code: i32, rule: &[u8]) -> Error {
     let build = || -> Result<Exception, Error> {
         let class: RClass = ruby
             .get_inner(&XML)
             .const_get::<_, magnus::RModule>("XPath")?
-            .const_get("SyntaxError")?;
-        let exception: Value = class.new_instance((error.message(),))?;
+            .const_get(class)?;
+        let exception: Value = class.new_instance((message,))?;
         let object = magnus::RObject::from_value(exception).expect("an exception is an object");
         object.ivar_set("@domain", 12)?;
-        object.ivar_set("@code", error.code())?;
+        object.ivar_set("@code", code)?;
         object.ivar_set("@level", 2)?;
-        object.ivar_set("@str1", rule)?;
+        object.ivar_set("@str1", utf8_string(ruby, rule))?;
         object.ivar_set("@line", 0)?;
         object.ivar_set("@column", 0)?;
         object.ivar_set("@int1", 0)?;

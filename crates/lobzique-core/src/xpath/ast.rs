@@ -46,7 +46,7 @@ pub enum NodeTest {
     /// `name` or `prefix:name`: no prefix means no namespace
     Name(QName),
     /// `*:name`, libxml2's wildcard namespace as Nokogiri patches it in:
-    /// the local name in any namespace or none
+    /// an element with the local name in any namespace or none
     LocalName(String),
 }
 
@@ -85,6 +85,37 @@ impl Path {
     /// `.`
     pub fn context_node() -> Path {
         Path::relative(vec![Step::new(Axis::Self_, NodeTest::Node)])
+    }
+}
+
+/// Which steps after `descendant-or-self::node()` merge into it. The two
+/// rules find the same nodes from any context node but a document
+/// fragment, which `node()` doesn't pass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Merge {
+    /// A child step whose predicates don't read the position. CSS never
+    /// searches from a fragment: Nokogiri searches its children instead.
+    UnlessPositional,
+    /// libxml2's `xmlXPathOptimizeExpression`, for XPath strings: a step
+    /// without predicates on the child, descendant, self or
+    /// descendant-or-self axis.
+    WithoutPredicates,
+}
+
+impl Merge {
+    /// The axis that replaces both steps, if `next` merges.
+    fn axis(self, next: &Step) -> Option<Axis> {
+        match self {
+            Merge::UnlessPositional => (next.axis == Axis::Child
+                && !next.predicates.iter().any(Expr::is_positional))
+            .then_some(Axis::Descendant),
+            Merge::WithoutPredicates if !next.predicates.is_empty() => None,
+            Merge::WithoutPredicates => match next.axis {
+                Axis::Child | Axis::Descendant => Some(Axis::Descendant),
+                Axis::Self_ | Axis::DescendantOrSelf => Some(Axis::DescendantOrSelf),
+                _ => None,
+            },
+        }
     }
 }
 
@@ -151,48 +182,48 @@ impl Expr {
     }
 
     /// Rewrites `descendant-or-self::node()/child::x[p]`, which `//x[p]`
-    /// stands for, as `descendant::x[p]` wherever no predicate reads the
-    /// position: the same nodes, without visiting each one twice.
-    pub(super) fn merge_descendant_steps(&mut self) {
+    /// stands for, as `descendant::x[p]`: the same nodes, without visiting
+    /// each one twice.
+    pub(super) fn merge_descendant_steps(&mut self, merge: Merge) {
         let merge_path = |path: &mut Path| {
             let mut merged = Vec::with_capacity(path.steps.len());
             let mut steps = std::mem::take(&mut path.steps).into_iter().peekable();
             while let Some(mut step) = steps.next() {
                 for predicate in &mut step.predicates {
-                    predicate.merge_descendant_steps();
+                    predicate.merge_descendant_steps(merge);
                 }
                 let mergeable = step.axis == Axis::DescendantOrSelf
                     && step.test == NodeTest::Node
                     && step.predicates.is_empty();
-                match steps.peek() {
-                    Some(next)
-                        if mergeable
-                            && next.axis == Axis::Child
-                            && !next.predicates.iter().any(Expr::is_positional) =>
-                    {
+                let axis = match steps.peek() {
+                    Some(next) if mergeable => merge.axis(next),
+                    _ => None,
+                };
+                match axis {
+                    Some(axis) => {
                         let mut next = steps.next().expect("peeked");
                         for predicate in &mut next.predicates {
-                            predicate.merge_descendant_steps();
+                            predicate.merge_descendant_steps(merge);
                         }
-                        next.axis = Axis::Descendant;
+                        next.axis = axis;
                         merged.push(next);
                     }
-                    _ => merged.push(step),
+                    None => merged.push(step),
                 }
             }
             path.steps = merged;
         };
         match self {
-            Expr::Or(list) | Expr::And(list) => {
-                list.iter_mut().for_each(Expr::merge_descendant_steps)
-            }
+            Expr::Or(list) | Expr::And(list) => list
+                .iter_mut()
+                .for_each(|expr| expr.merge_descendant_steps(merge)),
             Expr::Compare(_, left, right) | Expr::Arithmetic(_, left, right) => {
-                left.merge_descendant_steps();
-                right.merge_descendant_steps();
+                left.merge_descendant_steps(merge);
+                right.merge_descendant_steps(merge);
             }
-            Expr::Call(_, arguments) | Expr::Custom { arguments, .. } => {
-                arguments.iter_mut().for_each(Expr::merge_descendant_steps);
-            }
+            Expr::Call(_, arguments) | Expr::Custom { arguments, .. } => arguments
+                .iter_mut()
+                .for_each(|expr| expr.merge_descendant_steps(merge)),
             Expr::Path(path) => merge_path(path),
             Expr::Union(paths) => paths.iter_mut().for_each(merge_path),
             Expr::Number(_) | Expr::Literal(_) => {}

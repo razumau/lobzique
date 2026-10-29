@@ -373,12 +373,6 @@ class TestCSSLobzique < Minitest::Test
 
   def root = Lobzique
 
-  def test_xpath_strings_wait_for_the_xpath_subset
-    doc = Lobzique::HTML5::Document.parse("<p></p>")
-    assert_raises(NotImplementedError) { doc.xpath(".//p") }
-    assert_raises(NotImplementedError) { doc.search("./p") }
-  end
-
   # HTML4 parsing comes with plan.md, phase 2 step 7
   def doctypes = [Lobzique::HTML5::Document]
 

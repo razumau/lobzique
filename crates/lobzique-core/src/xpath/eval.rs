@@ -8,6 +8,7 @@
 //! evaluates again, until nothing is missing.
 
 use super::ast::{Arithmetic, Axis, Comparison, Expr, Function, NodeTest, Path, QName, Step};
+use super::chars::is_blank;
 use super::{Error, Query};
 use crate::dom::{Document, NodeId, NodeKind};
 use std::borrow::Cow;
@@ -478,11 +479,10 @@ impl<'a> Evaluator<'a> {
             Axis::PrecedingSibling => Box::new(siblings(Document::previous_sibling)),
             Axis::Following => {
                 let mut nodes = Vec::new();
+                // libxml2 starts after an attribute's element, skipping
+                // what is inside it
                 let start = match (is_attribute, document.parent(node)) {
-                    (true, Some(element)) => {
-                        nodes.extend(document.descendants(element));
-                        element
-                    }
+                    (true, Some(element)) => element,
                     _ => node,
                 };
                 for ancestor in std::iter::once(start).chain(document.ancestors(start)) {
@@ -527,11 +527,15 @@ impl<'a> Evaluator<'a> {
             _ => matches!(kind, NodeKind::Element(_)),
         };
         match test {
-            NodeTest::Node => true,
+            // libxml2's `node()` passes neither doctypes nor fragments
+            NodeTest::Node => !matches!(kind, NodeKind::Doctype(_) | NodeKind::DocumentFragment),
             NodeTest::Text => matches!(kind, NodeKind::Text(_) | NodeKind::CData(_)),
             NodeTest::Comment => matches!(kind, NodeKind::Comment(_)),
             NodeTest::Any => principal,
-            NodeTest::LocalName(local) => principal && self.local_name(node) == local.as_str(),
+            // Nokogiri's patch covers elements only: `@*:id` finds nothing
+            NodeTest::LocalName(local) => {
+                matches!(kind, NodeKind::Element(_)) && self.local_name(node) == local.as_str()
+            }
             NodeTest::Name(name) => {
                 principal
                     && self.local_name(node) == name.local
@@ -556,11 +560,6 @@ impl<'a> Evaluator<'a> {
             None => unreachable!("prefixes are checked before evaluation"),
         }
     }
-}
-
-/// libxml2's `IS_BLANK_CH`
-fn is_blank(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n' | b'\r')
 }
 
 fn contains(haystack: &[u8], needle: &[u8]) -> bool {

@@ -128,8 +128,17 @@ html5lib tokenizer inputs.
       would. The differential harness compares what 38 contract selectors
       find in every case, WPT's selectors on their test document, and the
       selectors of Nokogiri's visitor tests on its test page.
-   6. XPath subset (decision 2). The evaluator exists (step 5); this step
-      adds the parser for the subset, behind `XPathContext#evaluate`.
+   6. XPath subset (decision 2). Done: `XPathContext#evaluate` parses
+      XPath strings for `xpath`, `at_xpath` and `search` on nodes, node
+      sets, documents and fragments. The parser reads all of XPath 1.0 as
+      libxml2 does and raises libxml2's error codes for what it rejects;
+      valid XPath outside the subset raises `XPath::UnsupportedError`,
+      naming the construct. The differential harness compares what the
+      inventory's runtime XPath and an expression per axis find in every
+      case. libxml2 quirks the subset keeps: `node()` passes neither
+      doctypes nor fragments, `.` is no step at all, and
+      `descendant-or-self::node()/x` becomes `descendant::x` only when `x`
+      has no predicates, so from a fragment `.//p` and `.//p[@id]` differ.
    7. HTML4 names on the HTML5 parser (decision 3).
    8. XHTML output (`native_write_to`) for premailer.
 
@@ -208,12 +217,14 @@ are in `inventory/raw/src`.
    - reverse_markdown: `li`, `preceding::text()[1]`
 
    The subset covers:
-   - axes: child, descendant(-or-self), self, parent, ancestor(-or-self),
-     following-sibling, preceding-sibling, preceding;
-   - node tests: name, `*`, `text()`, `comment()`, `node()`;
-   - predicates: attribute existence, attribute equality, position, and
-     nested paths. On reverse axes, position counts in reverse document
-     order.
+   - axes: every one but namespace. attribute (`//img/@onerror` in
+     rails-html-sanitizer's tests) and following came free with the
+     evaluator;
+   - node tests: name, `*`, Nokogiri's `*:name`, `text()`, `comment()`,
+     `node()`;
+   - predicates: position, nested paths, and `=` between paths, literals
+     and numbers (attribute existence and equality, `[text()='x']`). On
+     reverse axes, position counts in reverse document order.
 
    Anything else raises a subclass of `Nokogiri::XML::XPath::SyntaxError`
    that names the unsupported construct. Unions, functions (`string()`,
@@ -316,8 +327,8 @@ are in `inventory/raw/src`.
    `Gemfile.lock` version is the oracle; bumping it is a reviewed change.
    - **Compared.** `to_html` bytes, plus a tree dump (node type, name,
      namespace, attributes, text) that locates a difference, and the paths
-     of what selectors find from the top node and its first element.
-     XPath results get added with the subset.
+     of what selectors and the XPath subset find from the top node and its
+     first element.
    - **Corpus.**
      - Every push: inputs from `test/fixtures` (WPT tree-construction and
        sanitizer `.dat`, html5lib tokenizer inputs, DOMPurify payloads,

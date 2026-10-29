@@ -15,8 +15,9 @@ class TestClassTree < Minitest::Test
   RENAMED = {"Lobzique::Html5ever" => "Nokogiri::Gumbo"}
   # Constants whose values differ by design
   OWN_VALUE = ["Lobzique::VERSION"]
-  # Ours, with no counterpart: compiled CSS, where Nokogiri has XPath strings
-  OWN = ["Lobzique::CSS::Selector"]
+  # Ours, with no counterpart: compiled CSS, where Nokogiri has XPath
+  # strings, and the error for XPath outside the subset
+  OWN = ["Lobzique::CSS::Selector", "Lobzique::XML::XPath::UnsupportedError"]
 
   def self.counterpart(path)
     RENAMED.reduce(path) { |p, (ours, theirs)| p.sub(/\A#{ours}\b/, theirs) }.sub(ROOT, "Nokogiri")
