@@ -317,10 +317,6 @@ module Lobzique
           return document.parse(string_or_io, options)
         end
 
-        # lobzique: in_context parses HTML only; XML parsing is out of scope
-        # (plan.md decision 4)
-        raise NotImplementedError, "#{XML::Document}.parse isn't supported" unless document.html?
-
         options ||= (document.html? ? ParseOptions::DEFAULT_HTML : ParseOptions::DEFAULT_XML)
         options = ParseOptions.new(options) if Integer === options
         yield options if block_given?
@@ -332,6 +328,10 @@ module Lobzique
         end
 
         return NodeSet.new(document) if contents.empty?
+
+        # lobzique: in_context parses HTML only; XML parsing is out of scope
+        # (plan.md decision 4)
+        raise NotImplementedError, "#{XML::Document}.parse isn't supported" unless document.html?
 
         error_count = document.errors.length
         node_set = in_context(contents, options.to_i)

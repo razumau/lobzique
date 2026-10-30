@@ -76,6 +76,16 @@ module NodeParseContract
     assert_equal 1, nodes.length
   end
 
+  def test_empty_input_in_xml_documents
+    doc = root::XML::Document.new
+    doc.root = root::XML::Node.new("r", doc)
+    options = nil
+    set = doc.root.parse("") { |config| options = config }
+    assert_empty set
+    assert_equal root::XML::ParseOptions::DEFAULT_XML, options.to_i
+    assert_empty root::XML::DocumentFragment.new(doc, "", doc.root).children
+  end
+
   def test_node_ownership_after_dup
     dup = root::HTML5(HTML).dup
     set = dup.at_css("div").parse("<div>replaced</div>")
