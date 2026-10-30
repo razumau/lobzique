@@ -18,6 +18,7 @@ use magnus::{
     typed_data::Obj,
     Error, RArray, RClass, RHash, RObject, RString, Ruby, Value,
 };
+use std::sync::OnceLock;
 
 /// `Html5ever.parse(input, url, klass, **options)`: a document of `klass`,
 /// initialized with no arguments, then given `@url`, `@quirks_mode` and,
@@ -95,16 +96,10 @@ pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error
         }
         None => body.with_quirks_mode(quirks_mode_for(document, document)?),
     };
-    let module = ruby.get_inner(&HTML5EVER);
-    let limit = |name: &str| -> Result<Option<usize>, Error> {
-        Ok(usize::try_from(module.const_get::<_, i32>(name)?).ok())
-    };
     let options = Options {
-        max_attributes: limit("DEFAULT_MAX_ATTRIBUTES")?,
         // libxml2 keeps at most 100 errors a parse
         max_errors: Some(100),
-        max_tree_depth: limit("DEFAULT_MAX_TREE_DEPTH")?,
-        parse_noscript_content_as_text: false,
+        ..default_options(ruby)?
     };
 
     let (ids, parsed) = document::with_arena_mut(ruby, document, |arena| {
@@ -116,8 +111,24 @@ pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error
     node_set(ruby, document, ids)
 }
 
-/// Gumbo's options: three required keywords and one optional one. A
-/// negative limit is no limit.
+/// The `Html5ever::DEFAULT_*` limits, which are constant once loaded.
+fn default_options(ruby: &Ruby) -> Result<Options, Error> {
+    static DEFAULTS: OnceLock<Options> = OnceLock::new();
+    if let Some(options) = DEFAULTS.get() {
+        return Ok(options.clone());
+    }
+    let module = ruby.get_inner(&HTML5EVER);
+    let default = |name: &str| module.const_get::<_, i32>(name).map(limit);
+    let options = Options {
+        max_attributes: default("DEFAULT_MAX_ATTRIBUTES")?,
+        max_errors: default("DEFAULT_MAX_ERRORS")?,
+        max_tree_depth: default("DEFAULT_MAX_TREE_DEPTH")?,
+        parse_noscript_content_as_text: false,
+    };
+    Ok(DEFAULTS.get_or_init(|| options).clone())
+}
+
+/// Gumbo's options: three required keywords and one optional one.
 fn options(keywords: RHash) -> Result<Options, Error> {
     let keywords = get_kwargs::<_, (i32, i32, i32), (Option<Value>,), ()>(
         keywords,
@@ -126,13 +137,17 @@ fn options(keywords: RHash) -> Result<Options, Error> {
     )?;
     let (max_attributes, max_errors, max_tree_depth) = keywords.required;
     let (noscript_as_text,) = keywords.optional;
-    let limit = |value: i32| usize::try_from(value).ok();
     Ok(Options {
         max_attributes: limit(max_attributes),
         max_errors: limit(max_errors),
         max_tree_depth: limit(max_tree_depth),
         parse_noscript_content_as_text: noscript_as_text.is_some_and(|value| value.to_bool()),
     })
+}
+
+/// A negative limit is no limit.
+fn limit(value: i32) -> Option<usize> {
+    usize::try_from(value).ok()
 }
 
 /// The whole string, zero bytes included, as gumbo reads it.
