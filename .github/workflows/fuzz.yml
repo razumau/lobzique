@@ -55,7 +55,7 @@ jobs:
         run: |
           for target in $(cargo fuzz list); do
             seeds=()
-            if [ "$target" = html5 ] || [ "$target" = dom ]; then
+            if [ "$target" = html5 ] || [ "$target" = html5_in_context ] || [ "$target" = dom ]; then
               seeds=(test/fixtures/wpt-parsing/tree-construction test/fixtures/html5lib-tests/tokenizer)
             fi
             dict=()

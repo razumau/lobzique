@@ -42,3 +42,10 @@ path = "fuzz_targets/xpath.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "html5_in_context"
+path = "fuzz_targets/html5_in_context.rs"
+test = false
+doc = false
+bench = false
