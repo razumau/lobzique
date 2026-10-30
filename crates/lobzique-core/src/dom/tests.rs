@@ -704,14 +704,14 @@ fn a_document_copy_leaves_unlinked_nodes_behind() {
     });
     assert!(doctype.is_some());
     let copy = doc.copy_document(true);
-    assert_eq!(copy.node_ids().len(), 1 + 1 + 1 + 2 + 4);
+    assert_eq!(copy.node_ids().count(), 1 + 1 + 1 + 2 + 4);
     assert_eq!(copy.encoding(), Some(&b"UTF-8"[..]));
     assert!(matches!(
         copy.node_kind(copy.doctype().unwrap()),
         NodeKind::Doctype(_)
     ));
     assert_eq!(copy.content(NodeId::DOCUMENT), doc.content(p));
-    assert_eq!(doc.copy_document(false).node_ids().len(), 1);
+    assert_eq!(doc.copy_document(false).node_ids().count(), 1);
     copy.check_invariants().unwrap();
 }
 

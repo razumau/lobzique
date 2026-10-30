@@ -215,7 +215,7 @@ pub fn parse_in_context(
         tree_builder_options(options, context.quirks_mode),
     );
     builder.sink.building_scaffolding.set(false);
-    let first_parsed = builder.sink.document.borrow().node_ids().len();
+    let first_parsed = builder.sink.document.borrow().arena_ids().len();
     let initial_state =
         builder.tokenizer_state_for_context_elem(options.parse_noscript_content_as_text);
     let parsed = run(builder, input, options, Some(initial_state));

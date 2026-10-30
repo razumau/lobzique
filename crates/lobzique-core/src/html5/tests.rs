@@ -171,10 +171,11 @@ fn parsing_in_context_reuses_its_scaffolding() {
             .0
     };
     let first = parse(&mut document, b"<html lang=en><p>a</p>");
-    let before = document.node_ids().len();
+    let before = document.arena_ids().len();
     let second = parse(&mut document, b"<p>b</p>");
     // the p and its text
-    assert_eq!(document.node_ids().len(), before + 2);
+    assert_eq!(document.arena_ids().len(), before + 2);
+    assert_eq!(document.node_ids().count() + 4, document.arena_ids().len());
     document.check_invariants().unwrap();
     assert_eq!(html(&document, first[0]), "<p>a</p>");
     assert_eq!(html(&document, second[0]), "<p>b</p>");

@@ -225,7 +225,7 @@ impl Document {
     /// Every node's tree root and position in that tree, in document order.
     pub(super) fn number_nodes(&self) -> Vec<(NodeId, u32)> {
         let mut order = vec![(NodeId::DOCUMENT, 0); self.nodes.len()];
-        for root in self.node_ids().filter(|&id| self.parent(id).is_none()) {
+        for root in self.arena_ids().filter(|&id| self.parent(id).is_none()) {
             // No more than the arena's node count, which fits in a u32
             let mut position = 0;
             for node in std::iter::once(root).chain(self.descendants(root)) {

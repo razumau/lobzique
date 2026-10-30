@@ -140,8 +140,14 @@ impl Document {
         self.version = version;
     }
 
-    /// Every node in the arena, linked or not, in creation order.
-    pub fn node_ids(&self) -> impl ExactSizeIterator<Item = NodeId> {
+    /// Every node a caller can hold, linked or not, in creation order: the
+    /// arena but for the scaffolding waiting for the next fragment parse.
+    pub fn node_ids(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.arena_ids().filter(|id| !self.scaffolding.contains(id))
+    }
+
+    /// Every node in the arena, the waiting scaffolding included.
+    pub(crate) fn arena_ids(&self) -> impl ExactSizeIterator<Item = NodeId> {
         (0..self.nodes.len()).map(NodeId::from_index)
     }
 
