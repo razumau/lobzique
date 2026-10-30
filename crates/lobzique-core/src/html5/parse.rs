@@ -180,9 +180,8 @@ pub fn parse_fragment(
     Ok(parsed)
 }
 
-/// Parses a fragment in `context` and returns its top-level nodes,
-/// unlinked from each other, as libxml2's `xmlParseInNodeContext` does for
-/// Nokogiri's `in_context`.
+/// Parses a fragment in `context` and returns its top-level nodes, each
+/// unlinked from its parent and siblings.
 pub fn parse_in_context(
     document: &mut Document,
     input: &[u8],
