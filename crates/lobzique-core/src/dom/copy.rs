@@ -194,11 +194,12 @@ impl Document {
         no_namespace(self.kind)
     }
 
-    /// Elements made from `first` on by the HTML parser, which names them
-    /// in the HTML namespace, renamed as this document writes no namespace.
-    pub fn adopt_parsed_names(&mut self, first: NodeId) {
+    /// Elements the HTML parser made, from the `first`-th node in the arena
+    /// on, which it names in the HTML namespace, renamed as this document
+    /// writes no namespace.
+    pub fn adopt_parsed_names(&mut self, first: usize) {
         let kind = self.kind;
-        for node in &mut self.nodes[first.index()..] {
+        for node in &mut self.nodes[first..] {
             if let NodeKind::Element(element) = &mut node.kind {
                 element.name = adopt_name(element.name.clone(), DocumentKind::Html, kind);
             }

@@ -1,6 +1,8 @@
 //! The arena DOM. A [`Document`] owns every node created for it, and frees
 //! none of them before it is dropped itself: unlinked nodes stay valid, the
 //! way they do in a libxml2 document that Nokogiri keeps them pinned to.
+//! Only the scaffolding a fragment parse builds, which Ruby never sees, is
+//! reused by the next fragment parse.
 //!
 //! Element and attribute names follow the HTML standard, so HTML elements are
 //! in the HTML namespace; the bindings show that namespace as `nil`, as
@@ -74,6 +76,9 @@ pub struct Document {
     /// dropped when the tree changes (`tree::document_order`).
     order: OnceCell<Vec<(NodeId, u32)>>,
     order_walked: Cell<usize>,
+    /// Unlinked nodes a fragment parse built around what it parsed, which
+    /// Ruby is never handed; the next fragment parse builds in them again.
+    scaffolding: Vec<NodeId>,
 }
 
 impl Document {
@@ -84,6 +89,7 @@ impl Document {
             encoding: None,
             order: OnceCell::new(),
             order_walked: Cell::new(0),
+            scaffolding: Vec::new(),
         }
     }
 
@@ -276,6 +282,44 @@ impl Document {
         let id = NodeId::from_index(self.nodes.len());
         self.nodes.push(Node::new(kind));
         id
+    }
+
+    pub(crate) fn create_scaffolding_fragment(&mut self) -> NodeId {
+        self.create_scaffolding(NodeKind::DocumentFragment)
+    }
+
+    pub(crate) fn create_scaffolding_element(&mut self, name: QualName) -> NodeId {
+        self.create_scaffolding(NodeKind::Element(Element {
+            name,
+            attributes: Vec::new(),
+            namespace_definitions: Vec::new(),
+        }))
+    }
+
+    fn create_scaffolding(&mut self, kind: NodeKind) -> NodeId {
+        match self.scaffolding.pop() {
+            Some(id) => {
+                *self.node_mut(id) = Node::new(kind);
+                id
+            }
+            None => self.create(kind),
+        }
+    }
+
+    /// Gives back a node from `create_scaffolding_*` for the next one to
+    /// reuse, unlinked from everything around it. Ruby must never have been
+    /// handed it, since its id will name another node.
+    pub(crate) fn release_scaffolding(&mut self, id: NodeId) {
+        self.detach(id);
+        while let Some(child) = self.first_child(id) {
+            self.detach(child);
+        }
+        while let Some(&attribute) = self.attributes(id).first() {
+            self.detach(attribute);
+        }
+        // An empty fragment, which no document kind puts constraints on
+        *self.node_mut(id) = Node::new(NodeKind::DocumentFragment);
+        self.scaffolding.push(id);
     }
 
     fn node(&self, id: NodeId) -> &Node {

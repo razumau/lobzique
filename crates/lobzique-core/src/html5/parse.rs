@@ -162,8 +162,6 @@ impl Context {
 }
 
 /// Parses a fragment in `context` and appends what it makes to `fragment`.
-/// The parser's own scaffolding (its root, the context element) stays
-/// behind in the arena, unlinked.
 pub fn parse_fragment(
     document: &mut Document,
     fragment: NodeId,
@@ -181,20 +179,23 @@ pub fn parse_fragment(
 }
 
 /// Parses a fragment in `context` and returns its top-level nodes, each
-/// unlinked from its parent and siblings.
+/// unlinked from its parent and siblings. The parser's own scaffolding (a
+/// scratch fragment, its html root, the context and form elements) is
+/// reused by the document's next fragment parse.
 pub fn parse_in_context(
     document: &mut Document,
     input: &[u8],
     context: &Context,
     options: &Options,
 ) -> Result<(Vec<NodeId>, Parsed), LimitError> {
-    let scratch = document.create_fragment();
+    let scratch = document.create_scaffolding_fragment();
     // The tree has an html element above the fragment's nodes, as gumbo's does
     let max_tree_depth = options.max_tree_depth.map(|depth| depth.saturating_add(1));
     let sink = Sink::new(document, scratch, options, max_tree_depth);
     // The tree builder starts in this mode and never sets it in a fragment
     sink.quirks_mode.set(context.quirks_mode);
 
+    sink.building_scaffolding.set(true);
     let mut attributes = Vec::new();
     if let Some(encoding) = &context.encoding {
         attributes.push(Attribute {
@@ -213,12 +214,15 @@ pub fn parse_in_context(
         form,
         tree_builder_options(options, context.quirks_mode),
     );
+    builder.sink.building_scaffolding.set(false);
+    let first_parsed = builder.sink.document.borrow().node_ids().len();
     let initial_state =
         builder.tokenizer_state_for_context_elem(options.parse_noscript_content_as_text);
-    let parsed = run(builder, input, options, Some(initial_state))?;
+    let parsed = run(builder, input, options, Some(initial_state));
 
+    let root = document.first_child(scratch);
     let mut nodes = Vec::new();
-    if let Some(root) = document.first_child(scratch) {
+    if let (Some(root), Ok(_)) = (root, &parsed) {
         while let Some(child) = document.first_child(root) {
             document.detach(child);
             if matches!(document.node_kind(child), NodeKind::Element(_)) {
@@ -227,8 +231,12 @@ pub fn parse_in_context(
             nodes.push(child);
         }
     }
-    document.adopt_parsed_names(scratch);
-    Ok((nodes, parsed))
+    let scaffolding = [Some(scratch), root, Some(context_element), form];
+    for id in scaffolding.into_iter().flatten() {
+        document.release_scaffolding(id);
+    }
+    document.adopt_parsed_names(first_parsed);
+    Ok((nodes, parsed?))
 }
 
 /// Gumbo's binding defines the foreign namespaces a top-level element and
@@ -451,6 +459,8 @@ struct Sink<'a> {
     /// MathML `annotation-xml` elements whose content parses as HTML.
     integration_points: RefCell<HashSet<NodeId>>,
     text_source: Cell<TextSource>,
+    /// Whether the elements being made are a fragment parse's scaffolding.
+    building_scaffolding: Cell<bool>,
 }
 
 impl<'a> Sink<'a> {
@@ -471,6 +481,7 @@ impl<'a> Sink<'a> {
             too_deep: Cell::new(false),
             integration_points: RefCell::default(),
             text_source: Cell::new(TextSource::Data),
+            building_scaffolding: Cell::new(false),
         }
     }
 
@@ -622,7 +633,11 @@ impl TreeSink for Sink<'_> {
         flags: ElementFlags,
     ) -> NodeId {
         let mut document = self.document.borrow_mut();
-        let element = document.create_element(name);
+        let element = if self.building_scaffolding.get() {
+            document.create_scaffolding_element(name)
+        } else {
+            document.create_element(name)
+        };
         for attribute in attributes {
             let node =
                 document.create_attribute(attribute.name, attribute.value.as_bytes().to_vec());

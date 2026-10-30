@@ -162,6 +162,25 @@ fn parsing_in_context_leaves_each_node_unlinked() {
 }
 
 #[test]
+fn parsing_in_context_reuses_its_scaffolding() {
+    let mut document = Document::new(DocumentKind::Html);
+    let context = Context::new(ContextNamespace::Html, "div").with_form_ancestor(true);
+    let parse = |document: &mut Document, input: &[u8]| {
+        parse_in_context(document, input, &context, &Options::default())
+            .unwrap()
+            .0
+    };
+    let first = parse(&mut document, b"<html lang=en><p>a</p>");
+    let before = document.node_ids().len();
+    let second = parse(&mut document, b"<p>b</p>");
+    // the p and its text
+    assert_eq!(document.node_ids().len(), before + 2);
+    document.check_invariants().unwrap();
+    assert_eq!(html(&document, first[0]), "<p>a</p>");
+    assert_eq!(html(&document, second[0]), "<p>b</p>");
+}
+
+#[test]
 fn a_form_ancestor_drops_nested_forms() {
     let body = Context::new(ContextNamespace::Html, "body");
     let (document, root) = fragment("<form></form>", &body.clone().with_form_ancestor(true));
@@ -373,10 +392,31 @@ fn fragments_in_xml_documents_have_no_namespace() {
     document.check_invariants().unwrap();
     let p = document.first_child(fragment).unwrap();
     let svg = document.last_child(p).unwrap();
-    let namespace = |id| match document.node_kind(id) {
+    let namespace = |document: &Document, id| match document.node_kind(id) {
         NodeKind::Element(element) => element.name.ns.clone(),
         _ => unreachable!(),
     };
-    assert_eq!((namespace(p), namespace(svg)), (ns!(), ns!(svg)));
+    assert_eq!(
+        (namespace(&document, p), namespace(&document, svg)),
+        (ns!(), ns!(svg))
+    );
     assert_eq!(html(&document, fragment), "<p>a<svg></svg></p>");
+
+    // The second parse builds in older nodes, and renames only what it made
+    let html_p = document.create_element(QualName::new(
+        None,
+        ns!(html),
+        crate::dom::LocalName::from("p"),
+    ));
+    parse_fragment(
+        &mut document,
+        fragment,
+        b"<i></i>",
+        &context,
+        &Options::default(),
+    )
+    .unwrap();
+    let i = document.last_child(fragment).unwrap();
+    assert_eq!(namespace(&document, html_p), ns!(html));
+    assert_eq!(namespace(&document, i), ns!());
 }

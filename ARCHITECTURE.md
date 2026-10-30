@@ -188,7 +188,7 @@ assemble it.
 | `dom::reparent` | Nokogiri's `reparent_node_with` over libxml2 2.13: hierarchy checks, copying text and cross-document nodes, merging adjacent text (`xmlAddChild` and `replace` only), `relink_namespace` | built |
 | `dom::copy` | `xmlDocCopyNode` at Nokogiri's three `dup` levels, `xmlCopyDoc`; a copy defines the foreign namespaces it uses on its root | built |
 | `dom::text` | content, `native_content=` (`xmlNodeSetContent`); `blank?`, `encode_special_chars` | built |
-| `html5::parse` | html5ever `TreeSink` into the arena: documents, fragments with a context node (appended to a fragment, or unlinked for `in_context`), `max_tree_depth`/`max_attributes`, quirks mode, errors; gumbo's text and CDATA nodes | built |
+| `html5::parse` | html5ever `TreeSink` into the arena: documents, fragments with a context node (appended to a fragment, or unlinked for `in_context`; the parser's scaffolding is reused across fragment parses), `max_tree_depth`/`max_attributes`, quirks mode, errors; gumbo's text and CDATA nodes | built |
 | `html5::serialize` | `html_standard_serialize`, byte for byte with Nokogiri::HTML5 | built |
 | `xml::serialize` | `native_write_to` for `to_xhtml` | planned, late in phase 2 |
 | `css` | Nokogiri's CSS front end, ported: `tokenizer` (rex rules in order), `parser` (racc's parse loop over `tables`, which `script/generate_css_tables` generates from Nokogiri's parser, and the grammar's actions), `translate` (`XPathVisitor`, building `xpath` trees where it writes strings) | built |
