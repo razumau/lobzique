@@ -188,7 +188,7 @@ assemble it.
 | `dom::reparent` | Nokogiri's `reparent_node_with` over libxml2 2.13: hierarchy checks, copying text and cross-document nodes, merging adjacent text (`xmlAddChild` and `replace` only), `relink_namespace` | built |
 | `dom::copy` | `xmlDocCopyNode` at Nokogiri's three `dup` levels, `xmlCopyDoc`; a copy defines the foreign namespaces it uses on its root | built |
 | `dom::text` | content, `native_content=` (`xmlNodeSetContent`); `blank?`, `encode_special_chars` | built |
-| `html5::parse` | html5ever `TreeSink` into the arena: documents, fragments with a context node, `max_tree_depth`/`max_attributes`, quirks mode, errors; gumbo's text and CDATA nodes | built |
+| `html5::parse` | html5ever `TreeSink` into the arena: documents, fragments with a context node (appended to a fragment, or unlinked for `in_context`), `max_tree_depth`/`max_attributes`, quirks mode, errors; gumbo's text and CDATA nodes | built |
 | `html5::serialize` | `html_standard_serialize`, byte for byte with Nokogiri::HTML5 | built |
 | `xml::serialize` | `native_write_to` for `to_xhtml` | planned, late in phase 2 |
 | `css` | Nokogiri's CSS front end, ported: `tokenizer` (rex rules in order), `parser` (racc's parse loop over `tables`, which `script/generate_css_tables` generates from Nokogiri's parser, and the grammar's actions), `translate` (`XPathVisitor`, building `xpath` trees where it writes strings) | built |
@@ -230,7 +230,9 @@ assemble it.
 | nested parentheses in CSS | unlimited | at most 32 deep, else `CSS::SyntaxError` | the tree is recursive to translate and evaluate, about 4 KB of stack a level; real selectors nest two or three deep |
 | CSS on HTML4 documents | names without a prefix match elements in no namespace, which is every element of an HTML4 parse | they match in any namespace, as in HTML5 documents | HTML4 names parse as HTML5 (decision 3), so `svg` has a namespace |
 | HTML4 names | libxml2's HTML4 parser and serializer | the HTML5 parser and serializer, with libxml2's encoding handling; `HTML5::Node`'s overrides apply to any `HTML4::Document` | decision 3 |
-| `Node#parse` / `in_context` | libxml2's HTML4 parser, even in HTML5 documents | the HTML5 fragment parser with the node as context | one parser |
+| `Node#parse` / `in_context` | libxml2's HTML4 parser, even in HTML5 documents; libxml2's XML parser in XML documents | the HTML5 fragment parser in the context of the nearest element, or with no context (`body`) where there is none; html5ever's errors, at most 100 a parse as libxml2 keeps; `NotImplementedError` in XML documents | one parser; XML parsing is out of scope (decision 4) |
+| `Node#parse` after errors with nothing parsed | parses again as a fragment without the context, in a new document | returns the empty NodeSet | the fallback emulates recovery for libxml2 < 2.13; the HTML5 parser always recovers |
+| nodes `in_context` returns | unlinked, but each keeps its `previous_sibling` | unlinked from each other too | a stale link into nodes that aren't siblings |
 | parse error text | gumbo's, with line and column | html5ever's, with line only | different parsers; listed in `test/differential/known.yml` if compared |
 | `<select>` contents | dropped, as the HTML standard did before 2025 | kept, as the standard and browsers now do (customizable select) | html5ever implements the current standard; `known.yml` lists the cases |
 | `max_tree_depth` | counted on gumbo's stack of open elements | each element's depth where it is inserted, void elements excepted | html5ever doesn't expose its stack; the two agree on ordinary nesting and can differ after the adoption agency moves elements |

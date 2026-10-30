@@ -137,6 +137,31 @@ fn fragments_parse_in_their_context() {
 }
 
 #[test]
+fn parsing_in_context_leaves_each_node_unlinked() {
+    let mut document = Document::new(DocumentKind::Html);
+    let context = Context::new(ContextNamespace::Html, "div");
+    let (nodes, _) = parse_in_context(
+        &mut document,
+        b"<p>a</p>b<svg/>",
+        &context,
+        &Options::default(),
+    )
+    .unwrap();
+    document.check_invariants().unwrap();
+    let parts: Vec<_> = nodes.iter().map(|&id| html(&document, id)).collect();
+    assert_eq!(parts, ["<p>a</p>", "b", "<svg></svg>"]);
+    for &id in &nodes {
+        assert_eq!(document.parent(id), None);
+        assert_eq!(document.previous_sibling(id), None);
+        assert_eq!(document.next_sibling(id), None);
+    }
+    assert!(document
+        .namespace_definitions(nodes[2])
+        .iter()
+        .any(|ns| ns.prefix.as_deref() == Some("svg")));
+}
+
+#[test]
 fn a_form_ancestor_drops_nested_forms() {
     let body = Context::new(ContextNamespace::Html, "body");
     let (document, root) = fragment("<form></form>", &body.clone().with_form_ancestor(true));

@@ -1,11 +1,13 @@
 //! `Html5ever`, Nokogiri's `Gumbo` (`ext/nokogiri/gumbo.c`): the HTML5
 //! parser's entry points behind `HTML5::Document.parse` and
-//! `HTML5::DocumentFragment#initialize`.
+//! `HTML5::DocumentFragment#initialize`, and the parse behind
+//! `Node#in_context`.
 
 use crate::support::{c_string, c_string_with_length, call_initialize, check_string, string_bytes};
 use crate::xml::document::{self, wrap_document};
-use crate::xml::node::{utf8_string, Node};
+use crate::xml::node::{node_set, utf8_string, wrap, Node};
 use crate::{HTML5EVER, XML};
+use lobzique_core::dom::NodeType;
 use lobzique_core::html5::{
     self, Context, ContextNamespace, LimitError, Options, ParseError, QuirksMode,
 };
@@ -14,7 +16,7 @@ use magnus::{
     prelude::*,
     scan_args::{get_kwargs, scan_args},
     typed_data::Obj,
-    Error, RClass, RHash, RObject, RString, Ruby, Value,
+    Error, RArray, RClass, RHash, RObject, RString, Ruby, Value,
 };
 
 /// `Html5ever.parse(input, url, klass, **options)`: a document of `klass`,
@@ -45,8 +47,9 @@ fn fragment(ruby: &Ruby, args: &[Value]) -> Result<(), Error> {
     let args = scan_args::<(Value, Value, Value), (), (), (), RHash, ()>(args)?;
     let (fragment, input, context_arg) = args.required;
     let options = options(args.keywords)?;
+    let document: Value = fragment.funcall("document", ())?;
     let context =
-        context_for(ruby, context_arg)?.with_quirks_mode(quirks_mode_for(fragment, context_arg)?);
+        context_for(ruby, context_arg)?.with_quirks_mode(quirks_mode_for(document, context_arg)?);
     let input = input_bytes(ruby, input)?;
 
     // Nokogiri builds in the document `fragment.document` names; the nodes
@@ -64,6 +67,46 @@ fn fragment(ruby: &Ruby, args: &[Value]) -> Result<(), Error> {
         parsed.errors,
         utf8_string(ruby, "#fragment").as_value(),
     )
+}
+
+/// `Node#in_context`'s parse: `input` as a fragment in the context of the
+/// nearest element at or above `node`, or with no context, as libxml2
+/// parses in the document. The top-level nodes come back unlinked, and the
+/// parse errors are added to the document's `@errors`.
+pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error> {
+    let input = input_bytes(ruby, input)?;
+    let document = node.document(ruby)?;
+    let element = node.with_arena(ruby, |arena, id| {
+        std::iter::once(id)
+            .chain(arena.ancestors(id))
+            .find(|&id| arena.node_type(id) == NodeType::Element)
+    })?;
+    let context = match element {
+        Some(element) => {
+            let element = wrap(ruby, document, element)?;
+            context_for(ruby, element)?.with_quirks_mode(quirks_mode_for(document, element)?)
+        }
+        None => context_for(ruby, ruby.qnil().as_value())?,
+    };
+    let module = ruby.get_inner(&HTML5EVER);
+    let limit = |name: &str| -> Result<Option<usize>, Error> {
+        Ok(usize::try_from(module.const_get::<_, i32>(name)?).ok())
+    };
+    let options = Options {
+        max_attributes: limit("DEFAULT_MAX_ATTRIBUTES")?,
+        // libxml2 keeps at most 100 errors a parse
+        max_errors: Some(100),
+        max_tree_depth: limit("DEFAULT_MAX_TREE_DEPTH")?,
+        parse_noscript_content_as_text: false,
+    };
+
+    let (ids, parsed) = document::with_arena_mut(ruby, document, |arena| {
+        html5::parse_in_context(arena, &input, &context, &options)
+    })?
+    .map_err(|error| limit_error(ruby, error))?;
+    let errors = Obj::<Node>::try_convert(document)?.ivar_get::<_, RArray>("@errors")?;
+    errors.concat(syntax_errors(ruby, parsed.errors, ruby.qnil().as_value())?)?;
+    node_set(ruby, document, ids)
 }
 
 /// Gumbo's options: three required keywords and one optional one. A
@@ -205,8 +248,7 @@ fn namespace_of(ruby: &Ruby, node: Value) -> Result<Option<ContextNamespace>, Er
 
 /// No quirks unless the context is a node of a parsed document; then the
 /// quirks mode its doctype selects, or quirks if it has none.
-fn quirks_mode_for(fragment: Value, context: Value) -> Result<QuirksMode, Error> {
-    let document: Value = fragment.funcall("document", ())?;
+fn quirks_mode_for(document: Value, context: Value) -> Result<QuirksMode, Error> {
     let doctype: Value = document.funcall("internal_subset", ())?;
     let document_quirks_mode =
         Obj::<Node>::try_convert(document)?.ivar_get::<_, Value>("@quirks_mode")?;
@@ -239,6 +281,10 @@ fn add_errors(
     if errors.is_empty() {
         return Ok(());
     }
+    target.ivar_set("@errors", syntax_errors(ruby, errors, file)?)
+}
+
+fn syntax_errors(ruby: &Ruby, errors: Vec<ParseError>, file: Value) -> Result<RArray, Error> {
     let class: RClass = ruby.get_inner(&XML).const_get("SyntaxError")?;
     let array = ruby.ary_new_capa(errors.len());
     for error in errors {
@@ -258,7 +304,7 @@ fn add_errors(
         syntax_error.ivar_set("@column", 0)?;
         array.push(syntax_error)?;
     }
-    target.ivar_set("@errors", array)
+    Ok(array)
 }
 
 pub fn init(ruby: &Ruby) -> Result<(), Error> {

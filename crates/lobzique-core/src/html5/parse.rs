@@ -171,6 +171,24 @@ pub fn parse_fragment(
     context: &Context,
     options: &Options,
 ) -> Result<Parsed, LimitError> {
+    let (nodes, parsed) = parse_in_context(document, input, context, options)?;
+    for node in nodes {
+        if document.append_child(fragment, node).is_err() {
+            break;
+        }
+    }
+    Ok(parsed)
+}
+
+/// Parses a fragment in `context` and returns its top-level nodes,
+/// unlinked from each other, as libxml2's `xmlParseInNodeContext` does for
+/// Nokogiri's `in_context`.
+pub fn parse_in_context(
+    document: &mut Document,
+    input: &[u8],
+    context: &Context,
+    options: &Options,
+) -> Result<(Vec<NodeId>, Parsed), LimitError> {
     let scratch = document.create_fragment();
     // The tree has an html element above the fragment's nodes, as gumbo's does
     let max_tree_depth = options.max_tree_depth.map(|depth| depth.saturating_add(1));
@@ -200,18 +218,18 @@ pub fn parse_fragment(
         builder.tokenizer_state_for_context_elem(options.parse_noscript_content_as_text);
     let parsed = run(builder, input, options, Some(initial_state))?;
 
+    let mut nodes = Vec::new();
     if let Some(root) = document.first_child(scratch) {
         while let Some(child) = document.first_child(root) {
-            if document.append_child(fragment, child).is_err() {
-                break;
-            }
+            document.detach(child);
             if matches!(document.node_kind(child), NodeKind::Element(_)) {
                 define_namespaces(document, child);
             }
+            nodes.push(child);
         }
     }
     document.adopt_parsed_names(scratch);
-    Ok(parsed)
+    Ok((nodes, parsed))
 }
 
 /// Gumbo's binding defines the foreign namespaces a top-level element and

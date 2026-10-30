@@ -307,6 +307,46 @@ module Lobzique
         document.related_class("DocumentFragment").new(document, tags, self)
       end
 
+      def parse(string_or_io, options = nil)
+        ##
+        # When the current node is unparented and not an element node, use the
+        # document as the parsing context instead. Otherwise, the in-context
+        # parser cannot find an element or a document node.
+        # Document Fragments are also not usable by the in-context parser.
+        if !element? && !document? && (!parent || parent.fragment?)
+          return document.parse(string_or_io, options)
+        end
+
+        # lobzique: in_context parses HTML only; XML parsing is out of scope
+        # (plan.md decision 4)
+        raise NotImplementedError, "#{XML::Document}.parse isn't supported" unless document.html?
+
+        options ||= (document.html? ? ParseOptions::DEFAULT_HTML : ParseOptions::DEFAULT_XML)
+        options = ParseOptions.new(options) if Integer === options
+        yield options if block_given?
+
+        contents = if string_or_io.respond_to?(:read)
+          string_or_io.read
+        else
+          string_or_io
+        end
+
+        return NodeSet.new(document) if contents.empty?
+
+        error_count = document.errors.length
+        node_set = in_context(contents, options.to_i)
+
+        if document.errors.length > error_count
+          raise document.errors[error_count] unless options.recover?
+
+          # lobzique: Nokogiri's fallback to a fragment parsed without the
+          # context is dropped: it emulates recovery for libxml2 < 2.13,
+          # and the HTML5 parser always recovers
+        end
+
+        node_set
+      end
+
       def namespaces
         namespace_scopes.each_with_object({}) do |ns, hash|
           prefix = ns.prefix

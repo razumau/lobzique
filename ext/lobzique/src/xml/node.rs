@@ -5,6 +5,7 @@ use super::{
     attr::ATTR, cdata::CDATA, comment::COMMENT, document, document_fragment::DOCUMENT_FRAGMENT,
     dtd::DTD, namespace, text::TEXT,
 };
+use crate::html5ever;
 use crate::support::{c_string, call_initialize, obj_class, warn_deprecated, yield_to_block};
 use crate::XML;
 use lobzique_core::dom::{
@@ -339,6 +340,17 @@ impl Node {
 
     fn prepend_newline_p(ruby: &Ruby, rb_self: &Self) -> Result<bool, Error> {
         rb_self.with_arena(ruby, html5::prepend_newline)
+    }
+
+    /// The options are libxml2's parser options, which the HTML5 parser has
+    /// no use for; they are still converted as Nokogiri converts them.
+    fn in_context(
+        ruby: &Ruby,
+        rb_self: &Self,
+        input: Value,
+        _options: i32,
+    ) -> Result<Value, Error> {
+        html5ever::in_context(ruby, rb_self, input)
     }
 
     fn add_child_node(ruby: &Ruby, rb_self: &Self, node: Value) -> Result<Value, Error> {
@@ -785,6 +797,7 @@ pub fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_private_method("set", method!(Node::set, 2))?;
     class.define_private_method("compare", method!(Node::compare, 1))?;
     class.define_private_method("get", method!(Node::get, 1))?;
+    class.define_private_method("in_context", method!(Node::in_context, 2))?;
     class.define_private_method("prepend_newline?", method!(Node::prepend_newline_p, 0))?;
     class.define_private_method(
         "html_standard_serialize",

@@ -140,8 +140,10 @@ html5lib tokenizer inputs.
       `descendant-or-self::node()/x` becomes `descendant::x` only when `x`
       has no predicates, so from a fragment `.//p` and `.//p[@id]` differ.
    7. `Node#parse` and `in_context`: the HTML5 fragment parser with the
-      node as context. Parsing with the HTML4 names (decision 3) waits for
-      the facade, because seam mode never reaches it.
+      node as context. Done, in HTML documents; XML documents raise
+      `NotImplementedError` (decision 4). The departures are in
+      `ARCHITECTURE.md`. Parsing with the HTML4 names (decision 3) waits
+      for the facade, because seam mode never reaches it.
    8. XHTML output (`native_write_to`) for premailer.
 
    Later, once profiling shows where it pays: move hot ported Ruby methods
