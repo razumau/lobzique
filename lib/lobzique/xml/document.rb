@@ -98,6 +98,8 @@ module Lobzique
         end
       end
 
+      alias_method :to_xml, :serialize
+
       def namespaces
         root ? root.namespaces : {}
       end

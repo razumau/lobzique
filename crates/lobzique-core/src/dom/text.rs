@@ -161,3 +161,12 @@ pub fn encode_special_chars(input: &[u8]) -> Vec<u8> {
     }
     encoded
 }
+
+/// libxml2 holds text as C strings, so what it writes ends at the first
+/// zero byte.
+pub fn c_string(bytes: &[u8]) -> &[u8] {
+    match bytes.iter().position(|&byte| byte == 0) {
+        Some(end) => &bytes[..end],
+        None => bytes,
+    }
+}

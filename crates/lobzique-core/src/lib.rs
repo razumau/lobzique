@@ -7,4 +7,5 @@
 pub mod css;
 pub mod dom;
 pub mod html5;
+pub mod xml;
 pub mod xpath;

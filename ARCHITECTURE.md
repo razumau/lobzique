@@ -190,7 +190,7 @@ assemble it.
 | `dom::text` | content, `native_content=` (`xmlNodeSetContent`); `blank?`, `encode_special_chars` | built |
 | `html5::parse` | html5ever `TreeSink` into the arena: documents, fragments with a context node (appended to a fragment, or unlinked for `in_context`; the parser's scaffolding is reused across fragment parses), `max_tree_depth`/`max_attributes`, quirks mode, errors; gumbo's text and CDATA nodes | built |
 | `html5::serialize` | `html_standard_serialize`, byte for byte with Nokogiri::HTML5 | built |
-| `xml::serialize` | `native_write_to` for `to_xhtml` | planned, late in phase 2 |
+| `xml::serialize` | `native_write_to`: libxml2's `xmlSaveTree` for XML and XHTML output, with its escaping, formatting, XHTML 1.0 appendix C rules and encoding switch; the binding transcodes the result | built |
 | `css` | Nokogiri's CSS front end, ported: `tokenizer` (rex rules in order), `parser` (racc's parse loop over `tables`, which `script/generate_css_tables` generates from Nokogiri's parser, and the grammar's actions), `translate` (`XPathVisitor`, building `xpath` trees where it writes strings) | built |
 | `xpath` | `ast` (expressions as trees, `and`/`or` as lists), `eval` (libxml2's evaluation: XPath 1.0 values and comparisons, node sets in document order, positions per step, custom calls answered in rounds), `parse` (XPath strings: all of XPath 1.0 read as libxml2 reads it, with its error codes, built into trees for the subset of plan.md decision 2); `XML::XPathContext` errors | built |
 
@@ -234,6 +234,9 @@ assemble it.
 | `Node#parse` after errors with nothing parsed | parses again as a fragment without the context, in a new document | returns the empty NodeSet | the fallback emulates recovery for libxml2 < 2.13; the HTML5 parser always recovers |
 | nodes `in_context` returns | unlinked, but each keeps its `previous_sibling` | unlinked from each other too | a stale link into nodes that aren't siblings |
 | parse error text | gumbo's, with line and column | html5ever's, with line only | different parsers; listed in `test/differential/known.yml` if compared |
+| libxml2's HTML serializer | `to_html` of nodes in XML documents, and save options that ask for it | `NotImplementedError` | HTML documents use the HTML5 serializer (decision 3); XML documents are out of scope (decision 4) |
+| output encodings for `to_xml` and `to_xhtml` | libxml2's encoding handlers and names; output stops at invalid UTF-8 | Ruby's transcoders and encoding names, with `&#NNN;` for characters the encoding lacks, as libxml2 writes them; invalid UTF-8 is replaced; a name Ruby doesn't know writes nothing, as one libxml2 doesn't know does | the core has no transcoders; names differ only outside the common ones |
+| `native_write_to` writes | one `io.write` per 4 KB | one `io.write` | only an IO object that counts its calls can tell |
 | `<select>` contents | dropped, as the HTML standard did before 2025 | kept, as the standard and browsers now do (customizable select) | html5ever implements the current standard; `known.yml` lists the cases |
 | `max_tree_depth` | counted on gumbo's stack of open elements | each element's depth where it is inserted, void elements excepted | html5ever doesn't expose its stack; the two agree on ordinary nesting and can differ after the adoption agency moves elements |
 | `XML::Namespace` objects | one per libxml2 `xmlNs`, shared by the nodes that use it | a new object per call to `namespace`, `namespace_definitions` or `namespace_scopes` | the arena keeps namespaces as names, not objects; Loofah and rails-html-sanitizer read only `prefix` and `href` |
@@ -255,6 +258,11 @@ assemble it.
   `HTML5::Node#write_to` → native `html_standard_serialize` → a UTF-8
   string, encoded into the document's encoding with `&#x…;` for unmappable
   characters.
+- **XML and XHTML.** `doc.to_xhtml` → `to_format` → `serialize` →
+  `HTML5::Node#write_to` (`XML::Node#write_to` in XML documents) → native
+  `native_write_to` → core `xml::write`, escaped and formatted as libxml2
+  does → transcoded into the requested encoding, or the document's when
+  libxml2 would switch to it → `io.write`.
 - **XPath.** `node.xpath("//p[@id]")` → `Searchable#xpath` →
   `xpath_internal` → `XPathContext#evaluate(string)` → the core parses
   the string into the same trees CSS compiles to, then evaluates it.

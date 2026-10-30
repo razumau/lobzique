@@ -10,6 +10,7 @@ use lobzique_core::dom::{Document, DocumentKind, NodeId};
 use lobzique_core::html5::{
     parse_document, parse_fragment, serialize, Context, ContextNamespace, Options, QuirksMode,
 };
+use lobzique_core::xml::{self, save_options::*};
 
 const CONTEXTS: &[(ContextNamespace, &str)] = &[
     (ContextNamespace::Html, "body"),
@@ -59,6 +60,7 @@ fuzz_target!(|data: &[u8]| {
         panic!("{violation}");
     }
     serialize(&document, root, selector & 0x10 != 0);
+    _ = xml::write(&document, root, None, b"  ", AS_XHTML | FORMAT);
     query(&document, root);
 });
 

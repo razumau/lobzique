@@ -41,11 +41,12 @@ impl Document {
         self.copy_from(Some(source), id, depth)
     }
 
-    /// `xmlCopyDoc`: the encoding, and with `deep` the whole tree. Unlinked
-    /// nodes stay behind.
+    /// `xmlCopyDoc`: the encoding and version, and with `deep` the whole
+    /// tree. Unlinked nodes stay behind.
     pub fn copy_document(&self, deep: bool) -> Document {
         let mut copy = Document::new(self.kind);
         copy.encoding.clone_from(&self.encoding);
+        copy.version.clone_from(&self.version);
         if !deep {
             return copy;
         }

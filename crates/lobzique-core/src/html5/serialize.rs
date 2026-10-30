@@ -2,7 +2,7 @@
 //! writes the HTML standard's serialization of a node, the node included.
 
 use super::{is_html, VOID_ELEMENTS};
-use crate::dom::{Attribute, Document, NodeId, NodeKind, QualName};
+use crate::dom::{c_string, Attribute, Document, NodeId, NodeKind, QualName};
 use html5ever::ns;
 
 /// Elements whose text is written as is.
@@ -165,15 +165,6 @@ fn write_escaped(out: &mut Vec<u8>, text: &[u8], attribute: bool) {
         start = index;
     }
     out.extend_from_slice(&text[start..]);
-}
-
-/// libxml2 holds text as C strings, so Nokogiri writes it up to the first
-/// zero byte.
-fn c_string(bytes: &[u8]) -> &[u8] {
-    match bytes.iter().position(|&byte| byte == 0) {
-        Some(end) => &bytes[..end],
-        None => bytes,
-    }
 }
 
 fn write_all(out: &mut Vec<u8>, parts: &[&[u8]]) {

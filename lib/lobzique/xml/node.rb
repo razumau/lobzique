@@ -482,11 +482,48 @@ module Lobzique
         to_format(SaveOptions::DEFAULT_HTML, options)
       end
 
-      # lobzique: to_xml, to_xhtml, write_to and the write_*_to methods
-      # that use them wait for native_write_to (plan.md, phase 2 step 8)
+      def to_xml(options = {})
+        options[:save_with] ||= SaveOptions::DEFAULT_XML
+        serialize(options)
+      end
+
+      def to_xhtml(options = {})
+        to_format(SaveOptions::DEFAULT_XHTML, options)
+      end
+
+      # Options: :encoding (defaults to the document's), :indent_text (" "),
+      # :indent (2) and :save_with (SaveOptions::FORMAT).
+      def write_to(io, *options)
+        options = options.first.is_a?(Hash) ? options.shift : {}
+        encoding = options[:encoding] || options[0] || document.encoding
+        save_options = options[:save_with] || options[1] || SaveOptions::FORMAT
+        indent_times = options[:indent] || 2
+        indent_text = options[:indent_text] || " "
+
+        # Any string times 0 returns an empty string. Therefore, use the same
+        # string instead of generating a new empty string for every node with
+        # zero indentation.
+        indentation = indent_times.zero? ? "" : (indent_text * indent_times)
+
+        config = SaveOptions.new(save_options.to_i)
+        yield config if block_given?
+
+        encoding = encoding.is_a?(Encoding) ? encoding.name : encoding
+
+        native_write_to(io, encoding, indentation, config.options)
+      end
 
       def write_html_to(io, options = {})
         write_format_to(SaveOptions::DEFAULT_HTML, io, options)
+      end
+
+      def write_xhtml_to(io, options = {})
+        write_format_to(SaveOptions::DEFAULT_XHTML, io, options)
+      end
+
+      def write_xml_to(io, options = {})
+        options[:save_with] ||= SaveOptions::DEFAULT_XML
+        write_to(io, options)
       end
 
       DECONSTRUCT_KEYS = [:name, :attributes, :children, :namespace, :content, :elements, :inner_html].freeze # :nodoc:

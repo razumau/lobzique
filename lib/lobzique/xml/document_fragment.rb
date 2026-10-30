@@ -61,8 +61,13 @@ module Lobzique
         children.to_html(*args)
       end
 
-      # lobzique: to_xhtml and to_xml wait for native_write_to (plan.md,
-      # phase 2 step 8)
+      def to_xhtml(*args)
+        children.to_xhtml(*args)
+      end
+
+      def to_xml(*args)
+        children.to_xml(*args)
+      end
 
       def css(*args)
         if children.any?
@@ -83,6 +88,8 @@ module Lobzique
           end
         end
       end
+
+      alias_method :serialize, :to_s
 
       def errors
         document.errors

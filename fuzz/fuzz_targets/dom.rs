@@ -2,7 +2,8 @@
 
 //! Random sequences of tree operations, across an HTML document parsed from
 //! the input and an XML document, must leave every link consistent, whether
-//! each operation succeeds or is refused, and compare nodes consistently.
+//! each operation succeeds or is refused, compare nodes consistently, and
+//! leave documents that serialize as XML and XHTML.
 //!
 //! The input is markup, then a zero byte, then operations of four bytes
 //! each. The markup is parsed into the HTML document, so namespaces and
@@ -14,6 +15,7 @@ use lobzique_core::dom::{
     CopyDepth, Doctype, Document, DocumentKind, LocalName, NodeId, Position, QualName,
 };
 use lobzique_core::html5::{parse_document, parse_fragment, Context, ContextNamespace, Options};
+use lobzique_core::xml::{self, save_options::*};
 
 const POSITIONS: [Position; 4] = [
     Position::LastChild,
@@ -112,6 +114,9 @@ fuzz_target!(|data: &[u8]| {
     for doc in &docs {
         if let Err(violation) = doc.check_invariants() {
             panic!("{violation}");
+        }
+        for options in [AS_XML | FORMAT, AS_XHTML | FORMAT] {
+            _ = xml::write(doc, NodeId::DOCUMENT, None, b"  ", options);
         }
     }
 });

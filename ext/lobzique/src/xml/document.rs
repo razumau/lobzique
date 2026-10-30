@@ -2,7 +2,7 @@
 
 use super::node::{utf8_string, wrap, Node, NODE};
 use super::ELEMENT;
-use crate::support::{c_string, call_initialize, displayed_class, obj_class};
+use crate::support::{c_string, call_initialize, displayed_class, obj_class, optional_arg};
 use crate::XML;
 use lobzique_core::dom::{self, CopyDepth, DocumentKind, NodeId, NodeType};
 use magnus::{
@@ -27,10 +27,17 @@ pub fn wrap_document(ruby: &Ruby, class: RClass, arena: dom::Document) -> Result
     Ok(document.as_value())
 }
 
-/// `Document.new(*args)`. Nokogiri's version argument is accepted and
-/// ignored; only XML documents have one.
+/// `Document.new(version = "1.0", *rest)`.
 fn new(ruby: &Ruby, class: RClass, args: &[Value]) -> Result<Value, Error> {
-    let document = wrap_document(ruby, class, dom::Document::new(DocumentKind::Xml))?;
+    let version = optional_arg(ruby, args, 0);
+    let version = if version.is_nil() {
+        b"1.0".to_vec()
+    } else {
+        c_string(version)?
+    };
+    let mut arena = dom::Document::new(DocumentKind::Xml);
+    arena.set_version(Some(version));
+    let document = wrap_document(ruby, class, arena)?;
     call_initialize(document, args)?;
     Ok(document)
 }
@@ -165,7 +172,7 @@ fn initialize_copy_with_args(
     level: i32,
 ) -> Result<Value, Error> {
     let copy = with_arena(ruby, other, move |arena| arena.copy_document(level != 0))?;
-    if rb_self.adopt_arena(copy).is_err() {
+    if !rb_self.adopt_arena(copy) {
         return Err(Error::new(
             ruby.exception_runtime_error(),
             "document is already initialized",
@@ -187,6 +194,11 @@ fn set_encoding(ruby: &Ruby, rb_self: Value, encoding: Value) -> Result<Value, E
     Ok(encoding)
 }
 
+fn version(ruby: &Ruby, rb_self: Value) -> Result<Option<RString>, Error> {
+    let version = with_arena(ruby, rb_self, |arena| arena.version().map(<[u8]>::to_vec))?;
+    Ok(version.map(|version| utf8_string(ruby, version)))
+}
+
 pub fn init(ruby: &Ruby) -> Result<(), Error> {
     let class = ruby.get_inner(&DOCUMENT);
     class.define_singleton_method("new", method!(new, -1))?;
@@ -194,6 +206,7 @@ pub fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_method("root=", method!(set_root, 1))?;
     class.define_method("encoding", method!(encoding, 0))?;
     class.define_method("encoding=", method!(set_encoding, 1))?;
+    class.define_method("version", method!(version, 0))?;
     class.define_protected_method(
         "initialize_copy_with_args",
         method!(initialize_copy_with_args, 2),

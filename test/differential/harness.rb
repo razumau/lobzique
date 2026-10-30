@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "stringio"
 require "yaml"
 require_relative "corpus"
 
@@ -86,8 +87,8 @@ module Differential
     def ok? = @failures.empty?
 
     # What a caller can see of one parse: the serialized HTML (with its
-    # encoding), the tree and what read-only methods answer about it, or
-    # the error raised.
+    # encoding) and XML, the tree and what read-only methods answer about
+    # it, or the error raised.
     def observe(root, kase)
       node = if kase.kind == :document
         root::HTML5.parse(kase.input)
@@ -95,10 +96,22 @@ module Differential
         root::HTML5::DocumentFragment.parse(kase.input, context: kase.context || "body")
       end
       html = node.to_html
-      {html: html.b, encoding: html.encoding.name, tree: dump(root, node), queries: queries(node),
+      {html: html.b, encoding: html.encoding.name, xml: xml(node), tree: dump(root, node), queries: queries(node),
        selected: select(root, node, kase.selectors || SELECTORS) + evaluate(node, kase.selectors ? [] : XPATHS)}
     rescue => e
       {error: "#{e.class.name.sub(ROOT_NAME, "")}: #{e.message}"}
+    end
+
+    XML_OUTPUTS = ["to_xml", "to_xhtml", "to_xhtml in US-ASCII", "first element's to_xhtml",
+      "write_xhtml_to with no encoding"].freeze
+
+    # libxml2's output, as XML_OUTPUTS names it. The XHTML of the first
+    # element takes the XHTML rules even where a doctype sends the document
+    # through libxml2's XML ones.
+    def xml(top)
+      element = top.children.find(&:element?)
+      [top.to_xml, top.to_xhtml, top.to_xhtml(encoding: "US-ASCII"), element&.to_xhtml.to_s,
+        StringIO.new.tap { |io| top.write_xhtml_to(io) }.string].map(&:b)
     end
 
     # html5lib-style tree dump, in document order and without recursion, so a
@@ -223,14 +236,20 @@ module Differential
       if expected[:encoding] != actual[:encoding]
         out << "  encoding: nokogiri #{expected[:encoding]}, lobzique #{actual[:encoding]}"
       end
-      if expected[:html] != actual[:html]
-        a, b = expected[:html], actual[:html]
-        index = (0...[a.bytesize, b.bytesize].min).find { |i| a.getbyte(i) != b.getbyte(i) } || [a.bytesize, b.bytesize].min
-        from = [index - 40, 0].max
-        out << "  to_html differs at byte #{index}:"
-        out << "    nokogiri #{a.byteslice(from, 100).inspect}" << "    lobzique #{b.byteslice(from, 100).inspect}"
+      out.concat(byte_difference("to_html", expected[:html], actual[:html]))
+      XML_OUTPUTS.zip(expected[:xml], actual[:xml]).each do |output, a, b|
+        out.concat(byte_difference(output, a, b))
       end
       out
+    end
+
+    def byte_difference(output, a, b)
+      return [] if a == b
+
+      index = (0...[a.bytesize, b.bytesize].min).find { |i| a.getbyte(i) != b.getbyte(i) } || [a.bytesize, b.bytesize].min
+      from = [index - 40, 0].max
+      ["  #{output} differs at byte #{index}:",
+        "    nokogiri #{a.byteslice(from, 100).inspect}", "    lobzique #{b.byteslice(from, 100).inspect}"]
     end
 
     def truncate(string, length) = (string.length > length) ? "#{string[0, length]}..." : string

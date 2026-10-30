@@ -288,6 +288,14 @@ module Lobzique
         end
       end
 
+      def to_xhtml(*args)
+        map { |x| x.to_xhtml(*args) }.join
+      end
+
+      def to_xml(*args)
+        map { |x| x.to_xml(*args) }.join
+      end
+
       def deconstruct
         to_a
       end

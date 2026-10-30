@@ -11,14 +11,16 @@ use crate::XML;
 use lobzique_core::dom::{
     self, CopyDepth, Doctype, NamespaceRef, NodeId, NodeType, Position, ReparentError,
 };
-use lobzique_core::html5;
+use lobzique_core::{html5, xml};
 use magnus::{
+    block::Proc,
+    encoding::{Encoding, EncodingCapable, RbEncoding},
     gc, method,
     prelude::*,
     rb_sys::AsRawValue,
     typed_data::Obj,
     value::{Lazy, Opaque},
-    DataTypeFunctions, Error, RArray, RClass, RString, Ruby, TypedData, Value,
+    DataTypeFunctions, Error, KwArgs, RArray, RClass, RString, Ruby, TypedData, Value,
 };
 use std::cell::{Cell, OnceCell, RefCell};
 use std::mem::size_of;
@@ -85,11 +87,14 @@ impl Node {
         self.document.set(Some(document.into()));
     }
 
-    /// Gives an allocated, empty object the arena it is the document of.
-    pub fn adopt_arena(&self, arena: dom::Document) -> Result<(), RefCell<dom::Document>> {
-        self.arena.set(RefCell::new(arena))?;
+    /// Gives an allocated, empty object the arena it is the document of;
+    /// `false` if it has one already.
+    pub fn adopt_arena(&self, arena: dom::Document) -> bool {
+        if self.arena.set(RefCell::new(arena)).is_err() {
+            return false;
+        }
         self.id.set(Some(NodeId::DOCUMENT));
-        Ok(())
+        true
     }
 
     /// Points the object at another node, possibly in another document, as
@@ -338,6 +343,34 @@ impl Node {
         Ok(utf8_string(ruby, html))
     }
 
+    /// libxml2's XML and XHTML output of the node, transcoded and written to
+    /// `io`.
+    fn native_write_to(
+        ruby: &Ruby,
+        rb_self: &Self,
+        io: Value,
+        encoding: Value,
+        indent_string: Value,
+        options: i32,
+    ) -> Result<Value, Error> {
+        let encoding = optional_c_string(encoding)?;
+        let indent = c_string(indent_string)?;
+        let output = rb_self
+            .with_arena(ruby, |arena, id| {
+                xml::write(arena, id, encoding.as_deref(), &indent, options as u32)
+            })?
+            .map_err(|xml::HtmlUnsupported| {
+                Error::new(
+                    ruby.exception_not_imp_error(),
+                    "libxml2's HTML serializer isn't supported; HTML documents use the HTML5 one",
+                )
+            })?;
+        if let Some(string) = transcode(ruby, output)? {
+            write_to_io(ruby, io, string)?;
+        }
+        Ok(io)
+    }
+
     fn prepend_newline_p(ruby: &Ruby, rb_self: &Self) -> Result<bool, Error> {
         rb_self.with_arena(ruby, html5::prepend_newline)
     }
@@ -544,6 +577,65 @@ fn reparent(ruby: &Ruby, pivot: &Node, node: Value, position: Position) -> Resul
     let reparented = wrap(ruby, document, reparented)?;
     reparented.funcall::<_, _, Value>("decorate!", ())?;
     Ok(reparented)
+}
+
+/// The output in the encoding libxml2 would transcode it into, with
+/// `&#NNN;` for characters the encoding lacks, as libxml2's encoder
+/// writes them. `None` for an encoding Ruby doesn't know, for which libxml2
+/// writes nothing.
+fn transcode(ruby: &Ruby, output: xml::Output) -> Result<Option<RString>, Error> {
+    let string = utf8_string(ruby, output.bytes);
+    let Some(label) = output.encoding else {
+        return Ok(Some(string));
+    };
+    let Some(encoding) = std::str::from_utf8(&label)
+        .ok()
+        .and_then(|label| ruby.find_encindex(label).ok())
+        .map(RbEncoding::from)
+    else {
+        return Ok(None);
+    };
+    if encoding.name() == ruby.utf8_encoding().name() {
+        return Ok(Some(string));
+    }
+    let options = ruby.hash_new();
+    options.aset(
+        ruby.to_symbol("fallback"),
+        ruby.proc_new(character_reference),
+    )?;
+    options.aset(ruby.to_symbol("invalid"), ruby.to_symbol("replace"))?;
+    string
+        .funcall("encode", (Encoding::from(encoding), KwArgs(options)))
+        .map(Some)
+}
+
+fn character_reference(
+    _ruby: &Ruby,
+    args: &[Value],
+    _block: Option<Proc>,
+) -> Result<String, Error> {
+    let character: u32 = args[0].funcall("ord", ())?;
+    Ok(format!("&#{character};"))
+}
+
+/// `noko_io_write`: the bytes tagged with the IO's external encoding, or as
+/// binary. If the write raises a StandardError, the output ends there.
+fn write_to_io(ruby: &Ruby, io: Value, string: RString) -> Result<(), Error> {
+    let external_encoding: Value = if io.respond_to("external_encoding", false)? {
+        io.funcall("external_encoding", ())?
+    } else {
+        ruby.qnil().as_value()
+    };
+    let encoding = if external_encoding.is_nil() {
+        ruby.ascii8bit_encoding()
+    } else {
+        RbEncoding::try_convert(external_encoding)?
+    };
+    string.enc_associate(encoding)?;
+    match io.funcall::<_, _, Value>("write", (string,)) {
+        Err(error) if error.is_kind_of(ruby.exception_standard_error()) => Ok(()),
+        written => written.map(drop),
+    }
 }
 
 /// A string argument as [`c_string`] reads it, or `None` for `nil`.
@@ -798,6 +890,7 @@ pub fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_private_method("compare", method!(Node::compare, 1))?;
     class.define_private_method("get", method!(Node::get, 1))?;
     class.define_private_method("in_context", method!(Node::in_context, 2))?;
+    class.define_private_method("native_write_to", method!(Node::native_write_to, 4))?;
     class.define_private_method("prepend_newline?", method!(Node::prepend_newline_p, 0))?;
     class.define_private_method(
         "html_standard_serialize",

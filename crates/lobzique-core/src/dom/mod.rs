@@ -27,7 +27,7 @@ pub use html5ever::{LocalName, Namespace, Prefix, QualName};
 pub use namespace::{NamespaceDefinition, NamespaceRef};
 pub use node::{Attribute, Doctype, Element, NodeKind, NodeType, ProcessingInstruction};
 pub use reparent::{Position, ReparentError};
-pub use text::encode_special_chars;
+pub use text::{c_string, encode_special_chars};
 pub use tree::{Ancestors, Children, Descendants, HierarchyError};
 
 use node::Node;
@@ -71,6 +71,8 @@ pub struct Document {
     nodes: Vec<Node>,
     /// libxml2's `doc->encoding`: a label, kept as given.
     encoding: Option<Vec<u8>>,
+    /// libxml2's `doc->version`, which only XML documents have.
+    version: Option<Vec<u8>>,
     /// Each node's tree root and position in that tree, built once
     /// comparisons have walked as many links as there are nodes, and
     /// dropped when the tree changes (`tree::document_order`).
@@ -87,6 +89,7 @@ impl Document {
             kind,
             nodes: vec![Node::new(NodeKind::Document)],
             encoding: None,
+            version: None,
             order: OnceCell::new(),
             order_walked: Cell::new(0),
             scaffolding: Vec::new(),
@@ -127,6 +130,14 @@ impl Document {
 
     pub fn set_encoding(&mut self, encoding: Option<Vec<u8>>) {
         self.encoding = encoding;
+    }
+
+    pub fn version(&self) -> Option<&[u8]> {
+        self.version.as_deref()
+    }
+
+    pub fn set_version(&mut self, version: Option<Vec<u8>>) {
+        self.version = version;
     }
 
     /// Every node in the arena, linked or not, in creation order.

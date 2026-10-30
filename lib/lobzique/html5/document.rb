@@ -81,12 +81,16 @@ module Lobzique
         DocumentFragment.new(self, markup)
       end
 
+      def to_xml(options = {}, &block) # :nodoc:
+        # Bypass XML::Document#to_xml which doesn't add
+        # XML::Node::SaveOptions::AS_XML like XML::Node#to_xml does.
+        XML::Node.instance_method(:to_xml).bind_call(self, options, &block)
+      end
+
       # lobzique: CSS::XPathVisitor::DoctypeConfig::HTML5 in Nokogiri
       def xpath_doctype
         :html5
       end
-
-      # lobzique: to_xml waits for native_write_to (plan.md, phase 2 step 8)
     end
   end
 end

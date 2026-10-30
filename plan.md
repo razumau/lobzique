@@ -144,7 +144,14 @@ html5lib tokenizer inputs.
       `NotImplementedError` (decision 4). The departures are in
       `ARCHITECTURE.md`. Parsing with the HTML4 names (decision 3) waits
       for the facade, because seam mode never reaches it.
-   8. XHTML output (`native_write_to`) for premailer.
+   8. XHTML output (`native_write_to`) for premailer. Done: `to_xhtml`,
+      `to_xml`, `write_to` and the `write_*_to` methods on nodes, node
+      sets, documents and fragments, through libxml2's XML and XHTML
+      serializer ported to the core. The differential harness compares
+      five outputs per case (XML, XHTML, XHTML in US-ASCII, the first
+      element's XHTML, XHTML with no encoding). libxml2's HTML serializer,
+      which `to_html` reaches only in XML documents, raises
+      `NotImplementedError`.
 
    Later, once profiling shows where it pays: move hot ported Ruby methods
    into Rust. Methods that subclasses and mixins override (`to_s`,
