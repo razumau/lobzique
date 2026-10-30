@@ -3,7 +3,9 @@
 //! into, and XPath strings in the subset of plan.md decision 2.
 
 use super::document;
-use super::node::{node_set, utf8_string, Node, NODE_SET};
+use super::node::{utf8_string, Node};
+use super::node_set::{self, NODE_SET};
+use super::syntax_error::{self, XmlError};
 use crate::css::selector::Selector;
 use crate::support::{apply, c_string, optional_arg};
 use crate::XML;
@@ -131,7 +133,7 @@ impl XPathContext {
             })?
             .map_err(|error| xpath_error(ruby, error, rule))?;
             match outcome {
-                Outcome::Nodes(ids) => return node_set(ruby, document, ids),
+                Outcome::Nodes(ids) => return node_set::wrap(ruby, document, ids),
                 Outcome::Calls(calls) => {
                     for call in calls {
                         let key = (call.site, call.node);
@@ -210,7 +212,7 @@ fn call_handler(
 /// Nokogiri's `_noko_xml_xpath_context__xpath2ruby`.
 fn to_ruby(ruby: &Ruby, document: Value, value: xpath::Value<'static>) -> Result<Value, Error> {
     Ok(match value {
-        xpath::Value::NodeSet(ids) => node_set(ruby, document, ids)?,
+        xpath::Value::NodeSet(ids) => node_set::wrap(ruby, document, ids)?,
         xpath::Value::Boolean(b) => b.into_value_with(ruby),
         xpath::Value::Number(n) => ruby.float_from_f64(n).as_value(),
         xpath::Value::String(s) => utf8_string(ruby, s).as_value(),
@@ -238,16 +240,16 @@ fn syntax_error(ruby: &Ruby, class: &str, message: &str, code: i32, rule: &[u8])
             .get_inner(&XML)
             .const_get::<_, magnus::RModule>("XPath")?
             .const_get(class)?;
-        let exception: Value = class.new_instance((message,))?;
-        let object = magnus::RObject::from_value(exception).expect("an exception is an object");
-        object.ivar_set("@domain", 12)?;
-        object.ivar_set("@code", code)?;
-        object.ivar_set("@level", 2)?;
-        object.ivar_set("@str1", utf8_string(ruby, rule))?;
-        object.ivar_set("@line", 0)?;
-        object.ivar_set("@column", 0)?;
-        object.ivar_set("@int1", 0)?;
-        Ok(Exception::from_value(exception).expect("an exception"))
+        let error = XmlError {
+            domain: 12, // XML_FROM_XPATH
+            code,
+            message,
+            level: 2, // XML_ERR_ERROR
+            file: ruby.qnil().as_value(),
+            line: 0,
+            str1: Some(rule),
+        };
+        syntax_error::wrap(ruby, class, &error)
     };
     match build() {
         Ok(exception) => Error::from(exception),

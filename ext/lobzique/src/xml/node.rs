@@ -3,7 +3,7 @@
 use super::ELEMENT;
 use super::{
     attr::ATTR, cdata::CDATA, comment::COMMENT, document, document_fragment::DOCUMENT_FRAGMENT,
-    dtd::DTD, namespace, text::TEXT,
+    dtd::DTD, namespace, node_set, text::TEXT,
 };
 use crate::html5ever;
 use crate::support::{c_string, call_initialize, obj_class, warn_deprecated, yield_to_block};
@@ -196,12 +196,12 @@ impl Node {
 
     fn children(ruby: &Ruby, rb_self: &Self) -> Result<Value, Error> {
         let ids = rb_self.with_arena(ruby, |arena, id| arena.children(id).collect())?;
-        node_set(ruby, rb_self.document(ruby)?, ids)
+        node_set::wrap(ruby, rb_self.document(ruby)?, ids)
     }
 
     fn element_children(ruby: &Ruby, rb_self: &Self) -> Result<Value, Error> {
         let ids = rb_self.with_arena(ruby, |arena, id| arena.element_children(id).collect())?;
-        node_set(ruby, rb_self.document(ruby)?, ids)
+        node_set::wrap(ruby, rb_self.document(ruby)?, ids)
     }
 
     fn attribute(ruby: &Ruby, rb_self: &Self, name: Value) -> Result<Option<Value>, Error> {
@@ -679,19 +679,6 @@ pub fn wrap_all(ruby: &Ruby, document: Value, ids: Vec<NodeId>) -> Result<RArray
         nodes.push(wrap(ruby, document, id)?)?;
     }
     Ok(nodes)
-}
-
-pub static NODE_SET: Lazy<RClass> = Lazy::new(|ruby| {
-    ruby.get_inner(&XML)
-        .const_get("NodeSet")
-        .expect("lib/lobzique/xml/node_set.rb defines XML::NodeSet")
-});
-
-/// A NodeSet of the node objects for `ids`: `noko_xml_node_set_wrap`, which
-/// is Ruby's `NodeSet.wrap` here (ARCHITECTURE.md, departures).
-pub fn node_set(ruby: &Ruby, document: Value, ids: Vec<NodeId>) -> Result<Value, Error> {
-    let nodes = wrap_all(ruby, document, ids)?;
-    ruby.get_inner(&NODE_SET).funcall("wrap", (document, nodes))
 }
 
 /// Bytes from the arena as a Ruby string tagged UTF-8, valid or not, as

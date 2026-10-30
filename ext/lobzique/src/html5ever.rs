@@ -5,9 +5,10 @@
 
 use crate::support::{c_string, c_string_with_length, call_initialize, check_string, string_bytes};
 use crate::xml::document::{self, wrap_document};
-use crate::xml::node::{node_set, utf8_string, wrap, Node};
+use crate::xml::node::{utf8_string, Node};
+use crate::xml::node_set;
+use crate::xml::syntax_error::{self, XmlError};
 use crate::{HTML5EVER, XML};
-use lobzique_core::dom::NodeType;
 use lobzique_core::html5::{
     self, Context, ContextNamespace, LimitError, Options, ParseError, QuirksMode,
 };
@@ -16,7 +17,7 @@ use magnus::{
     prelude::*,
     scan_args::{get_kwargs, scan_args},
     typed_data::Obj,
-    Error, RArray, RClass, RHash, RObject, RString, Ruby, Value,
+    Error, RArray, RClass, RHash, RString, Ruby, Value,
 };
 use std::sync::OnceLock;
 
@@ -70,45 +71,31 @@ fn fragment(ruby: &Ruby, args: &[Value]) -> Result<(), Error> {
     )
 }
 
-/// `Node#in_context`'s parse: `input` as a fragment in the context of the
-/// nearest element at or above `node`, or in `body` where there is none or
-/// it is in a namespace the parser has no rules for. The top-level nodes
-/// come back unlinked, and the parse errors are added to the document's
-/// `@errors`.
+/// `Node#in_context`'s parse: `input` as a fragment in the context
+/// `Context::for_node` finds for `node`. The top-level nodes come back
+/// unlinked, and the parse errors are added to the document's `@errors`.
 pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error> {
     let input = input_bytes(ruby, input)?;
     let document = node.document(ruby)?;
-    let element = node.with_arena(ruby, |arena, id| {
-        std::iter::once(id)
-            .chain(arena.ancestors(id))
-            .find(|&id| arena.node_type(id) == NodeType::Element)
-    })?;
-    let body = Context::new(ContextNamespace::Html, "body");
-    let context = match element {
-        Some(element) => {
-            let element = wrap(ruby, document, element)?;
-            let context = if namespace_of(ruby, element)?.is_some() {
-                context_for(ruby, element)?
-            } else {
-                body.with_form_ancestor(has_form_ancestor(ruby, element)?)
-            };
-            context.with_quirks_mode(quirks_mode_for(document, element)?)
-        }
-        None => body.with_quirks_mode(quirks_mode_for(document, document)?),
-    };
+    let document_object = Obj::<Node>::try_convert(document)?;
+    let parsed = !document_object
+        .ivar_get::<_, Value>("@quirks_mode")?
+        .is_nil();
     let options = Options {
         // libxml2 keeps at most 100 errors a parse
         max_errors: Some(100),
         ..default_options(ruby)?
     };
 
-    let (ids, parsed) = document::with_arena_mut(ruby, document, |arena| {
-        html5::parse_in_context(arena, &input, &context, &options)
-    })?
-    .map_err(|error| limit_error(ruby, error))?;
-    let errors = Obj::<Node>::try_convert(document)?.ivar_get::<_, RArray>("@errors")?;
+    let (ids, parsed) = node
+        .with_arena_mut(ruby, |arena, id| {
+            let context = Context::for_node(arena, id, parsed);
+            html5::parse_in_context(arena, &input, &context, &options)
+        })?
+        .map_err(|error| limit_error(ruby, error))?;
+    let errors = document_object.ivar_get::<_, RArray>("@errors")?;
     errors.concat(syntax_errors(ruby, parsed.errors, ruby.qnil().as_value())?)?;
-    node_set(ruby, document, ids)
+    node_set::wrap(ruby, document, ids)
 }
 
 /// The `Html5ever::DEFAULT_*` limits, which are constant once loaded.
@@ -183,22 +170,14 @@ fn context_for(ruby: &Ruby, context: Value) -> Result<Context, Error> {
         Error::new(ruby.exception_arg_error(), message)
     })?;
 
-    let encoding =
-        if namespace == ContextNamespace::MathMl && name.eq_ignore_ascii_case("annotation-xml") {
-            // Nokogiri reads it with `context["encoding"]`, which needs
-            // `Node#get` (plan.md, phase 2 step 3)
-            let node = <&Node>::try_convert(context)?;
-            node.with_arena(ruby, |arena, id| {
-                arena.attributes(id).iter().find_map(|&attribute| {
-                    let name = arena.node_name(attribute)?;
-                    (name == b"encoding" && arena.namespace(attribute).is_none())
-                        .then(|| arena.content(attribute))
-                        .flatten()
-                })
-            })?
-        } else {
-            None
-        };
+    let mut encoding = None;
+    if namespace == ContextNamespace::MathMl && name.eq_ignore_ascii_case("annotation-xml") {
+        let value: Value = context.funcall("[]", ("encoding",))?;
+        if value.to_bool() {
+            check_string(ruby, value)?;
+            encoding = Some(c_string(value)?);
+        }
+    }
 
     Ok(Context::new(namespace, &name)
         .with_encoding(encoding)
@@ -308,25 +287,22 @@ fn add_errors(
     target.ivar_set("@errors", syntax_errors(ruby, errors, file)?)
 }
 
+/// html5ever's errors have neither gumbo's error code, which gumbo.c puts
+/// in `str1`, nor a column.
 fn syntax_errors(ruby: &Ruby, errors: Vec<ParseError>, file: Value) -> Result<RArray, Error> {
     let class: RClass = ruby.get_inner(&XML).const_get("SyntaxError")?;
     let array = ruby.ary_new_capa(errors.len());
     for error in errors {
-        let syntax_error: Value = class.new_instance((utf8_string(ruby, &error.message),))?;
-        let syntax_error = RObject::try_convert(syntax_error)?;
-        syntax_error.ivar_set("@domain", 1)?; // XML_FROM_PARSER
-        syntax_error.ivar_set("@code", 1)?; // XML_ERR_INTERNAL_ERROR
-        syntax_error.ivar_set("@level", 2)?; // XML_ERR_ERROR
-        syntax_error.ivar_set("@file", file)?;
-        syntax_error.ivar_set("@line", error.line)?;
-        // gumbo's error code; html5ever's errors have none
-        syntax_error.ivar_set("@str1", ruby.qnil())?;
-        syntax_error.ivar_set("@str2", ruby.qnil())?;
-        syntax_error.ivar_set("@str3", ruby.qnil())?;
-        syntax_error.ivar_set("@int1", 0)?;
-        // html5ever reports lines only
-        syntax_error.ivar_set("@column", 0)?;
-        array.push(syntax_error)?;
+        let error = XmlError {
+            domain: 1, // XML_FROM_PARSER
+            code: 1,   // XML_ERR_INTERNAL_ERROR
+            message: &error.message,
+            level: 2, // XML_ERR_ERROR
+            file,
+            line: error.line,
+            str1: None,
+        };
+        array.push(syntax_error::wrap(ruby, class, &error)?)?;
     }
     Ok(array)
 }

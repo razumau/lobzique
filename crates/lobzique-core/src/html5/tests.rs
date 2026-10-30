@@ -181,6 +181,53 @@ fn parsing_in_context_reuses_its_scaffolding() {
     assert_eq!(html(&document, second[0]), "<p>b</p>");
 }
 
+/// Parses `input` in the context `Context::for_node` finds for the first
+/// `local` element of `page`, or for the document if `local` is empty.
+fn in_context_of(page: &str, local: &str, parsed: bool, input: &str) -> (Document, Vec<NodeId>) {
+    let mut document = parse(page);
+    let node = if local.is_empty() {
+        NodeId::DOCUMENT
+    } else {
+        find(&document, local)
+    };
+    let context = Context::for_node(&document, node, parsed);
+    let (nodes, _) = parse_in_context(
+        &mut document,
+        input.as_bytes(),
+        &context,
+        &Options::default(),
+    )
+    .unwrap();
+    document.check_invariants().unwrap();
+    (document, nodes)
+}
+
+#[test]
+fn a_nodes_context_is_the_nearest_element() {
+    let (document, nodes) = in_context_of("<table><tr><td>", "tr", true, "<td>x</td>");
+    assert_eq!(html(&document, nodes[0]), "<td>x</td>");
+    let (_, nodes) = in_context_of("<form><div>", "div", true, "<form></form>");
+    assert!(nodes.is_empty());
+    let (document, nodes) = in_context_of("<svg><g>", "g", true, "<p>x");
+    assert_eq!(document.namespace(nodes[0]), None);
+    let page = "<math><annotation-xml encoding=text/html><mi>";
+    let (document, nodes) = in_context_of(page, "annotation-xml", true, "<x>");
+    assert_eq!(document.namespace(nodes[0]), None);
+    let page = "<math><annotation-xml><mi>";
+    let (document, nodes) = in_context_of(page, "annotation-xml", true, "<x>");
+    assert_eq!(document.namespace(nodes[0]).unwrap().prefix, Some("math"));
+}
+
+#[test]
+fn a_nodes_context_takes_the_quirks_mode_of_a_parsed_document() {
+    let (document, nodes) = in_context_of("<p>", "", true, "<p><table>");
+    assert_eq!(html(&document, nodes[0]), "<p><table></table></p>");
+    let (document, nodes) = in_context_of("<p>", "", false, "<p><table>");
+    assert_eq!(html(&document, nodes[0]), "<p></p>");
+    let (document, nodes) = in_context_of("<!DOCTYPE html>", "body", true, "<p><table>");
+    assert_eq!(html(&document, nodes[0]), "<p></p>");
+}
+
 #[test]
 fn a_form_ancestor_drops_nested_forms() {
     let body = Context::new(ContextNamespace::Html, "body");

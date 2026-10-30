@@ -6,6 +6,8 @@ pub mod document_fragment;
 pub mod dtd;
 pub mod namespace;
 pub mod node;
+pub mod node_set;
+pub mod syntax_error;
 pub mod text;
 pub mod xpath_context;
 

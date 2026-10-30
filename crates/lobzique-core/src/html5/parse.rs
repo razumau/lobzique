@@ -159,6 +159,74 @@ impl Context {
         self.quirks_mode = quirks_mode;
         self
     }
+
+    /// The context `Node#in_context` parses in: the nearest element at or
+    /// above `node`, or `body` where there is none or it is in a namespace
+    /// the parser has no rules for. The quirks mode is the doctype's if
+    /// the document was `parsed`, as for `Gumbo.fragment` with a node.
+    pub fn for_node(document: &Document, node: NodeId, parsed: bool) -> Context {
+        let element = std::iter::once(node)
+            .chain(document.ancestors(node))
+            .find(|&id| matches!(document.node_kind(id), NodeKind::Element(_)));
+        let context = match element {
+            Some(element) => match context_namespace(document, element) {
+                Some(namespace) => {
+                    let name = document.node_name(element).unwrap_or_default();
+                    let context = Context::new(namespace, &String::from_utf8_lossy(name));
+                    let annotation_xml = namespace == ContextNamespace::MathMl
+                        && name.eq_ignore_ascii_case(b"annotation-xml");
+                    let encoding = annotation_xml
+                        .then(|| document.attribute_value(element, b"encoding"))
+                        .flatten();
+                    context.with_encoding(encoding.map(<[u8]>::to_vec))
+                }
+                None => Context::new(ContextNamespace::Html, "body"),
+            }
+            .with_form_ancestor(has_form_ancestor(document, element)),
+            None => Context::new(ContextNamespace::Html, "body"),
+        };
+        let doctype = document
+            .doctype()
+            .and_then(|id| match document.node_kind(id) {
+                NodeKind::Doctype(doctype) => Some(doctype),
+                _ => None,
+            });
+        let quirks_mode = match doctype {
+            _ if !parsed => QuirksMode::NoQuirks,
+            None => QuirksMode::Quirks,
+            Some(doctype) => quirks_mode_for_doctype(
+                Some(&doctype.name),
+                doctype.public_id.as_deref(),
+                doctype.system_id.as_deref(),
+            ),
+        };
+        context.with_quirks_mode(quirks_mode)
+    }
+}
+
+/// gumbo.c's `lookup_namespace` for an element; `None` for a namespace the
+/// parser has no rules for.
+fn context_namespace(document: &Document, element: NodeId) -> Option<ContextNamespace> {
+    let Some(namespace) = document.namespace(element) else {
+        return Some(ContextNamespace::Html);
+    };
+    match namespace.href {
+        "http://www.w3.org/1999/xhtml" => Some(ContextNamespace::Html),
+        "http://www.w3.org/1998/Math/MathML" => Some(ContextNamespace::MathMl),
+        "http://www.w3.org/2000/svg" => Some(ContextNamespace::Svg),
+        _ => None,
+    }
+}
+
+/// Whether `node` or an element above it is an HTML `form`.
+fn has_form_ancestor(document: &Document, node: NodeId) -> bool {
+    let is_form = |id| {
+        matches!(document.node_kind(id), NodeKind::Element(element)
+            if element.name.local.eq_ignore_ascii_case(&local_name!("form")))
+    };
+    std::iter::once(node)
+        .chain(document.ancestors(node))
+        .any(|id| is_form(id) && context_namespace(document, id) == Some(ContextNamespace::Html))
 }
 
 /// Parses a fragment in `context` and appends what it makes to `fragment`.
