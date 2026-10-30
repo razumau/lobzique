@@ -104,6 +104,12 @@ class TestNodeParseLobzique < Minitest::Test
     assert_equal ["<input>"], Lobzique::HTML5("<form><span>").at_css("span").parse("<form><input></form>").map(&:to_s)
   end
 
+  def test_the_document_context_has_the_documents_quirks_mode
+    input = "<p>a<table></table>"
+    assert_equal ["<p>a<table></table></p>"], Lobzique::HTML5("<div></div>").parse(input).map(&:to_s)
+    assert_equal ["<p>a</p>", "<table></table>"], Lobzique::HTML5("<!DOCTYPE html>").parse(input).map(&:to_s)
+  end
+
   def test_parsed_nodes_have_no_previous_sibling
     set = Lobzique::HTML5(HTML).at_css("div").parse("<p>a</p><b>c</b>")
     assert_nil set[1].previous_sibling

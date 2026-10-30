@@ -86,7 +86,8 @@ pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error
             let element = wrap(ruby, document, element)?;
             context_for(ruby, element)?.with_quirks_mode(quirks_mode_for(document, element)?)
         }
-        None => context_for(ruby, ruby.qnil().as_value())?,
+        None => Context::new(ContextNamespace::Html, "body")
+            .with_quirks_mode(quirks_mode_for(document, document)?),
     };
     let module = ruby.get_inner(&HTML5EVER);
     let limit = |name: &str| -> Result<Option<usize>, Error> {
