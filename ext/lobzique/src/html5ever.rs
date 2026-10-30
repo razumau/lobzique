@@ -70,9 +70,10 @@ fn fragment(ruby: &Ruby, args: &[Value]) -> Result<(), Error> {
 }
 
 /// `Node#in_context`'s parse: `input` as a fragment in the context of the
-/// nearest element at or above `node`, or with no context, as libxml2
-/// parses in the document. The top-level nodes come back unlinked, and the
-/// parse errors are added to the document's `@errors`.
+/// nearest element at or above `node`, or in `body` where there is none or
+/// it is in a namespace the parser has no rules for. The top-level nodes
+/// come back unlinked, and the parse errors are added to the document's
+/// `@errors`.
 pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error> {
     let input = input_bytes(ruby, input)?;
     let document = node.document(ruby)?;
@@ -81,13 +82,18 @@ pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error
             .chain(arena.ancestors(id))
             .find(|&id| arena.node_type(id) == NodeType::Element)
     })?;
+    let body = Context::new(ContextNamespace::Html, "body");
     let context = match element {
         Some(element) => {
             let element = wrap(ruby, document, element)?;
-            context_for(ruby, element)?.with_quirks_mode(quirks_mode_for(document, element)?)
+            let context = if namespace_of(ruby, element)?.is_some() {
+                context_for(ruby, element)?
+            } else {
+                body.with_form_ancestor(has_form_ancestor(ruby, element)?)
+            };
+            context.with_quirks_mode(quirks_mode_for(document, element)?)
         }
-        None => Context::new(ContextNamespace::Html, "body")
-            .with_quirks_mode(quirks_mode_for(document, document)?),
+        None => body.with_quirks_mode(quirks_mode_for(document, document)?),
     };
     let module = ruby.get_inner(&HTML5EVER);
     let limit = |name: &str| -> Result<Option<usize>, Error> {
@@ -162,25 +168,6 @@ fn context_for(ruby: &Ruby, context: Value) -> Result<Context, Error> {
         Error::new(ruby.exception_arg_error(), message)
     })?;
 
-    let mut has_form_ancestor = false;
-    let mut node = context;
-    while !node.is_nil() {
-        if node.funcall::<_, _, Value>("element?", ())?.to_bool() {
-            let name = c_string_with_length(node.funcall("name", ())?)?;
-            if name.eq_ignore_ascii_case(b"form")
-                && namespace_of(ruby, node)? == Some(ContextNamespace::Html)
-            {
-                has_form_ancestor = true;
-                break;
-            }
-        }
-        node = if node.respond_to("parent", false)? {
-            node.funcall("parent", ())?
-        } else {
-            ruby.qnil().as_value()
-        };
-    }
-
     let encoding =
         if namespace == ContextNamespace::MathMl && name.eq_ignore_ascii_case("annotation-xml") {
             // Nokogiri reads it with `context["encoding"]`, which needs
@@ -200,7 +187,28 @@ fn context_for(ruby: &Ruby, context: Value) -> Result<Context, Error> {
 
     Ok(Context::new(namespace, &name)
         .with_encoding(encoding)
-        .with_form_ancestor(has_form_ancestor))
+        .with_form_ancestor(has_form_ancestor(ruby, context)?))
+}
+
+/// Whether `node` or an element above it is an HTML `form`.
+fn has_form_ancestor(ruby: &Ruby, node: Value) -> Result<bool, Error> {
+    let mut node = node;
+    while !node.is_nil() {
+        if node.funcall::<_, _, Value>("element?", ())?.to_bool() {
+            let name = c_string_with_length(node.funcall("name", ())?)?;
+            if name.eq_ignore_ascii_case(b"form")
+                && namespace_of(ruby, node)? == Some(ContextNamespace::Html)
+            {
+                return Ok(true);
+            }
+        }
+        node = if node.respond_to("parent", false)? {
+            node.funcall("parent", ())?
+        } else {
+            ruby.qnil().as_value()
+        };
+    }
+    Ok(false)
 }
 
 /// A context given by name: `"tr"`, `"svg:path"`, or `"svg"` and `"math"`,
