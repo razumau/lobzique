@@ -129,11 +129,17 @@ What Nokogiri guarantees, and how lobzique keeps it:
   `@decorators` and `@errors` included, are shared, as in Nokogiri.
 - **Lifetime.**
   - A node object marks its document, and the document owns every node it
-    ever created.
-  - Unlinked nodes stay valid until the document is collected, as libxml2
-    nodes pinned by Nokogiri do.
+    ever created. Unlinked nodes stay valid until the document is collected.
+  - Nokogiri retains as much: it pins every node it unlinks
+    (`noko_xml_document_pin_node`) until the document is freed, and its
+    `@node_cache` holds every object it wrapped. So a document that is kept
+    and edited grows with each node its edits create, about 100 bytes plus
+    content here, under either library. The one exception is a text copy
+    merged into its neighbor, which libxml2 frees; here it stays as an
+    empty slot.
   - The `document` reference is marked movable and updated in `compact`.
-  - A document reports its arena's heap size to `ObjectSpace.memsize_of`.
+  - A document reports its arena's heap size, unlinked nodes included, to
+    `ObjectSpace.memsize_of`. Nokogiri's counts only the linked tree.
 - **No borrow across Ruby.** The arena's `RefCell` is borrowed inside
   `with_arena`/`with_arena_mut` and released before any call into Ruby:
   decorate, `initialize`, blocks, CSS handlers. The closures can't reach
