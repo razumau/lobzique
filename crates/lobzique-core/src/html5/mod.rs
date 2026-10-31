@@ -8,7 +8,8 @@ mod tests;
 
 pub use parse::{
     parse_document, parse_fragment, parse_in_context, quirks_mode_for_doctype, Context,
-    ContextNamespace, LimitError, Options, ParseError, Parsed, QuirksMode,
+    ContextNamespace, DocumentParser, FragmentParser, LimitError, Options, ParseError, Parsed,
+    ParsedFragment, QuirksMode,
 };
 pub use serialize::{prepend_newline, serialize};
 

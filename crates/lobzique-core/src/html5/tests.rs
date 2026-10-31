@@ -474,3 +474,38 @@ fn fragments_in_xml_documents_have_no_namespace() {
     assert_eq!(namespace(&document, html_p), ns!(html));
     assert_eq!(namespace(&document, i), ns!());
 }
+
+#[test]
+fn parsers_go_a_chunk_at_a_time() {
+    let count = if cfg!(miri) { 100 } else { 17_000 };
+    let input = "<p>chunk".repeat(count);
+    let mut parser = DocumentParser::new(input.clone().into_bytes(), &Options::default());
+    let mut steps = 0;
+    while parser.step() {
+        steps += 1;
+    }
+    assert_eq!(steps, input.len().div_ceil(parse::CHUNK));
+    let (document, _) = parser.finish().unwrap();
+    assert_eq!(html(&document, NodeId::DOCUMENT), html(&parse(&input), NodeId::DOCUMENT));
+
+    let body = Context::new(ContextNamespace::Html, "body");
+    let mut parser = FragmentParser::new(input.into_bytes(), &body, &Options::default());
+    assert!(parser.step());
+    let mut document = Document::new(DocumentKind::Html);
+    let root = document.create_fragment();
+    parser.finish().unwrap().append_to(&mut document, root);
+    assert_eq!(document.children(root).count(), count);
+}
+
+#[test]
+fn parsers_stop_stepping_past_a_limit() {
+    let options = Options {
+        max_tree_depth: Some(10),
+        ..Options::default()
+    };
+    let input = format!("{}{}", "<div>".repeat(11), "<p>".repeat(if cfg!(miri) { 300 } else { 30_000 }));
+    let mut parser = DocumentParser::new(input.into_bytes(), &options);
+    assert!(parser.step());
+    assert!(!parser.step());
+    assert_eq!(parser.finish().err(), Some(LimitError::TreeTooDeep));
+}

@@ -90,15 +90,35 @@ pub struct Parsed {
 /// Parses a document. Input that isn't UTF-8 is decoded lossily, as gumbo
 /// decodes it.
 pub fn parse_document(input: &[u8], options: &Options) -> Result<(Document, Parsed), LimitError> {
-    let mut document = Document::new(DocumentKind::Html);
-    let sink = Sink::new(&mut document, options, options.max_tree_depth);
-    let builder = TreeBuilder::new(sink, tree_builder_options(options, QuirksMode::NoQuirks));
-    let parsed = run(builder, input, options, None)?;
-    let roots: Vec<_> = document.element_children(NodeId::DOCUMENT).collect();
-    for root in roots {
-        define_namespaces(&mut document, root);
+    DocumentParser::new(input.to_vec(), options).finish()
+}
+
+/// A document parse that can be run a chunk of input at a time, so that a
+/// caller can do something else between chunks.
+pub struct DocumentParser(Run);
+
+impl DocumentParser {
+    pub fn new(input: Vec<u8>, options: &Options) -> DocumentParser {
+        let sink = Sink::new(options, options.max_tree_depth);
+        let builder = TreeBuilder::new(sink, tree_builder_options(options, QuirksMode::NoQuirks));
+        DocumentParser(Run::new(builder, input, options, None))
     }
-    Ok((document, parsed))
+
+    /// Parses the next chunk of input; false once there is none left or a
+    /// limit was exceeded.
+    pub fn step(&mut self) -> bool {
+        self.0.step()
+    }
+
+    /// Parses the rest of the input.
+    pub fn finish(self) -> Result<(Document, Parsed), LimitError> {
+        let (mut document, parsed) = self.0.finish()?;
+        let roots: Vec<_> = document.element_children(NodeId::DOCUMENT).collect();
+        for root in roots {
+            define_namespaces(&mut document, root);
+        }
+        Ok((document, parsed))
+    }
 }
 
 /// The context a fragment is parsed in, as Nokogiri's `Gumbo.fragment`
@@ -232,63 +252,103 @@ pub fn parse_fragment(
     context: &Context,
     options: &Options,
 ) -> Result<Parsed, LimitError> {
-    let (nodes, parsed) = parse_in_context(document, input, context, options)?;
-    for node in nodes {
-        if document.append_child(fragment, node).is_err() {
-            break;
-        }
-    }
-    Ok(parsed)
+    let parsed = FragmentParser::new(input.to_vec(), context, options).finish()?;
+    Ok(parsed.append_to(document, fragment))
 }
 
 /// Parses a fragment in `context` and returns its top-level nodes, each
-/// unlinked from its parent and siblings. The parse builds in a scratch
-/// document and copies its result in, so the parser's scaffolding (an html
-/// root, the context and form elements) and the nodes of a parse that fails
-/// never reach `document`.
+/// unlinked from its parent and siblings.
 pub fn parse_in_context(
     document: &mut Document,
     input: &[u8],
     context: &Context,
     options: &Options,
 ) -> Result<(Vec<NodeId>, Parsed), LimitError> {
-    let mut scratch = Document::new(DocumentKind::Html);
-    // The tree has an html element above the fragment's nodes, as gumbo's does
-    let max_tree_depth = options.max_tree_depth.map(|depth| depth.saturating_add(1));
-    let sink = Sink::new(&mut scratch, options, max_tree_depth);
-    // The tree builder starts in this mode and never sets it in a fragment
-    sink.quirks_mode.set(context.quirks_mode);
+    let parsed = FragmentParser::new(input.to_vec(), context, options).finish()?;
+    Ok(parsed.import(document))
+}
 
-    let mut attributes = Vec::new();
-    if let Some(encoding) = &context.encoding {
-        attributes.push(Attribute {
-            name: QualName::new(None, ns!(), local_name!("encoding")),
-            value: StrTendril::from_slice(&String::from_utf8_lossy(encoding)),
+/// A fragment parse that can be run a chunk of input at a time, like
+/// [`DocumentParser`]. It builds in a scratch document of its own, so the
+/// parser's scaffolding (an html root, the context and form elements) and
+/// the nodes of a parse that fails never reach the document they are for.
+pub struct FragmentParser(Run);
+
+impl FragmentParser {
+    pub fn new(input: Vec<u8>, context: &Context, options: &Options) -> FragmentParser {
+        // The tree has an html element above the fragment's nodes, as gumbo's does
+        let max_tree_depth = options.max_tree_depth.map(|depth| depth.saturating_add(1));
+        let sink = Sink::new(options, max_tree_depth);
+        // The tree builder starts in this mode and never sets it in a fragment
+        sink.quirks_mode.set(context.quirks_mode);
+
+        let mut attributes = Vec::new();
+        if let Some(encoding) = &context.encoding {
+            attributes.push(Attribute {
+                name: QualName::new(None, ns!(), local_name!("encoding")),
+                value: StrTendril::from_slice(&String::from_utf8_lossy(encoding)),
+            });
+        }
+        let context_element = create_element(&sink, context.name.clone(), attributes);
+        let form = context.has_form_ancestor.then(|| {
+            let name = QualName::new(None, ns!(html), local_name!("form"));
+            create_element(&sink, name, Vec::new())
         });
+        let builder = TreeBuilder::new_for_fragment(
+            sink,
+            context_element,
+            form,
+            tree_builder_options(options, context.quirks_mode),
+        );
+        let initial_state =
+            builder.tokenizer_state_for_context_elem(options.parse_noscript_content_as_text);
+        FragmentParser(Run::new(builder, input, options, Some(initial_state)))
     }
-    let context_element = create_element(&sink, context.name.clone(), attributes);
-    let form = context.has_form_ancestor.then(|| {
-        let name = QualName::new(None, ns!(html), local_name!("form"));
-        create_element(&sink, name, Vec::new())
-    });
-    let builder = TreeBuilder::new_for_fragment(
-        sink,
-        context_element,
-        form,
-        tree_builder_options(options, context.quirks_mode),
-    );
-    let initial_state =
-        builder.tokenizer_state_for_context_elem(options.parse_noscript_content_as_text);
-    let parsed = run(builder, input, options, Some(initial_state))?;
 
-    // The copies get the names and namespace definitions `document` writes
-    let root = scratch.first_child(NodeId::DOCUMENT);
-    let nodes = root
-        .into_iter()
-        .flat_map(|root| scratch.children(root))
-        .filter_map(|child| document.import(&scratch, child, CopyDepth::Deep))
-        .collect();
-    Ok((nodes, parsed))
+    /// Parses the next chunk of input; false once there is none left or a
+    /// limit was exceeded.
+    pub fn step(&mut self) -> bool {
+        self.0.step()
+    }
+
+    /// Parses the rest of the input.
+    pub fn finish(self) -> Result<ParsedFragment, LimitError> {
+        let (scratch, parsed) = self.0.finish()?;
+        Ok(ParsedFragment { scratch, parsed })
+    }
+}
+
+/// A fragment's nodes, still in the parser's scratch document.
+pub struct ParsedFragment {
+    scratch: Document,
+    parsed: Parsed,
+}
+
+impl ParsedFragment {
+    /// Copies the top-level nodes into `document`, unlinked. The copies get
+    /// the names and namespace definitions `document` writes.
+    pub fn import(self, document: &mut Document) -> (Vec<NodeId>, Parsed) {
+        let scratch = &self.scratch;
+        let root = scratch.first_child(NodeId::DOCUMENT);
+        let nodes = root
+            .into_iter()
+            .flat_map(|root| scratch.children(root))
+            .filter_map(|child| document.import(scratch, child, CopyDepth::Deep))
+            .collect();
+        (nodes, self.parsed)
+    }
+
+    /// Copies the top-level nodes into `document` and appends them to
+    /// `fragment`.
+    pub fn append_to(self, document: &mut Document, fragment: NodeId) -> Parsed {
+        let (nodes, parsed) = self.import(document);
+        for node in nodes {
+            if document.append_child(fragment, node).is_err() {
+                break;
+            }
+        }
+        parsed
+    }
 }
 
 /// Gumbo's binding defines the foreign namespaces a top-level element and
@@ -337,9 +397,8 @@ pub fn quirks_mode_for_doctype(
     };
     // A tree builder in its initial mode decides the quirks mode from the
     // doctype token, with the same table it uses for documents
-    let mut document = Document::new(DocumentKind::Html);
     let options = Options::default();
-    let sink = Sink::new(&mut document, &options, None);
+    let sink = Sink::new(&options, None);
     let builder = TreeBuilder::new(sink, tree_builder_options(&options, QuirksMode::NoQuirks));
     let _ = builder.process_token(Token::DoctypeToken(doctype), 1);
     builder.sink.quirks_mode.get()
@@ -355,59 +414,85 @@ fn tree_builder_options(options: &Options, quirks_mode: QuirksMode) -> TreeBuild
 }
 
 /// Input goes to the tokenizer in pieces, so parsing stops soon after a
-/// limit is exceeded and no tendril outgrows its 32-bit length.
-const CHUNK: usize = 1 << 16;
+/// limit is exceeded and no tendril outgrows its 32-bit length. Smaller
+/// under Miri, so tests can cross chunks in reasonable time.
+pub(super) const CHUNK: usize = if cfg!(miri) { 1 << 8 } else { 1 << 16 };
 
-fn run(
-    builder: TreeBuilder<NodeId, Sink<'_>>,
-    input: &[u8],
-    options: &Options,
-    initial_state: Option<tokenizer::states::State>,
-) -> Result<Parsed, LimitError> {
-    let input = String::from_utf8_lossy(input);
-    let tokenizer = Tokenizer::new(
-        Tokens {
-            builder,
-            max_attributes: options.max_attributes,
-            exceeded: Cell::new(false),
-            cdata: Cell::new(Cdata::Outside),
-        },
-        TokenizerOpts {
-            initial_state,
-            ..TokenizerOpts::default()
-        },
-    );
-    let queue = BufferQueue::default();
-    let mut rest = &*input;
-    while !rest.is_empty() && tokenizer.sink.limit_error().is_none() {
+/// The tokenizer, the tree builder it feeds, and the input not fed yet.
+struct Run {
+    tokenizer: Tokenizer<Tokens>,
+    queue: BufferQueue,
+    input: String,
+    fed: usize,
+}
+
+impl Run {
+    fn new(
+        builder: TreeBuilder<NodeId, Sink>,
+        input: Vec<u8>,
+        options: &Options,
+        initial_state: Option<tokenizer::states::State>,
+    ) -> Run {
+        let input = String::from_utf8(input)
+            .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned());
+        let tokenizer = Tokenizer::new(
+            Tokens {
+                builder,
+                max_attributes: options.max_attributes,
+                exceeded: Cell::new(false),
+                cdata: Cell::new(Cdata::Outside),
+            },
+            TokenizerOpts {
+                initial_state,
+                ..TokenizerOpts::default()
+            },
+        );
+        Run {
+            tokenizer,
+            queue: BufferQueue::default(),
+            input,
+            fed: 0,
+        }
+    }
+
+    fn step(&mut self) -> bool {
+        let rest = &self.input[self.fed..];
+        if rest.is_empty() || self.tokenizer.sink.limit_error().is_some() {
+            return false;
+        }
         let mut end = rest.len().min(CHUNK);
         while !rest.is_char_boundary(end) {
             end += 1;
         }
-        let (chunk, tail) = rest.split_at(end);
-        rest = tail;
-        queue.push_back(StrTendril::from_slice(chunk));
-        while !matches!(tokenizer.feed(&queue), TokenizerResult::Done) {}
+        self.queue.push_back(StrTendril::from_slice(&rest[..end]));
+        self.fed += end;
+        while !matches!(self.tokenizer.feed(&self.queue), TokenizerResult::Done) {}
+        true
     }
-    tokenizer.end();
 
-    let tokens = &tokenizer.sink;
-    if let Some(error) = tokens.limit_error() {
-        return Err(error);
+    fn finish(mut self) -> Result<(Document, Parsed), LimitError> {
+        while self.step() {}
+        self.tokenizer.end();
+
+        let tokens = self.tokenizer.sink;
+        if let Some(error) = tokens.limit_error() {
+            return Err(error);
+        }
+        let sink = tokens.builder.sink;
+        let parsed = Parsed {
+            quirks_mode: sink.quirks_mode.get(),
+            errors: sink.errors.into_inner(),
+        };
+        Ok((sink.document.into_inner(), parsed))
     }
-    let sink = &tokens.builder.sink;
-    Ok(Parsed {
-        quirks_mode: sink.quirks_mode.get(),
-        errors: sink.errors.take(),
-    })
 }
 
 /// Passes tokens to the tree builder, counting attributes and following
 /// CDATA sections on the way. Gumbo's tokenizer refuses a tag with more
 /// distinct attributes than the limit, and html5ever's has already dropped
 /// the duplicates.
-struct Tokens<'a> {
-    builder: TreeBuilder<NodeId, Sink<'a>>,
+struct Tokens {
+    builder: TreeBuilder<NodeId, Sink>,
     max_attributes: Option<usize>,
     exceeded: Cell<bool>,
     cdata: Cell<Cdata>,
@@ -429,7 +514,7 @@ enum Cdata {
     Null,
 }
 
-impl Tokens<'_> {
+impl Tokens {
     /// Notes which part of a CDATA section, if any, `token` is.
     fn follow_cdata(&self, token: &Token) -> TextSource {
         use Cdata::*;
@@ -456,7 +541,7 @@ impl Tokens<'_> {
     }
 }
 
-impl TokenSink for Tokens<'_> {
+impl TokenSink for Tokens {
     type Handle = NodeId;
 
     fn process_token(&self, token: Token, line_number: u64) -> TokenSinkResult<NodeId> {
@@ -497,8 +582,8 @@ enum TextSource {
 
 /// Builds the tree in the arena. A template's contents are its children,
 /// as Nokogiri builds them.
-struct Sink<'a> {
-    document: RefCell<&'a mut Document>,
+struct Sink {
+    document: RefCell<Document>,
     quirks_mode: Cell<QuirksMode>,
     line: Cell<u64>,
     errors: RefCell<Vec<ParseError>>,
@@ -510,14 +595,10 @@ struct Sink<'a> {
     text_source: Cell<TextSource>,
 }
 
-impl<'a> Sink<'a> {
-    fn new(
-        document: &'a mut Document,
-        options: &Options,
-        max_tree_depth: Option<usize>,
-    ) -> Sink<'a> {
+impl Sink {
+    fn new(options: &Options, max_tree_depth: Option<usize>) -> Sink {
         Sink {
-            document: RefCell::new(document),
+            document: RefCell::new(Document::new(DocumentKind::Html)),
             quirks_mode: Cell::new(QuirksMode::NoQuirks),
             line: Cell::new(1),
             errors: RefCell::new(Vec::new()),
@@ -639,7 +720,7 @@ impl ElemName for Name {
     }
 }
 
-impl TreeSink for Sink<'_> {
+impl TreeSink for Sink {
     type Handle = NodeId;
     type Output = ();
     type ElemName<'b>
