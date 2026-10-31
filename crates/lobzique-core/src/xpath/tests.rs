@@ -795,23 +795,24 @@ fn none_variables() -> HashMap<String, Vec<u8>> {
 /// no stack to evaluate or drop.
 #[test]
 fn long_operator_chains_stay_flat() {
+    let length = if cfg!(miri) { 1_000 } else { 100_000 };
     let document = parse("<p>");
-    let sum = format!("1{}", " + 1".repeat(100_000));
+    let sum = format!("1{}", " + 1".repeat(length));
     assert_eq!(
         value(&document, NodeId::DOCUMENT, &sum),
-        Found::Number(100_001.0)
+        Found::Number((length + 1) as f64)
     );
-    let signs = format!("{}1", "-".repeat(100_001));
+    let signs = format!("{}1", "-".repeat(length + 1));
     assert_eq!(
         value(&document, NodeId::DOCUMENT, &signs),
         Found::Number(-1.0)
     );
-    let comparisons = format!("1{}", " = 1".repeat(100_000));
+    let comparisons = format!("1{}", " = 1".repeat(length));
     assert_eq!(
         value(&document, NodeId::DOCUMENT, &comparisons),
         Found::Boolean(true)
     );
-    let union = format!("//p{}", " | //p".repeat(10_000));
+    let union = format!("//p{}", " | //p".repeat(length / 10));
     assert_eq!(value(&document, NodeId::DOCUMENT, &union), nodes(&["?"]));
 }
 
