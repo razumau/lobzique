@@ -10,7 +10,7 @@ description = "Build the extension into lib/lobzique/"
 run = "bundle exec rake compile"
 
 [tasks.test]
-description = "Compile and run the Ruby tests (TEST=file, TESTOPTS='-n name' narrow it)"
+description = "Compile and run the Ruby tests (N=name narrows it to matching tests)"
 run = "bundle exec rake compile test"
 
 [tasks."test:rust"]
