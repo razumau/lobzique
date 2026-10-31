@@ -162,6 +162,29 @@ What Nokogiri guarantees, and how lobzique keeps it:
   contain a NUL character, and stored as bytes without transcoding. They
   come back tagged UTF-8, valid or not.
 
+### Threads, Ractors and panics
+
+- **Threads.** Native methods hold the GVL throughout and none releases it,
+  as in Nokogiri. Ruby switches threads only while Ruby code runs, which
+  happens only with no borrow held, so other threads see a document before
+  or after a native call, never during one. `Thread#raise` and `Timeout`
+  wait until a parse or search returns.
+
+  XPath and CSS handlers run between evaluations
+  (`XPathContext#evaluate`): if the handler or another thread edits the
+  document, the next evaluation sees the edited tree with answers already
+  given. Ids stay valid, so the result may be stale but nothing is unsafe.
+- **Ractors.** Not supported, as in Nokogiri: the extension isn't declared
+  Ractor-safe, so native methods raise `Ractor::UnsafeError` outside the
+  main Ractor, and node types aren't `frozen_shareable`, so
+  `Ractor.make_shareable` raises.
+- **Panics** are bugs (the fuzzers look for them). magnus turns one in a
+  native method into `fatal`: it can't be rescued, `ensure` and `at_exit`
+  run, and the process exits. Unwinding releases the arena's borrow but
+  can leave the arena half-edited; the core has no `unsafe`, so later
+  calls can give wrong answers or panic again, not corrupt memory. A panic
+  in `mark`, `free`, `size` or `compact` is an `rb_bug` crash.
+
 ### Other native classes
 
 | class | role | Nokogiri counterpart | status |
