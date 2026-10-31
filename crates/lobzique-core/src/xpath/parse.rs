@@ -1,21 +1,22 @@
 //! XPath strings, parsed into the trees [`evaluate`](super::evaluate) runs.
 //!
-//! lobzique evaluates a subset of XPath (plan.md decision 2): location paths
-//! on every axis but `namespace`, whose predicates are positions, paths, or
-//! `=` between paths, literals and numbers. The parser still reads all of
-//! XPath 1.0 as libxml2 reads it, so an expression libxml2 rejects fails
-//! with libxml2's error, and one it accepts that the subset leaves out
-//! fails with [`ParseError::Unsupported`], naming what it is.
+//! The parser reads XPath 1.0 as libxml2 reads it, so an expression libxml2
+//! rejects fails with libxml2's error. Two things libxml2 accepts fail with
+//! [`ParseError::Unsupported`] instead: the `namespace` axis, and brackets
+//! nested deeper than [`MAX_NESTING`].
 
-use super::ast::{Axis, Comparison, Expr, NodeTest, Path, QName, Step};
+use super::ast::{
+    Arithmetic, Axis, Comparison, Expr, Filter, Function, NodeTest, Operator, Path, QName, Step,
+};
 use super::chars::{is_blank, is_name_char, is_name_start, is_xml_char};
-use super::{Error, Query};
+use super::eval::scan_number;
+use super::{Error, FunctionName, Query};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParseError {
     /// libxml2 can't compile it either.
     Syntax(Error),
-    /// Valid XPath outside the subset: the construct it uses.
+    /// Valid XPath that lobzique leaves out: the construct it uses.
     Unsupported(String),
 }
 
@@ -25,8 +26,8 @@ impl From<Error> for ParseError {
     }
 }
 
-/// Predicates and parentheses nest at most this deep, as CSS does: each
-/// level costs stack to parse and evaluate.
+/// Predicates, parentheses and argument lists nest at most this deep, as
+/// CSS does: each level costs stack to parse and evaluate.
 pub const MAX_NESTING: usize = 32;
 
 pub fn parse(expression: &[u8]) -> Result<Query> {
@@ -35,6 +36,7 @@ pub fn parse(expression: &[u8]) -> Result<Query> {
         at: 0,
         depth: 0,
         unsupported: None,
+        functions: Vec::new(),
     };
     parser.skip_blanks();
     let expr = parser.expr()?;
@@ -45,12 +47,7 @@ pub fn parse(expression: &[u8]) -> Result<Query> {
     if let Some(construct) = parser.unsupported {
         return Err(ParseError::Unsupported(construct));
     }
-    if !matches!(expr, Expr::Path(_)) {
-        return Err(ParseError::Unsupported(
-            "expressions that aren't location paths".into(),
-        ));
-    }
-    Ok(Query::xpath(expr))
+    Ok(Query::xpath(expr, parser.functions))
 }
 
 type Result<T> = std::result::Result<T, ParseError>;
@@ -59,14 +56,14 @@ struct Parser<'a> {
     input: &'a [u8],
     at: usize,
     depth: usize,
-    /// The first construct outside the subset, in reading order. Parsing
-    /// carries on, so a syntax error later still wins, as libxml2 would
-    /// raise it.
+    /// The first construct left out, in reading order. Parsing carries on,
+    /// so a syntax error later still wins, as libxml2 would raise it.
     unsupported: Option<String>,
+    /// The name of each call to a function that isn't XPath 1.0's, by site.
+    functions: Vec<FunctionName>,
 }
 
-/// What stands in for a construct outside the subset. It is never
-/// evaluated, and keeps the tree flat.
+/// What stands in for a construct left out. It is never evaluated.
 const PLACEHOLDER: Expr = Expr::Number(0.0);
 
 impl Parser<'_> {
@@ -97,9 +94,8 @@ impl Parser<'_> {
         found
     }
 
-    fn unsupported(&mut self, construct: impl Into<String>) -> Expr {
+    fn unsupported(&mut self, construct: impl Into<String>) {
         self.unsupported.get_or_insert_with(|| construct.into());
-        PLACEHOLDER
     }
 
     /// Called past an opening bracket: whether to parse what it holds. Past
@@ -141,22 +137,22 @@ impl Parser<'_> {
     }
 
     fn expr(&mut self) -> Result<Expr> {
-        let mut expr = self.and_expr()?;
+        let first = self.and_expr()?;
+        let mut rest = Vec::new();
         // libxml2 matches operator names without looking past them
         while self.skip_operator(b"or") {
-            expr = self.unsupported("the or operator");
-            self.and_expr()?;
+            rest.push(self.and_expr()?);
         }
-        Ok(expr)
+        Ok(list(first, rest, Expr::Or))
     }
 
     fn and_expr(&mut self) -> Result<Expr> {
-        let mut expr = self.equality_expr()?;
+        let first = self.equality_expr()?;
+        let mut rest = Vec::new();
         while self.skip_operator(b"and") {
-            expr = self.unsupported("the and operator");
-            self.equality_expr()?;
+            rest.push(self.equality_expr()?);
         }
-        Ok(expr)
+        Ok(list(first, rest, Expr::And))
     }
 
     /// Skips blanks, and `operator` if it comes next.
@@ -167,90 +163,84 @@ impl Parser<'_> {
         found
     }
 
-    fn equality_expr(&mut self) -> Result<Expr> {
-        let mut expr = self.relational_expr()?;
+    /// One precedence of binary operators: operands that `operand` reads,
+    /// between the first of `operators` that comes next each time.
+    fn operation(
+        &mut self,
+        operators: &[(&[u8], Operator)],
+        operand: fn(&mut Self) -> Result<Expr>,
+    ) -> Result<Expr> {
+        let first = operand(self)?;
+        let mut rest = Vec::new();
         loop {
             self.skip_blanks();
-            let equal = if self.eat(b"=") {
-                true
-            } else if self.eat(b"!=") {
-                false
-            } else {
-                return Ok(expr);
+            let Some(&(token, operator)) = operators
+                .iter()
+                .find(|(token, _)| self.rest().starts_with(token))
+            else {
+                break;
             };
+            self.at += token.len();
             self.skip_blanks();
-            let supported = if !equal {
-                self.unsupported("the != operator");
-                false
-            } else if matches!(expr, Expr::Compare(..)) {
-                self.unsupported("chained comparisons");
-                false
-            } else {
-                true
-            };
-            let right = self.relational_expr()?;
-            expr = if supported {
-                Expr::compare(Comparison::Equal, expr, right)
-            } else {
-                PLACEHOLDER
-            };
+            rest.push((operator, operand(self)?));
         }
+        Ok(if rest.is_empty() {
+            first
+        } else {
+            Expr::Operation(Box::new(first), rest)
+        })
+    }
+
+    fn equality_expr(&mut self) -> Result<Expr> {
+        use Comparison::*;
+        self.operation(
+            &[
+                (&b"="[..], Operator::Compare(Equal)),
+                (&b"!="[..], Operator::Compare(NotEqual)),
+            ],
+            Self::relational_expr,
+        )
     }
 
     fn relational_expr(&mut self) -> Result<Expr> {
-        let mut expr = self.additive_expr()?;
-        loop {
-            self.skip_blanks();
-            let operator = [&b"<="[..], b"<", b">=", b">"]
-                .into_iter()
-                .find(|operator| self.rest().starts_with(operator));
-            let Some(operator) = operator else {
-                return Ok(expr);
-            };
-            self.at += operator.len();
-            let operator = String::from_utf8_lossy(operator);
-            expr = self.unsupported(format!("the {operator} operator"));
-            self.skip_blanks();
-            self.additive_expr()?;
-        }
+        use Comparison::*;
+        self.operation(
+            &[
+                (&b"<="[..], Operator::Compare(LessOrEqual)),
+                (&b"<"[..], Operator::Compare(Less)),
+                (&b">="[..], Operator::Compare(GreaterOrEqual)),
+                (&b">"[..], Operator::Compare(Greater)),
+            ],
+            Self::additive_expr,
+        )
     }
 
     fn additive_expr(&mut self) -> Result<Expr> {
-        let mut expr = self.multiplicative_expr()?;
-        loop {
-            self.skip_blanks();
-            let operator = match self.peek() {
-                Some(b'+') => "+",
-                Some(b'-') => "-",
-                _ => return Ok(expr),
-            };
-            self.at += 1;
-            expr = self.unsupported(format!("the {operator} operator"));
-            self.skip_blanks();
-            self.multiplicative_expr()?;
-        }
+        use Arithmetic::*;
+        self.operation(
+            &[
+                (&b"+"[..], Operator::Arithmetic(Add)),
+                (&b"-"[..], Operator::Arithmetic(Subtract)),
+            ],
+            Self::multiplicative_expr,
+        )
     }
 
     fn multiplicative_expr(&mut self) -> Result<Expr> {
-        let mut expr = self.unary_expr()?;
-        loop {
-            self.skip_blanks();
-            let operator = [&b"*"[..], b"div", b"mod"]
-                .into_iter()
-                .find(|operator| self.rest().starts_with(operator));
-            let Some(operator) = operator else {
-                return Ok(expr);
-            };
-            self.at += operator.len();
-            let operator = String::from_utf8_lossy(operator);
-            expr = self.unsupported(format!("the {operator} operator"));
-            self.skip_blanks();
-            self.unary_expr()?;
-        }
+        use Arithmetic::*;
+        self.operation(
+            &[
+                (&b"*"[..], Operator::Arithmetic(Multiply)),
+                (&b"div"[..], Operator::Arithmetic(Divide)),
+                (&b"mod"[..], Operator::Arithmetic(Modulo)),
+            ],
+            Self::unary_expr,
+        )
     }
 
-    /// Minus signs before a number are part of it; before anything else,
-    /// they are arithmetic.
+    /// libxml2's `xmlXPathCompUnaryExpr`: an odd number of minus signs
+    /// negates, an even number converts to a number. Before a number, they
+    /// are part of it.
     fn unary_expr(&mut self) -> Result<Expr> {
         self.skip_blanks();
         let mut negative = false;
@@ -263,23 +253,26 @@ impl Parser<'_> {
         }
         let expr = self.union_expr()?;
         Ok(match expr {
+            expr if !signed => expr,
             Expr::Number(n) if negative => Expr::Number(-n),
-            expr if !signed || matches!(expr, Expr::Number(_)) => expr,
-            _ => self.unsupported("unary minus"),
+            expr @ Expr::Number(_) => expr,
+            expr if negative => Expr::Negate(Box::new(expr)),
+            expr => Expr::Call(Function::Number, vec![expr]),
         })
     }
 
     fn union_expr(&mut self) -> Result<Expr> {
-        let mut expr = self.path_expr()?;
+        let first = self.path_expr()?;
+        let mut rest = Vec::new();
         loop {
             self.skip_blanks();
             if !self.eat(b"|") {
-                return Ok(expr);
+                break;
             }
-            expr = self.unsupported("unions");
             self.skip_blanks();
-            self.path_expr()?;
+            rest.push(self.path_expr()?);
         }
+        Ok(list(first, rest, Expr::Union))
     }
 
     /// libxml2's `xmlXPathCompPathExpr`: a location path, or a primary
@@ -296,22 +289,20 @@ impl Parser<'_> {
         }
         let primary = self.primary_expr()?;
         self.skip_blanks();
-        let mut filtered = false;
+        let mut predicates = Vec::new();
         while self.peek() == Some(b'[') {
-            self.predicate()?;
-            filtered = true;
+            predicates.push(self.predicate()?);
             self.skip_blanks();
         }
-        if self.eat(b"//") || self.eat(b"/") {
-            self.skip_blanks();
-            self.relative_path(Vec::new())?;
-            filtered = true;
+        let mut steps = Vec::new();
+        if self.eat(b"//") {
+            steps.push(descendant_or_self());
+        } else if !self.eat(b"/") {
+            return Ok(filter(primary, predicates, steps));
         }
-        Ok(if filtered {
-            self.unsupported("filter expressions")
-        } else {
-            primary
-        })
+        self.skip_blanks();
+        steps = self.relative_path(steps)?;
+        Ok(filter(primary, predicates, steps))
     }
 
     /// Whether a function call starts here: a QName, other than a node
@@ -342,22 +333,21 @@ impl Parser<'_> {
             Some(b'$') => {
                 self.at += 1;
                 let name = self.qname()?.ok_or(Error::VariableReference)?;
-                Ok(self.unsupported(format!("variable ${name}")))
+                Ok(Expr::Variable(name))
             }
             Some(b'(') => {
                 self.at += 1;
-                let placeholder = self.unsupported("parentheses");
                 if !self.nest()? {
-                    return Ok(placeholder);
+                    return Ok(PLACEHOLDER);
                 }
                 self.skip_blanks();
-                self.expr()?;
+                let expr = self.expr()?;
                 self.skip_blanks();
                 if !self.eat(b")") {
                     return Err(Error::InvalidExpression.into());
                 }
                 self.depth -= 1;
-                Ok(placeholder)
+                Ok(expr)
             }
             Some(b'\'' | b'"') => Ok(Expr::Literal(self.literal()?)),
             Some(b'0'..=b'9' | b'.') => Ok(Expr::Number(self.number())),
@@ -365,18 +355,20 @@ impl Parser<'_> {
         }
     }
 
+    /// A call to XPath 1.0's function, or to one the caller has to find,
+    /// as libxml2 looks those up when it evaluates the call.
     fn function_call(&mut self) -> Result<Expr> {
         let name = self.qname()?.ok_or(Error::InvalidExpression)?;
-        let placeholder = self.unsupported(format!("function {name}()"));
         self.skip_blanks();
         self.at += 1; // `(`, as function_name_ahead saw
         if !self.nest()? {
-            return Ok(placeholder);
+            return Ok(PLACEHOLDER);
         }
         self.skip_blanks();
+        let mut arguments = Vec::new();
         if self.peek() != Some(b')') {
             loop {
-                self.expr()?;
+                arguments.push(self.expr()?);
                 self.skip_blanks();
                 if self.peek() == Some(b')') {
                     break;
@@ -389,7 +381,19 @@ impl Parser<'_> {
         }
         self.at += 1;
         self.depth -= 1;
-        Ok(placeholder)
+        let builtin = match &name.prefix {
+            None => Function::named(&name.local),
+            Some(_) => None,
+        };
+        if let Some(function) = builtin {
+            return Ok(Expr::Call(function, arguments));
+        }
+        let site = self.functions.len();
+        self.functions.push(FunctionName {
+            prefix: name.prefix,
+            local: name.local,
+        });
+        Ok(Expr::Custom { site, arguments })
     }
 
     /// libxml2's `xmlXPathCompLocationPath`, which reads `/` again after a
@@ -531,8 +535,7 @@ impl Parser<'_> {
             }));
         }
         if self.eat(b"*") {
-            self.unsupported(format!("the node test {name}:*"));
-            return Ok(NodeTest::Any);
+            return Ok(NodeTest::AnyIn(name));
         }
         let local = self.ncname()?.ok_or(Error::InvalidExpression)?;
         Ok(NodeTest::Name(QName {
@@ -549,14 +552,14 @@ impl Parser<'_> {
             "text" => NodeTest::Text,
             "comment" => NodeTest::Comment,
             "processing-instruction" => {
+                let mut target = None;
                 if matches!(self.peek(), Some(b'\'' | b'"')) {
-                    self.literal()?;
+                    target = Some(self.literal()?);
                     self.skip_blanks();
                 } else if self.peek() != Some(b')') {
                     return Err(Error::StartLiteral.into());
                 }
-                self.unsupported("processing-instruction()");
-                NodeTest::Node
+                NodeTest::ProcessingInstruction(target)
             }
             _ => return Err(Error::InvalidExpression.into()),
         };
@@ -578,10 +581,7 @@ impl Parser<'_> {
             return Err(Error::InvalidPredicate.into());
         }
         self.depth -= 1;
-        Ok(match expr {
-            Expr::Literal(_) => self.unsupported("literals as predicates"),
-            expr => expr,
-        })
+        Ok(expr)
     }
 
     /// libxml2's `xmlXPathParseLiteral`: no escapes, any XML character,
@@ -613,50 +613,28 @@ impl Parser<'_> {
         Ok(content)
     }
 
-    /// libxml2's `xmlXPathCompNumber`: digits, an optional fraction, and an
-    /// optional exponent, whose digits may be missing.
+    /// libxml2's `xmlXPathCompNumber`, at a digit or at a `.` before one.
     fn number(&mut self) -> f64 {
-        let digits = |parser: &mut Self| {
-            while parser.peek().is_some_and(|b| b.is_ascii_digit()) {
-                parser.at += 1;
-            }
-        };
-        let start = self.at;
-        digits(self);
-        if self.eat(b".") {
-            digits(self);
-        }
-        let mantissa = &self.input[start..self.at];
-        let mut exponent = 0i32;
-        if matches!(self.peek(), Some(b'e' | b'E')) {
-            self.at += 1;
-            let negative = self.eat(b"-");
-            if !negative {
-                self.eat(b"+");
-            }
-            let start = self.at;
-            digits(self);
-            exponent = std::str::from_utf8(&self.input[start..self.at])
-                .ok()
-                .and_then(|e| e.parse().ok())
-                .unwrap_or(if start == self.at { 0 } else { i32::MAX });
-            if negative {
-                exponent = -exponent;
-            }
-        }
-        let mantissa = std::str::from_utf8(mantissa).expect("ASCII digits");
-        format!("{mantissa}e{exponent}").parse().unwrap_or(f64::NAN)
+        let (n, length) = scan_number(self.rest()).expect("a digit");
+        self.at += length;
+        n
     }
 
     /// libxml2's `xmlXPathParseQName`: None if either part is missing.
-    fn qname(&mut self) -> Result<Option<String>> {
+    fn qname(&mut self) -> Result<Option<QName>> {
         let Some(name) = self.ncname()? else {
             return Ok(None);
         };
         if !self.eat(b":") {
-            return Ok(Some(name));
+            return Ok(Some(QName {
+                prefix: None,
+                local: name,
+            }));
         }
-        Ok(self.ncname()?.map(|local| format!("{name}:{local}")))
+        Ok(self.ncname()?.map(|local| QName {
+            prefix: Some(name),
+            local,
+        }))
     }
 
     fn ncname(&mut self) -> Result<Option<String>> {
@@ -726,6 +704,28 @@ fn decode(bytes: &[u8]) -> Option<(u32, usize)> {
             value << 6 | u32::from(b & 0x3F)
         });
     Some((value, length))
+}
+
+/// `first`, or a list of it and `rest`.
+fn list(first: Expr, mut rest: Vec<Expr>, make: fn(Vec<Expr>) -> Expr) -> Expr {
+    if rest.is_empty() {
+        return first;
+    }
+    rest.insert(0, first);
+    make(rest)
+}
+
+/// libxml2 checks that a primary expression is a node set only for the
+/// predicates and steps after it: `'x'/.` is `'x'`.
+fn filter(primary: Expr, predicates: Vec<Expr>, steps: Vec<Step>) -> Expr {
+    if predicates.is_empty() && steps.is_empty() {
+        return primary;
+    }
+    Expr::Filter(Box::new(Filter {
+        primary,
+        predicates,
+        steps,
+    }))
 }
 
 fn descendant_or_self() -> Step {

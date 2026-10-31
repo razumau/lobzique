@@ -25,3 +25,4 @@ fixture directories.
 | `dompurify/expect.json` | JSON `[{title, payload, expected[]}]` | Derived from `expect.mjs`. Any element of `expected` is acceptable. Outputs reflect DOMPurify's defaults in browsers, so use payloads as attack inputs and the expectations as hints. |
 | `nokogiri`, `loofah`, `rails-*` | Minitest files | Behavioral contracts to port or run against the shim. `loofah/assets/testdata_sanitizer_tests1.dat` is JSON keyed by libxml2 version. |
 | `rails/` | Minitest files | Need Rails' own test environment; read as a contract. |
+| `libxml2/xpath` | One XPath expression per line | `expr/*` need no document; `tests/*` were written for XML documents in libxml2's tree, so on HTML they mostly find nothing. Expected results aren't copied: Nokogiri is the oracle. |

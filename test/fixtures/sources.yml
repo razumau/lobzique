@@ -146,8 +146,25 @@ sources:
           - "test/html4/test_comments.rb"
           - "test/files/staff.xml"
           - "test/files/tlm.html"
+          - "test/files/huge-xpath-query.txt"
         strip: test
         to: .
+
+  libxml2:
+    repo: GNOME/libxml2
+    # v2.13.9, what Nokogiri 1.19.4 vendors (an annotated tag, which
+    # `ls-remote` resolves to the tag object rather than the commit)
+    ref: 04af2cabb9f859c198b8a553c028a87481199410
+    license: MIT
+    license_files: [Copyright]
+    purpose: >-
+      libxml2's XPath regression expressions, one per line: the expr ones
+      need no document. The differential harness evaluates them with
+      Nokogiri and lobzique on an HTML page.
+    files:
+      - include: ["test/XPath/expr/*", "test/XPath/tests/*"]
+        strip: test/XPath
+        to: xpath
 
   loofah:
     repo: flavorjones/loofah

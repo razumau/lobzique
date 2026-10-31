@@ -107,6 +107,7 @@ pub fn compile(rule: &str, options: &Options) -> Result<Selector, SyntaxError> {
     let query = if invalid {
         Err(xpath::Error::InvalidExpression)
     } else {
+        let paths = paths.into_iter().map(Expr::Path).collect();
         Ok(Query::new(Expr::Union(paths), translator.functions))
     };
     Ok(Selector { query })

@@ -41,6 +41,12 @@ derived file is noted. Upstream license texts are copied into each directory.
 - License: MIT (`LICENSE.md`)
 - Purpose: HTML5 (gumbo) parse/serialize and CSS selector behavior to match, plus the DOM contract: Node, NodeSet, fragments, reparenting, attributes, XPath, subclassing and decorators. Most DOM tests parse staff.xml; port them to HTML. The HTML4 tests show the API shape; their libxml2 output doesn't apply (plan.md decision 3). helper.rb is there to read the tests, not to run.
 
+## libxml2/
+
+- Source: [GNOME/libxml2](https://github.com/GNOME/libxml2/tree/04af2cabb9f859c198b8a553c028a87481199410) at `04af2cabb9f859c198b8a553c028a87481199410`
+- License: MIT (`Copyright`)
+- Purpose: libxml2's XPath regression expressions, one per line: the expr ones need no document. The differential harness evaluates them with Nokogiri and lobzique on an HTML page.
+
 ## loofah/
 
 - Source: [flavorjones/loofah](https://github.com/flavorjones/loofah/tree/541c07b8b0562f16299b8dac70cc3a553e9a0cec) at `541c07b8b0562f16299b8dac70cc3a553e9a0cec`

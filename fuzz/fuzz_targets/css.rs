@@ -67,18 +67,27 @@ fuzz_target!(|data: &[u8]| {
     ]);
     let contexts = std::iter::once(NodeId::DOCUMENT)
         .chain(document.descendants(NodeId::DOCUMENT).step_by(7).take(4));
+    let variables = HashMap::new();
     for context in contexts {
         let mut answers = HashMap::new();
         for round in 0.. {
-            let outcome = match evaluate(&document, &query, context, &namespaces, &answers) {
+            let outcome = match evaluate(
+                &document,
+                &query,
+                context,
+                &namespaces,
+                &variables,
+                &answers,
+            ) {
                 Ok(outcome) => outcome,
                 Err(_) => break,
             };
             match outcome {
-                Outcome::Nodes(nodes) => {
+                Outcome::Value(Value::NodeSet(nodes)) => {
                     check_order(&document, &nodes);
                     break;
                 }
+                Outcome::Value(value) => panic!("selectors find node sets, not {value:?}"),
                 Outcome::Calls(calls) => {
                     assert!(round < 10_000, "custom calls never settle");
                     for call in calls {
@@ -88,7 +97,7 @@ fuzz_target!(|data: &[u8]| {
                             2 => Value::String(Cow::Borrowed(b"x")),
                             _ => Value::NodeSet(vec![call.node]),
                         };
-                        answers.insert((call.site, call.node), answer);
+                        answers.insert((call.site, call.node), Ok(answer));
                     }
                 }
             }

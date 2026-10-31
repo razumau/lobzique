@@ -24,11 +24,12 @@ Sanitizing user HTML is exactly that use. Build a Rust-based gem covering only w
 
 In: HTML5 parsing of documents and fragments (html5ever); arena DOM with
 traversal and mutation; CSS selectors in Nokogiri's dialect, compiled to
-XPath trees as Nokogiri compiles them to XPath strings; a serializer that
+XPath trees as Nokogiri compiles them to XPath strings; XPath 1.0 as
+libxml2 evaluates it (decision 2); a serializer that
 matches Nokogiri::HTML5 byte for byte; a sanitizer with Rails' Full / Link /
 SafeList semantics.
 
-Out (for now): full XPath 1.0 (only a subset, see decision 2), XSLT,
+Out (for now): XPath's namespace axis (decision 2), XSLT,
 XSD/RelaxNG/DTD, SAX, the HTML4 quirks parser (HTML4 names parse as HTML5,
 see decision 3), namespace-heavy XML, and any XmlMini backend.
 
@@ -128,17 +129,21 @@ html5lib tokenizer inputs.
       would. The differential harness compares what 38 contract selectors
       find in every case, WPT's selectors on their test document, and the
       selectors of Nokogiri's visitor tests on its test page.
-   6. XPath subset (decision 2). Done: `XPathContext#evaluate` parses
-      XPath strings for `xpath`, `at_xpath` and `search` on nodes, node
-      sets, documents and fragments. The parser reads all of XPath 1.0 as
-      libxml2 does and raises libxml2's error codes for what it rejects;
-      valid XPath outside the subset raises `XPath::UnsupportedError`,
-      naming the construct. The differential harness compares what the
-      inventory's runtime XPath and an expression per axis find in every
-      case. libxml2 quirks the subset keeps: `node()` passes neither
-      doctypes nor fragments, `.` is no step at all, and
-      `descendant-or-self::node()/x` becomes `descendant::x` only when `x`
-      has no predicates, so from a fragment `.//p` and `.//p[@id]` differ.
+   6. XPath (decision 2). Done: `XPathContext#evaluate` parses XPath
+      strings for `xpath`, `at_xpath` and `search` on nodes, node sets,
+      documents and fragments, and returns what libxml2 would: node sets,
+      strings, numbers and booleans, with variables and custom functions.
+      The parser reads XPath 1.0 as libxml2 does and raises libxml2's error
+      codes; evaluation raises libxml2's codes for unknown variables and
+      functions, wrong types and wrong numbers of arguments. The
+      differential harness compares what libxml2's own XPath regression
+      expressions, the XPath of Nokogiri's visitor tests, and a set of
+      function calls on every case return. libxml2 quirks kept:
+      `node()` passes neither doctypes nor fragments, `.` is no step at
+      all, `descendant-or-self::node()/x` becomes `descendant::x` only when
+      `x` has no predicates (so from a fragment `.//p` and `.//p[@id]`
+      differ), and numbers are read and printed as libxml2 does it, not
+      correctly rounded.
    7. `Node#parse` and `in_context`: the HTML5 fragment parser with the
       node as context. Done, in HTML documents; XML documents raise
       `NotImplementedError` (decision 4). The departures are in
@@ -220,7 +225,8 @@ are in `inventory/raw/src`.
      and `Lobzique::VERSION` is only defined when absent. The core keeps
      `Lobzique::VERSION` until then.
    - **HTML4 parsing.** Decided in decision 3, built with the facade.
-2. **XPath.** Decided: a location-path subset; anything else raises.
+2. **XPath.** Decided: XPath 1.0 as libxml2 evaluates it, without the
+   namespace axis.
 
    Runtime HTML code uses a fixed set of expressions:
    - Loofah: `/html/body`, `./body`, `./form`, `//p[br[following-sibling::br]]`
@@ -229,31 +235,34 @@ are in `inventory/raw/src`.
    - roadie: `html`, `html/head`, `html/head/meta`
    - reverse_markdown: `li`, `preceding::text()[1]`
 
-   The subset covers:
-   - axes: every one but namespace. attribute (`//img/@onerror` in
-     rails-html-sanitizer's tests) and following came free with the
-     evaluator;
-   - node tests: name, `*`, Nokogiri's `*:name`, `text()`, `comment()`,
-     `node()`;
-   - predicates: position, nested paths, and `=` between paths, literals
-     and numbers (attribute existence and equality, `[text()='x']`). On
-     reverse axes, position counts in reverse document order.
+   A location-path subset covered those, but the engine CSS needs already
+   had functions, operators and unions, so a subset only refused what it
+   could evaluate. mechanize, for one, needs more
+   (`string(((/html/head | /html | /head | /)/title)[1])`).
 
-   Anything else raises a subclass of `Nokogiri::XML::XPath::SyntaxError`
-   that names the unsupported construct. Unions, functions (`string()`,
-   `contains()`, …) and parenthesized paths are left out. mechanize needs
-   them (`string(((/html/head | /html | /head | /)/title)[1])`); add them
-   only if it turns out to be runtime in the corpus.
+   - Values: node sets, strings, numbers and booleans, as Nokogiri returns
+     them. Variables are strings, as `register_variable` binds them.
+   - Functions: XPath 1.0's, Nokogiri's `nokogiri-builtin:css-class` and
+     `local-name-is`, and libxml2's `escape-uri`; any other name is the
+     handler's, as in Nokogiri.
+   - The namespace axis raises `XPath::UnsupportedError`, a subclass of
+     `Nokogiri::XML::XPath::SyntaxError`: Nokogiri returns
+     `XML::Namespace` objects in node sets, and nothing in the inventory
+     asks for them.
+   - Predicates, parentheses and argument lists nest at most 32 deep, as
+     CSS does. Operators of one precedence make a list, so long chains of
+     them cost no stack.
 
    `Rails::HTML::Sanitizer#remove_xpaths` is private and called only from
-   its own tests. It is a hook for subclasses, so the subset is enough.
+   its own tests. It is a hook for subclasses.
 
-   Capybara: rack_test needs full XPath 1.0 through the `xpath` gem and
+   Capybara: rack_test needs XPath 1.0 through the `xpath` gem and
    `Nokogiri::CSS.xpath_for`. It is test-only in all 16 apps that have it.
    - Seam mode: Capybara keeps using real Nokogiri.
    - Facade mode: real Nokogiri can't sit next to the facade (same gem
      name), so rack_test is unsupported for now. Those apps use a JS driver
-     or seam mode for tests. Revisit full XPath after phase 4.
+     or seam mode for tests. `CSS.xpath_for` is what is still missing;
+     revisit after phase 4.
 3. **HTML4 entry points.** Decided: the HTML4 names use the HTML5 parser
    and serializer but libxml2's encoding handling. This is for facade mode
    only, and is built with the facade.
@@ -369,13 +378,14 @@ are in `inventory/raw/src`.
    `Gemfile.lock` version is the oracle; bumping it is a reviewed change.
    - **Compared.** `to_html` bytes, plus a tree dump (node type, name,
      namespace, attributes, text) that locates a difference, and the paths
-     of what selectors and the XPath subset find from the top node and its
-     first element.
+     of what selectors find and what XPath returns from the top node and
+     its first element.
    - **Corpus.**
      - Every push: inputs from `test/fixtures` (WPT tree-construction and
        sanitizer `.dat`, html5lib tokenizer inputs, DOMPurify payloads,
        Loofah, Nokogiri and Action Text assets, the selectors of WPT and of
-       Nokogiri's visitor tests).
+       Nokogiri's visitor tests, the XPath those tests expect, and libxml2's
+       XPath regression expressions).
      - A weekly job: a pinned Common Crawl sample, a byte range of one WARC
        file per entry, checked by SHA-256. It is downloaded, never
        committed. A divergence found there is minimized into a small case
@@ -388,8 +398,8 @@ are in `inventory/raw/src`.
 
 Three extra phase 2 requirements came out of the inventory:
 
-- **XPath subset** (decision 2), with `xpath`/`at_xpath` on Node, NodeSet
-  and Document.
+- **XPath** (decision 2), with `xpath`/`at_xpath` on Node, NodeSet and
+  Document.
 
 - **Extension points.** Loofah's `Document#decorators` hook, subclassing of
   the Document/Fragment classes, and Nokogiri's class names and constants

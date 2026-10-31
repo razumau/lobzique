@@ -9,6 +9,10 @@ sources:
     repo: html5lib/html5lib-tests
     ref: HEAD
     commit: c777c408b61078ea2eb4acefc2535f54dbc8b28a
+  libxml2:
+    repo: GNOME/libxml2
+    ref: 04af2cabb9f859c198b8a553c028a87481199410
+    commit: 04af2cabb9f859c198b8a553c028a87481199410
   loofah:
     repo: flavorjones/loofah
     ref: HEAD

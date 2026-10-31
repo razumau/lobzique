@@ -1,5 +1,6 @@
-//! XPath expressions as trees. `and` and `or` take lists, so the long
-//! conjunctions a compound selector makes cost no stack.
+//! XPath expressions as trees. Operators of one precedence take lists, so
+//! a long chain of them costs no stack: only brackets nest, and the parser
+//! limits how deep.
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Axis {
@@ -48,6 +49,11 @@ pub enum NodeTest {
     /// `*:name`, libxml2's wildcard namespace as Nokogiri patches it in:
     /// an element with the local name in any namespace or none
     LocalName(String),
+    /// `prefix:*`: any node of the axis's principal type in the namespace
+    AnyIn(String),
+    /// `processing-instruction()`, or with a literal, those with that
+    /// target
+    ProcessingInstruction(Option<Vec<u8>>),
 }
 
 #[derive(Clone, Debug)]
@@ -133,39 +139,141 @@ pub enum Comparison {
 pub enum Arithmetic {
     Add,
     Subtract,
+    Multiply,
+    Divide,
     Modulo,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Operator {
+    Compare(Comparison),
+    Arithmetic(Arithmetic),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Function {
-    Position,
     Last,
+    Position,
     Count,
-    Contains,
+    Id,
+    LocalName,
+    NamespaceUri,
+    Name,
+    String,
+    Concat,
     StartsWith,
+    Contains,
+    SubstringBefore,
+    SubstringAfter,
+    Substring,
+    StringLength,
+    NormalizeSpace,
+    Translate,
+    Boolean,
+    Not,
+    True,
+    False,
+    Lang,
+    Number,
+    Sum,
+    Floor,
+    Ceiling,
+    Round,
     /// Not XPath 1.0: what Nokogiri's `substring(…)=…` test for `[a$=b]`
     /// comes to.
     EndsWith,
-    Concat,
-    NormalizeSpace,
-    Not,
     /// Nokogiri's `nokogiri-builtin:css-class`
     CssClass,
+    /// Nokogiri's `nokogiri-builtin:local-name-is`
+    LocalNameIs,
+    /// libxml2's `escape-uri` in the XQuery functions namespace
+    EscapeUri,
+}
+
+impl Function {
+    /// The XPath 1.0 function `name` names, without a prefix.
+    pub fn named(name: &str) -> Option<Function> {
+        use Function::*;
+        Some(match name {
+            "last" => Last,
+            "position" => Position,
+            "count" => Count,
+            "id" => Id,
+            "local-name" => LocalName,
+            "namespace-uri" => NamespaceUri,
+            "name" => Name,
+            "string" => String,
+            "concat" => Concat,
+            "starts-with" => StartsWith,
+            "contains" => Contains,
+            "substring-before" => SubstringBefore,
+            "substring-after" => SubstringAfter,
+            "substring" => Substring,
+            "string-length" => StringLength,
+            "normalize-space" => NormalizeSpace,
+            "translate" => Translate,
+            "boolean" => Boolean,
+            "not" => Not,
+            "true" => True,
+            "false" => False,
+            "lang" => Lang,
+            "number" => Number,
+            "sum" => Sum,
+            "floor" => Floor,
+            "ceiling" => Ceiling,
+            "round" => Round,
+            _ => return None,
+        })
+    }
+
+    /// The function registered as `local` in the namespace `href`.
+    pub fn in_namespace(href: &str, local: &str) -> Option<Function> {
+        match (href, local) {
+            (super::NOKOGIRI_BUILTIN_URI, "css-class") => Some(Function::CssClass),
+            (super::NOKOGIRI_BUILTIN_URI, "local-name-is") => Some(Function::LocalNameIs),
+            (super::XQUERY_FUNCTIONS_URI, "escape-uri") => Some(Function::EscapeUri),
+            _ => None,
+        }
+    }
+
+    /// Whether it may return a number, which a predicate tests against the
+    /// position.
+    fn may_be_number(self) -> bool {
+        use Function::*;
+        matches!(
+            self,
+            Last | Position | Count | StringLength | Number | Sum | Floor | Ceiling | Round
+        )
+    }
+}
+
+/// A filter expression: a primary expression, predicates that number its
+/// nodes in document order, and a path from each node that passes.
+#[derive(Clone, Debug)]
+pub struct Filter {
+    pub primary: Expr,
+    pub predicates: Vec<Expr>,
+    pub steps: Vec<Step>,
 }
 
 #[derive(Clone, Debug)]
 pub enum Expr {
     Or(Vec<Expr>),
     And(Vec<Expr>),
-    Compare(Comparison, Box<Expr>, Box<Expr>),
-    Arithmetic(Arithmetic, Box<Expr>, Box<Expr>),
+    /// Operators of one precedence, applied left to right.
+    Operation(Box<Expr>, Vec<(Operator, Expr)>),
+    Negate(Box<Expr>),
     Number(f64),
     Literal(Vec<u8>),
+    /// `$name`, a variable Nokogiri binds as a string.
+    Variable(QName),
     Path(Path),
-    Union(Vec<Path>),
+    Filter(Box<Filter>),
+    Union(Vec<Expr>),
     Call(Function, Vec<Expr>),
-    /// `nokogiri:name(…)`, answered by the caller's handler; `site` numbers
-    /// the call within its query.
+    /// A function outside XPath 1.0, such as `nokogiri:name(…)`: one of
+    /// the namespaced builtins, or answered by the caller's handler. `site`
+    /// numbers the call within its query, which names it.
     Custom {
         site: usize,
         arguments: Vec<Expr>,
@@ -174,20 +282,80 @@ pub enum Expr {
 
 impl Expr {
     pub fn compare(comparison: Comparison, left: Expr, right: Expr) -> Expr {
-        Expr::Compare(comparison, Box::new(left), Box::new(right))
+        Expr::Operation(Box::new(left), vec![(Operator::Compare(comparison), right)])
     }
 
     pub fn arithmetic(operator: Arithmetic, left: Expr, right: Expr) -> Expr {
-        Expr::Arithmetic(operator, Box::new(left), Box::new(right))
+        Expr::Operation(
+            Box::new(left),
+            vec![(Operator::Arithmetic(operator), right)],
+        )
+    }
+
+    /// The expressions it evaluates in its own context: every operand but
+    /// the predicates and steps of paths and filters, which start their own.
+    fn operands(&self) -> Box<dyn Iterator<Item = &Expr> + '_> {
+        match self {
+            Expr::Or(list) | Expr::And(list) | Expr::Union(list) => Box::new(list.iter()),
+            Expr::Operation(first, rest) => {
+                Box::new(std::iter::once(&**first).chain(rest.iter().map(|(_, e)| e)))
+            }
+            Expr::Negate(expr) => Box::new(std::iter::once(&**expr)),
+            Expr::Filter(filter) => Box::new(std::iter::once(&filter.primary)),
+            Expr::Call(_, arguments) | Expr::Custom { arguments, .. } => Box::new(arguments.iter()),
+            Expr::Number(_) | Expr::Literal(_) | Expr::Variable(_) | Expr::Path(_) => {
+                Box::new(std::iter::empty())
+            }
+        }
+    }
+
+    fn operands_mut(&mut self) -> Box<dyn Iterator<Item = &mut Expr> + '_> {
+        match self {
+            Expr::Or(list) | Expr::And(list) | Expr::Union(list) => Box::new(list.iter_mut()),
+            Expr::Operation(first, rest) => {
+                Box::new(std::iter::once(&mut **first).chain(rest.iter_mut().map(|(_, e)| e)))
+            }
+            Expr::Negate(expr) => Box::new(std::iter::once(&mut **expr)),
+            Expr::Filter(filter) => Box::new(std::iter::once(&mut filter.primary)),
+            Expr::Call(_, arguments) | Expr::Custom { arguments, .. } => {
+                Box::new(arguments.iter_mut())
+            }
+            Expr::Number(_) | Expr::Literal(_) | Expr::Variable(_) | Expr::Path(_) => {
+                Box::new(std::iter::empty())
+            }
+        }
+    }
+
+    /// Each step in it, at any depth.
+    pub(super) fn for_each_step(&self, each: &mut dyn FnMut(&Step)) {
+        let walk = |steps: &[Step], each: &mut dyn FnMut(&Step)| {
+            for step in steps {
+                each(step);
+                for predicate in &step.predicates {
+                    predicate.for_each_step(each);
+                }
+            }
+        };
+        match self {
+            Expr::Path(path) => walk(&path.steps, each),
+            Expr::Filter(filter) => {
+                filter.primary.for_each_step(each);
+                for predicate in &filter.predicates {
+                    predicate.for_each_step(each);
+                }
+                walk(&filter.steps, each);
+            }
+            expr => expr.operands().for_each(|e| e.for_each_step(each)),
+        }
     }
 
     /// Rewrites `descendant-or-self::node()/child::x[p]`, which `//x[p]`
     /// stands for, as `descendant::x[p]`: the same nodes, without visiting
     /// each one twice.
     pub(super) fn merge_descendant_steps(&mut self, merge: Merge) {
-        let merge_path = |path: &mut Path| {
-            let mut merged = Vec::with_capacity(path.steps.len());
-            let mut steps = std::mem::take(&mut path.steps).into_iter().peekable();
+        let merge_path = |path: &mut Vec<Step>| {
+            let mut merged = Vec::with_capacity(path.len());
+            let mut steps = std::mem::take(path).into_iter().peekable();
             while let Some(mut step) = steps.next() {
                 for predicate in &mut step.predicates {
                     predicate.merge_descendant_steps(merge);
@@ -211,22 +379,20 @@ impl Expr {
                     None => merged.push(step),
                 }
             }
-            path.steps = merged;
+            *path = merged;
         };
         match self {
-            Expr::Or(list) | Expr::And(list) => list
-                .iter_mut()
-                .for_each(|expr| expr.merge_descendant_steps(merge)),
-            Expr::Compare(_, left, right) | Expr::Arithmetic(_, left, right) => {
-                left.merge_descendant_steps(merge);
-                right.merge_descendant_steps(merge);
+            Expr::Path(path) => merge_path(&mut path.steps),
+            Expr::Filter(filter) => {
+                filter.primary.merge_descendant_steps(merge);
+                for predicate in &mut filter.predicates {
+                    predicate.merge_descendant_steps(merge);
+                }
+                merge_path(&mut filter.steps);
             }
-            Expr::Call(_, arguments) | Expr::Custom { arguments, .. } => arguments
-                .iter_mut()
-                .for_each(|expr| expr.merge_descendant_steps(merge)),
-            Expr::Path(path) => merge_path(path),
-            Expr::Union(paths) => paths.iter_mut().for_each(merge_path),
-            Expr::Number(_) | Expr::Literal(_) => {}
+            expr => expr
+                .operands_mut()
+                .for_each(|e| e.merge_descendant_steps(merge)),
         }
     }
 
@@ -239,28 +405,19 @@ impl Expr {
 
     fn may_be_number(&self) -> bool {
         match self {
-            Expr::Number(_) | Expr::Arithmetic(..) | Expr::Custom { .. } => true,
-            Expr::Call(function, _) => {
-                matches!(
-                    function,
-                    Function::Position | Function::Last | Function::Count
-                )
+            Expr::Number(_) | Expr::Negate(_) | Expr::Custom { .. } => true,
+            Expr::Operation(_, rest) => {
+                matches!(rest.last(), Some((Operator::Arithmetic(_), _)))
             }
+            Expr::Call(function, _) => function.may_be_number(),
             _ => false,
         }
     }
 
     fn reads_position(&self) -> bool {
         match self {
-            Expr::Or(list) | Expr::And(list) => list.iter().any(Expr::reads_position),
-            Expr::Compare(_, left, right) | Expr::Arithmetic(_, left, right) => {
-                left.reads_position() || right.reads_position()
-            }
             Expr::Call(Function::Position | Function::Last, _) => true,
-            Expr::Call(_, arguments) | Expr::Custom { arguments, .. } => {
-                arguments.iter().any(Expr::reads_position)
-            }
-            Expr::Number(_) | Expr::Literal(_) | Expr::Path(_) | Expr::Union(_) => false,
+            expr => expr.operands().any(Expr::reads_position),
         }
     }
 }

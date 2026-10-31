@@ -9,9 +9,9 @@ require_relative "warc"
 module Differential
   # One input to parse with both implementations. `context` is nil for a
   # document, or a fragment context in Nokogiri's string form ("body",
-  # "svg:path"). `selectors` replaces the harness's default selectors.
-  Case = Data.define(:id, :source, :kind, :input, :context, :note, :selectors) do
-    def initialize(id:, source:, kind:, input:, context: nil, note: nil, selectors: nil) = super
+  # "svg:path"). `selectors` and `xpaths` replace the harness's defaults.
+  Case = Data.define(:id, :source, :kind, :input, :context, :note, :selectors, :xpaths) do
+    def initialize(id:, source:, kind:, input:, context: nil, note: nil, selectors: nil, xpaths: nil) = super
   end
 
   # Inputs for the differential harness (plan.md decision 6). Everything is
@@ -52,6 +52,8 @@ module Differential
       each_dompurify(&block)
       each_wpt_selector(&block)
       each_nokogiri_selector(&block)
+      each_nokogiri_xpath(&block)
+      each_libxml2_xpath(&block)
       %w[wpt-parsing/serializing-reference/*.html loofah/assets/*.html nokogiri/files/*.html].each do |glob|
         fixture_glob(glob).each do |path|
           yield Case.new(id: relative(path), source: glob[%r{\A[^/]+}], kind: :document, input: File.binread(path))
@@ -138,6 +140,29 @@ module Differential
       end
     end
 
+    # The XPath Nokogiri's visitor tests expect selectors to become, on the
+    # same page
+    def each_nokogiri_xpath(&block)
+      path = File.join(FIXTURES, "nokogiri", "css", "test_xpath_visitor.rb")
+      each_xpath(relative(path), "nokogiri-xpath", ruby_selectors(path, 0), &block)
+    end
+
+    # libxml2's XPath regression expressions, one per line, on Nokogiri's
+    # HTML test page
+    def each_libxml2_xpath(&block)
+      fixture_glob("libxml2/xpath/*/*").each do |path|
+        each_xpath(relative(path), "libxml2-xpath", File.read(path).lines.map(&:chomp).reject(&:empty?), &block)
+      end
+    end
+
+    def each_xpath(file, source, xpaths)
+      document = File.binread(File.join(FIXTURES, "nokogiri", "files", "tlm.html"))
+      xpaths.uniq.each do |xpath|
+        yield Case.new(id: selector_id(file, xpath), source: source, kind: :document, input: document,
+          note: xpath, selectors: [], xpaths: [xpath])
+      end
+    end
+
     # A selector's case id: its digest rather than its place in the file, so
     # known.yml entries keep pointing at the same selector when the fixture
     # is updated. The selector itself is the case's note.
@@ -145,7 +170,9 @@ module Differential
       "#{file}##{Digest::SHA256.hexdigest(selector)[0, 12]}"
     end
 
-    def ruby_selectors(path)
+    # The string literal arguments at `index` (the selector by default) of
+    # the `assert_xpath(xpath, selector)` calls in `path`
+    def ruby_selectors(path, index = -1)
       source = File.read(path)
       tokens = Ripper::Lexer.new(source).scan
       arguments = []
@@ -154,9 +181,9 @@ module Differential
 
         case node
         in [:method_add_arg, [:fcall, [:@ident, "assert_xpath", _]], [:arg_paren, [:args_add_block, args, _]]]
-          arguments << args.last
+          arguments << args[index]
         in [:command, [:@ident, "assert_xpath", _], [:args_add_block, args, _]]
-          arguments << args.last
+          arguments << args[index]
         else
         end
         node.each { |child| walk[child] }

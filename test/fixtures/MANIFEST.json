@@ -43,6 +43,33 @@
       "tokenizer/xmlViolation.test": "193a2f52d81adb4df4e056e3489f3bae79b3fc65253ccf31423a0e2f9c128d5c"
     }
   },
+  "libxml2": {
+    "repo": "GNOME/libxml2",
+    "commit": "04af2cabb9f859c198b8a553c028a87481199410",
+    "license": "MIT",
+    "files": {
+      "Copyright": "c99aae1afe013e50b8b3701e089222b351258043c3025b64053a233fd25b4be7",
+      "xpath/expr/base": "73e6aac1e4a2a5edf31656e66e7f45e7394eef8a0215d731b47db4233778d1e9",
+      "xpath/expr/compare": "3f331076ec929f42e817c24c92d9232e5f078cd747e1d67106591fa09b8a73cd",
+      "xpath/expr/equality": "f7b5e18804b5d6cd002146d6bf9f8b0c317ea5eb4fc542cebe85a9761288249b",
+      "xpath/expr/floats": "d899d300a8a3be44e17f6b72ccb34f7d97ca410bb148b1bd93caa4ac4336ca06",
+      "xpath/expr/functions": "c2881153a1936f24935d5c2fb644926783fa83f428a1b8b929e5c949ec12933c",
+      "xpath/expr/strings": "57b73f20aaa16b61a5913bf0d7b4e9d30f5309d163483a32e140b83b48b01724",
+      "xpath/tests/chaptersbase": "6f1da9cb4503a456349f9e7fc27ddde383476c83c6dd1c7bd9e893043cde6195",
+      "xpath/tests/chaptersprefol": "87c2c0e46081eedb5bf94cdd2210d1fc543239aaf68fcf3115982768665706e2",
+      "xpath/tests/idsimple": "73e4e5376e05288f7af738e0de48e30c52ef89d2069eeb3f9cebbdadd5841390",
+      "xpath/tests/langsimple": "e87f4df792efae48c38b372cb1f1682cab0e84b8d86862a86fe39c91c0c6e27d",
+      "xpath/tests/mixedpat": "e13d70572d1839b4ebdf527c361b317b0e7e70de8960686a814de2516a0c9351",
+      "xpath/tests/nodespat": "857a3d005d37333bb4ac05d560d7320c646e2587172c47128dcb0b0195db56c0",
+      "xpath/tests/nssimple": "31049ca2bc077397dfa9634d248c832c1699eb25e5b1b200fc42ce4870d69774",
+      "xpath/tests/simpleabbr": "a1a33110a81fab8c1632565b064d72a72b52abc9ac27dd699997a01dacb6543f",
+      "xpath/tests/simplebase": "6c04cea58d282e454c35c07ae04a3cc344c2e4e10a84933c19c46a4867873444",
+      "xpath/tests/strbase": "38129fa445a399d503abdba591d693329019836e3a410130e7baf450f3344acf",
+      "xpath/tests/unicodesimple": "b617a34d81e5dbbd32b6376fe0678fea9c87980b2dda206deeb82f124224bf31",
+      "xpath/tests/usr1check": "097b08a24679441b8c27a7b0d716d61859a28097a2194ea0d56654c1784e227c",
+      "xpath/tests/vidbase": "685979a263d86933fe80177d3365678fd7b4a337e44b34cdabe1bb75340dcf5e"
+    }
+  },
   "loofah": {
     "repo": "flavorjones/loofah",
     "commit": "541c07b8b0562f16299b8dac70cc3a553e9a0cec",
@@ -79,6 +106,7 @@
       "css/test_tokenizer.rb": "a7d5a126cf7887126727de6cd37a731a887d880b72d1c4f60346470584b537d4",
       "css/test_xpath_visitor.rb": "4fe5ecf1489e8647f12f39a070c8da4f78c1bafe876568d6755b88223ffa9142",
       "decorators/test_slop.rb": "5ecbaa603bc9cab8b3375a35a180d3c028265c40ae73fc7352d5ebe9e8415a92",
+      "files/huge-xpath-query.txt": "936fbe278c5011716bf4055a14eaa0bed0bae2708e6a966eb6a7401959db611e",
       "files/staff.xml": "a8492c308e08d6b2839abd6fbfa509ff4532496eeea9c231c5b7cb9ca1124e5e",
       "files/tlm.html": "a93011a5c624f102cc3a8d7444785090c37932a5e4eda8186057641077f1c25e",
       "helper.rb": "99d6d4f176228137309cad36ee98be5de6bf777d5917aeecb32cd92d487be2b7",

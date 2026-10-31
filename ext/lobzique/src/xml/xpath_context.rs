@@ -1,16 +1,16 @@
 //! `XML::XPathContext`: a context node, namespace and variable bindings,
 //! and `evaluate`. It evaluates the selectors `Searchable` compiles CSS
-//! into, and XPath strings in the subset of plan.md decision 2.
+//! into, and XPath strings (plan.md decision 2).
 
 use super::document;
 use super::node::{utf8_string, Node};
 use super::node_set::{self, NODE_SET};
 use super::syntax_error::{self, XmlError};
 use crate::css::selector::Selector;
-use crate::support::{apply, c_string, optional_arg};
+use crate::support::{apply, c_string, optional_arg, warn_deprecated};
 use crate::XML;
 use lobzique_core::dom::NodeId;
-use lobzique_core::xpath::{self, Call, Outcome, ParseError, Query};
+use lobzique_core::xpath::{self, Answer, Call, Outcome, ParseError, Query};
 use magnus::{
     function, gc, method, prelude::*, rb_sys::AsRawValue, typed_data::Obj, value::Lazy,
     value::Opaque, DataTypeFunctions, Error, Exception, Float, Integer, IntoValue, RArray, RClass,
@@ -18,7 +18,7 @@ use magnus::{
 };
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub static XPATH_CONTEXT: Lazy<RClass> = Lazy::new(|ruby| {
     ruby.get_inner(&XML)
@@ -32,7 +32,7 @@ pub struct XPathContext {
     /// The context node's object, which follows the node across documents.
     node: Cell<Opaque<Value>>,
     namespaces: RefCell<HashMap<String, String>>,
-    variables: RefCell<HashMap<Vec<u8>, Vec<u8>>>,
+    variables: RefCell<HashMap<String, Vec<u8>>>,
 }
 
 impl DataTypeFunctions for XPathContext {
@@ -83,7 +83,7 @@ impl XPathContext {
         name: Value,
         value: Value,
     ) -> Result<Obj<Self>, Error> {
-        let name = c_string(name)?;
+        let name = String::from_utf8_lossy(&c_string(name)?).into_owned();
         let mut variables = rb_self.variables.borrow_mut();
         if value.is_nil() {
             variables.remove(&name);
@@ -126,18 +126,24 @@ impl XPathContext {
         let node = <&Node>::try_convert(ruby.get_inner(rb_self.node.get()))?;
         let (document, id) = (node.document(ruby)?, node.id(ruby)?);
         let namespaces = rb_self.namespaces.borrow().clone();
+        let variables = rb_self.variables.borrow().clone();
         let mut answers = HashMap::new();
+        let mut warned = HashSet::new();
         loop {
             let outcome = document::with_arena(ruby, document, |arena| {
-                xpath::evaluate(arena, query, id, &namespaces, &answers)
+                xpath::evaluate(arena, query, id, &namespaces, &variables, &answers)
             })?
             .map_err(|error| xpath_error(ruby, error, rule))?;
             match outcome {
-                Outcome::Nodes(ids) => return node_set::wrap(ruby, document, ids),
+                Outcome::Value(value) => return to_ruby(ruby, document, value),
                 Outcome::Calls(calls) => {
                     for call in calls {
                         let key = (call.site, call.node);
-                        let answer = call_handler(ruby, document, handler, query, call, rule)?;
+                        let handler = Handler {
+                            object: handler,
+                            warned: &mut warned,
+                        };
+                        let answer = call_handler(ruby, document, handler, query, call)?;
                         answers.insert(key, answer);
                     }
                 }
@@ -146,35 +152,52 @@ impl XPathContext {
     }
 }
 
-/// Nokogiri's `Nokogiri_marshal_xpath_funcall_and_return_values`.
+/// The object custom functions are methods of, and the call sites it has
+/// warned about.
+struct Handler<'a> {
+    object: Value,
+    warned: &'a mut HashSet<usize>,
+}
+
+/// Nokogiri's `_noko_xml_xpath_context_handler_lookup`, then
+/// `Nokogiri_marshal_xpath_funcall_and_return_values`.
 fn call_handler(
     ruby: &Ruby,
     document: Value,
-    handler: Value,
+    handler: Handler,
     query: &Query,
     call: Call,
-    rule: &[u8],
-) -> Result<xpath::Value<'static>, Error> {
-    let name = query.function_name(call.site);
-    if handler.is_nil() || !handler.respond_to(name, false)? {
-        return Err(xpath_error(ruby, xpath::Error::UnregisteredFunction, rule));
+) -> Result<Answer, Error> {
+    let function = query.function(call.site);
+    let name = function.local.as_str();
+    // libxml2 raises this only if it reaches the call
+    if handler.object.is_nil() || !handler.object.respond_to(name, false)? {
+        return Ok(Err(xpath::Error::UnregisteredFunction));
+    }
+    // libxml2 looks a function up once per call site
+    if function.prefix.is_none() && handler.warned.insert(call.site) {
+        warn_deprecated(ruby, &format!(
+            "A custom XPath or CSS handler function named '{name}' is being invoked without a namespace. \
+             Please update your query to reference this function as 'nokogiri:{name}'. \
+             Invoking custom handler functions without a namespace is deprecated and will become an error in Nokogiri v1.17.0."
+        ))?;
     }
     let arguments = ruby.ary_new_capa(call.arguments.len());
     for argument in call.arguments {
         arguments.push(to_ruby(ruby, document, argument)?)?;
     }
-    let result = apply(ruby, handler, name, arguments)?;
+    let result = apply(ruby, handler.object, name, arguments)?;
     if result.is_nil() {
-        return Err(xpath_error(ruby, xpath::Error::StackUsage, rule));
+        return Ok(Err(xpath::Error::StackUsage));
     }
     if Float::from_value(result).is_some() || Integer::from_value(result).is_some() {
-        return Ok(xpath::Value::Number(f64::try_convert(result)?));
+        return Ok(Ok(xpath::Value::Number(f64::try_convert(result)?)));
     }
     if RString::from_value(result).is_some() {
-        return Ok(xpath::Value::String(Cow::Owned(c_string(result)?)));
+        return Ok(Ok(xpath::Value::String(Cow::Owned(c_string(result)?))));
     }
     if result.is_kind_of(ruby.class_true_class()) || result.is_kind_of(ruby.class_false_class()) {
-        return Ok(xpath::Value::Boolean(result.to_bool()));
+        return Ok(Ok(xpath::Value::Boolean(result.to_bool())));
     }
     let node_set_class = ruby.get_inner(&NODE_SET);
     let set = if RArray::from_value(result).is_some() {
@@ -206,7 +229,7 @@ fn call_handler(
         arena.sort_in_document_order(&mut ids);
         ids
     })?;
-    Ok(xpath::Value::NodeSet(ids))
+    Ok(Ok(xpath::Value::NodeSet(ids)))
 }
 
 /// Nokogiri's `_noko_xml_xpath_context__xpath2ruby`.
@@ -226,8 +249,8 @@ fn xpath_error(ruby: &Ruby, error: xpath::Error, rule: &[u8]) -> Error {
     syntax_error(ruby, "SyntaxError", error.message(), error.code(), rule)
 }
 
-/// `XPath::UnsupportedError`: valid XPath outside the subset, raised as
-/// libxml2 would raise an invalid expression, naming the construct.
+/// `XPath::UnsupportedError`: valid XPath that lobzique leaves out, raised
+/// as libxml2 would raise an invalid expression, naming the construct.
 fn unsupported_error(ruby: &Ruby, construct: &str, expression: &[u8]) -> Error {
     let message = format!("Unsupported XPath: {construct}");
     let code = xpath::Error::InvalidExpression.code();

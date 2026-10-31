@@ -3,8 +3,8 @@
 require "test_helper"
 require "nokogiri"
 
-# XPath strings as Nokogiri evaluates them, run against both, within the
-# subset lobzique evaluates (plan.md decision 2).
+# XPath strings as Nokogiri evaluates them, run against both (plan.md
+# decision 2).
 module XPathContract
   PAGE = <<~HTML
     <!DOCTYPE html>
@@ -168,6 +168,149 @@ module XPathContract
     end
   end
 
+  # Values XPath 1.0's functions and operators return, as Ruby objects
+  def test_values
+    doc = page
+    p2 = doc.at_css("#p2")
+    {
+      "count(//p)" => 2.0,
+      "string(//li)" => "a",
+      "string()" => "see top ",
+      "concat('fo', 'o', 1)" => "foo1",
+      "1 + 1" => 2.0,
+      "1.5" => 1.5,
+      "1 = 2" => false,
+      "1 = 1" => true,
+      "number('x')" => :nan,
+      "1 div 0" => Float::INFINITY,
+      "-0" => -0.0,
+      "name()" => "p",
+      "name(//svg:svg)" => "svg:svg",
+      "namespace-uri(//svg:svg)" => "http://www.w3.org/2000/svg",
+      "local-name(//img/@onerror)" => "onerror",
+      "string-length(normalize-space(' a  b '))" => 3.0,
+      "translate(substring-after(//a/@href, '#'), 'pt', 'PT')" => "ToP",
+      "substring('12345', 1.5, 2.6)" => "234",
+      "round(-2.5)" => -2.0,
+      "sum(//li[1] | //nosuch)" => :nan,
+      "boolean(//form)" => true,
+      "lang('en')" => false,
+      "nokogiri-builtin:css-class(@class, 'x')" => true,
+      "'x'/." => "x"
+    }.each do |xpath, value|
+      found = p2.xpath(xpath)
+      if value == :nan
+        assert_predicate found, :nan?, xpath
+      else
+        assert_equal value, found, xpath
+        assert_equal value.class, found.class, xpath
+      end
+    end
+    assert_equal(-Float::INFINITY, 1 / p2.xpath("-0"))
+  end
+
+  def test_operators_and_filters
+    doc = page
+    {
+      "//p | //ul | //p" => ["/html/body/p[1]", "/html/body/p[2]", "/html/body/ul"],
+      "(//li)[last()]" => ["/html/body/ul/li[2]"],
+      "(//li/text())[1]/.." => ["/html/body/ul/li[1]"],
+      "(//br)[2]/preceding-sibling::text()[1]" => ["/html/body/p[1]/text()[2]"],
+      "//li[position() > 1 and @id]" => ["/html/body/ul/li[2]"],
+      "//li[@id = 'l1' or . = 'b']" => ["/html/body/ul/li[1]", "/html/body/ul/li[2]"],
+      "//li[@id != 'l1']" => ["/html/body/ul/li[2]"],
+      "//li[last() - 1]" => ["/html/body/ul/li[1]"],
+      "//li[count(preceding-sibling::*) * 2 = 2]" => ["/html/body/ul/li[2]"],
+      "//p[not(@class)]" => ["/html/body/p[1]"],
+      "//*[starts-with(name(), 'svg:')]" => ["/html/body/svg:svg", "/html/body/svg:svg/svg:circle"],
+      "//svg:*" => ["/html/body/svg:svg", "/html/body/svg:svg/svg:circle"],
+      "id('l2 p1')" => ["/html/body/p[1]", "/html/body/ul/li[2]"],
+      "//p[contains(., 'two')]" => ["/html/body/p[1]"],
+      "//body/node()[self::comment()]" => ["/html/body/comment()"],
+      "//p['']" => [],
+      "//p[-(-2)]" => ["/html/body/p[2]"]
+    }.each do |xpath, found|
+      assert_equal found, paths(doc.xpath(xpath)), xpath
+    end
+  end
+
+  def test_variables_are_strings
+    doc = page
+    assert_equal ["/html/body/ul/li[2]"], paths(doc.xpath("//li[. = $value]", nil, value: "b"))
+    assert_equal ["/html/body/ul/li[2]"], paths(doc.search("//li[. = $value]", nil, value: "b"))
+    assert_equal 3.0, doc.xpath("$n + 1", nil, n: "2")
+    assert_equal 2, doc.xpath("//li[$n]", nil, n: "1").size
+    error = assert_raises(root::XML::XPath::SyntaxError) { doc.xpath("$nope") }
+    assert_equal [1205, "ERROR: Undefined variable: $nope"], [error.code, error.message]
+  end
+
+  def test_custom_functions
+    handler = Class.new do
+      attr_reader :things
+
+      def initialize = @things = []
+
+      def thing(thing)
+        @things << thing
+        thing
+      end
+
+      def anint = 1230456
+
+      def filter(set, value) = set.find_all { |node| node.text == value }
+    end
+    doc = page
+    found = nil
+    assert_silent { found = doc.xpath("nokogiri:anint()", handler.new) }
+    assert_equal 1230456, found
+    assert_output("", /Invoking custom handler functions without a namespace is deprecated/) do
+      Warning[:deprecated], deprecated = true, Warning[:deprecated]
+      found = doc.xpath("anint()", handler.new)
+    ensure
+      Warning[:deprecated] = deprecated
+    end
+    assert_equal 1230456, found
+    assert_equal ["/html/body/ul/li[2]"], paths(doc.xpath("//ul/li[nokogiri:filter(., 'b')]", handler.new))
+    assert_equal ["/html/body/ul/li[1]"], paths(doc.xpath("nokogiri:filter(//li, 'a')", handler.new))
+    things = handler.new
+    doc.xpath("//li[nokogiri:thing(true())][nokogiri:thing(1)][nokogiri:thing('x')]", things)
+    # 1 tests the position, so only the first item reaches 'x'
+    assert_equal [1.0, 1.0, true, true, "x"], things.things.sort_by(&:to_s)
+    assert_equal 2.0, doc.xpath("count(//li)", handler.new), "XPath's own functions come first"
+    error = assert_raises(root::XML::XPath::SyntaxError) { doc.xpath("nokogiri:nope()", handler.new) }
+    assert_equal [1209, "ERROR: Unregistered function: nokogiri:nope()"], [error.code, error.message]
+    assert_empty doc.xpath("//nosuch[nope()]")
+  end
+
+  # Nokogiri's test_huge_xpath_query: a real query, 15 brackets deep
+  def test_huge_query
+    query = File.read(File.expand_path("../fixtures/nokogiri/files/huge-xpath-query.txt", __dir__))
+    handler = Class.new do
+      def seconds(context) = 42
+
+      def add(context, rhs) = 42
+    end
+    namespaces = {"ct" => "https://test.nokogiri.org/ct", "date" => "https://test.nokogiri.org/date"}
+    assert_equal true, page.xpath(query, namespaces, handler.new)
+  end
+
+  def test_evaluation_errors
+    doc = page
+    {
+      "count('x')" => [1211, "Invalid type"],
+      "1 | //p" => [1211, "Invalid type"],
+      "'x'[1]" => [1211, "Invalid type"],
+      "count()" => [1212, "Invalid number of arguments"],
+      "nokogiri-builtin:css-class('a')" => [1212, "Invalid number of arguments"],
+      "x:f()" => [1219, "Undefined namespace prefix"],
+      "1 = foo()" => [1209, "Unregistered function"]
+    }.each do |xpath, (code, message)|
+      error = assert_raises(root::XML::XPath::SyntaxError, xpath) { doc.xpath(xpath) }
+      assert_equal [12, code, 2, xpath], [error.domain, error.code, error.level, error.str1], xpath
+      assert_equal "ERROR: #{message}: #{xpath}", error.message
+    end
+  end
+
   def test_expressions_are_strings_without_nul
     context = root::XML::XPathContext.new(page)
     assert_raises(TypeError) { context.evaluate(1) }
@@ -187,24 +330,12 @@ class TestXPathLobzique < Minitest::Test
   def root = Lobzique
 
   # What Nokogiri evaluates and lobzique leaves out
-  def test_unsupported_xpath_names_the_construct
-    doc = page
-    {
-      "string(((/html/head | /html | /head | /)/title)[1])" => "function string()",
-      "//p | //a" => "unions",
-      "(//p)[1]" => "parentheses",
-      "//p[last()]" => "function last()",
-      "//p[@id != 'p1']" => "the != operator",
-      "//p[@id and @class]" => "the and operator",
-      "//address[@domestic=$value]" => "variable $value",
-      "//svg:*" => "the node test svg:*",
-      "1 = 1" => "expressions that aren't location paths"
-    }.each do |xpath, construct|
-      error = assert_raises(Lobzique::XML::XPath::UnsupportedError, xpath) { doc.xpath(xpath) }
-      assert_kind_of Lobzique::XML::XPath::SyntaxError, error
-      assert_equal [12, 1207, 2, xpath], [error.domain, error.code, error.level, error.str1]
-      assert_equal "ERROR: Unsupported XPath: #{construct}: #{xpath}", error.message
-    end
+  def test_the_namespace_axis_is_unsupported
+    xpath = "//p/namespace::*"
+    error = assert_raises(Lobzique::XML::XPath::UnsupportedError) { page.xpath(xpath) }
+    assert_kind_of Lobzique::XML::XPath::SyntaxError, error
+    assert_equal [12, 1207, 2, xpath], [error.domain, error.code, error.level, error.str1]
+    assert_equal "ERROR: Unsupported XPath: the namespace axis: #{xpath}", error.message
   end
 
   def test_predicates_nest_32_deep

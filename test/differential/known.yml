@@ -27,3 +27,8 @@
   reason: >-
     gumbo keeps a CR that follows "&" in an attribute value; the standard,
     and lobzique, turn CR LF into LF everywhere.
+- match: \Alibxml2/xpath/tests/nssimple#
+  reason: >-
+    The namespace axis raises XPath::UnsupportedError (plan.md decision 2):
+    Nokogiri returns XML::Namespace objects in node sets, which lobzique
+    doesn't make.

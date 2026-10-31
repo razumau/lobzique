@@ -35,9 +35,15 @@ fn select_from(document: &Document, context: NodeId, rule: &str, options: &Optio
     let selector = compile(rule, options).unwrap();
     let query = selector.query.unwrap();
     let namespaces = HashMap::new();
-    let Outcome::Nodes(nodes) =
-        evaluate(document, &query, context, &namespaces, &HashMap::new()).unwrap()
-    else {
+    let Outcome::Value(Value::NodeSet(nodes)) = evaluate(
+        document,
+        &query,
+        context,
+        &namespaces,
+        &HashMap::new(),
+        &HashMap::new(),
+    )
+    .unwrap() else {
         panic!("no custom calls expected");
     };
     nodes.into_iter().map(|id| describe(document, id)).collect()
@@ -238,22 +244,35 @@ fn custom_calls_are_noted_until_answered() {
         .unwrap()
         .query
         .unwrap();
-    assert_eq!(query.function_name(0), "odd");
+    assert_eq!(query.function(0).local, "odd");
     let namespaces = HashMap::new();
     let mut answers = HashMap::new();
-    let Outcome::Calls(calls) =
-        evaluate(&document, &query, NodeId::DOCUMENT, &namespaces, &answers).unwrap()
-    else {
+    let variables = HashMap::new();
+    let Outcome::Calls(calls) = evaluate(
+        &document,
+        &query,
+        NodeId::DOCUMENT,
+        &namespaces,
+        &variables,
+        &answers,
+    )
+    .unwrap() else {
         panic!("calls expected");
     };
     assert_eq!(calls.len(), 3);
     assert_eq!(calls[0].arguments[1], Value::String(b"x"[..].into()));
     for (i, call) in calls.iter().enumerate() {
-        answers.insert((call.site, call.node), Value::Boolean(i % 2 == 0));
+        answers.insert((call.site, call.node), Ok(Value::Boolean(i % 2 == 0)));
     }
-    let Outcome::Nodes(nodes) =
-        evaluate(&document, &query, NodeId::DOCUMENT, &namespaces, &answers).unwrap()
-    else {
+    let Outcome::Value(Value::NodeSet(nodes)) = evaluate(
+        &document,
+        &query,
+        NodeId::DOCUMENT,
+        &namespaces,
+        &variables,
+        &answers,
+    )
+    .unwrap() else {
         panic!("nodes expected");
     };
     let ids: Vec<String> = nodes.iter().map(|&id| describe(&document, id)).collect();
@@ -273,11 +292,19 @@ fn prefixes_must_be_bound() {
         NodeId::DOCUMENT,
         &HashMap::new(),
         &HashMap::new(),
+        &HashMap::new(),
     );
     assert_eq!(unbound, Err(crate::xpath::Error::UndefinedNamespacePrefix));
     let bound = HashMap::from([("svg".to_string(), "http://www.w3.org/2000/svg".to_string())]);
-    let found = evaluate(&document, &query, NodeId::DOCUMENT, &bound, &HashMap::new());
-    assert!(matches!(found, Ok(Outcome::Nodes(nodes)) if nodes.len() == 1));
+    let found = evaluate(
+        &document,
+        &query,
+        NodeId::DOCUMENT,
+        &bound,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
+    assert!(matches!(found, Ok(Outcome::Value(Value::NodeSet(nodes))) if nodes.len() == 1));
 }
 
 #[test]

@@ -20,11 +20,20 @@ fn element(document: &Document, id: &str) -> NodeId {
 /// The ids, or contents, of what `expr` finds from `context`.
 fn run(document: &Document, context: NodeId, expr: Expr) -> Vec<String> {
     let query = Query::new(expr, Vec::new());
-    let Ok(Outcome::Nodes(nodes)) =
-        evaluate(document, &query, context, &HashMap::new(), &HashMap::new())
-    else {
+    let Ok(Outcome::Value(Value::NodeSet(nodes))) = evaluate(
+        document,
+        &query,
+        context,
+        &HashMap::new(),
+        &HashMap::new(),
+        &HashMap::new(),
+    ) else {
         panic!("expected nodes");
     };
+    describe(document, nodes)
+}
+
+fn describe(document: &Document, nodes: Vec<NodeId>) -> Vec<String> {
     nodes
         .into_iter()
         .map(|node| {
@@ -129,9 +138,9 @@ fn steps_from_several_nodes_merge_in_document_order() {
         ["d", "a", "c"]
     );
     let union = Expr::Union(vec![
-        Path::relative(vec![step(Axis::Child, NodeTest::Any, vec![number(3.0)])]),
-        Path::relative(vec![step(Axis::Child, NodeTest::Any, vec![number(1.0)])]),
-        Path::relative(vec![step(Axis::Child, NodeTest::Any, vec![number(3.0)])]),
+        path(vec![step(Axis::Child, NodeTest::Any, vec![number(3.0)])]),
+        path(vec![step(Axis::Child, NodeTest::Any, vec![number(1.0)])]),
+        path(vec![step(Axis::Child, NodeTest::Any, vec![number(3.0)])]),
     ]);
     assert_eq!(run(&document, element(&document, "d"), union), ["a", "c"]);
 }
@@ -268,7 +277,30 @@ fn numbers_convert_as_libxml2_converts_them() {
     assert_eq!(string_to_number(b"-1.5"), -1.5);
     assert_eq!(string_to_number(b".5"), 0.5);
     assert_eq!(string_to_number(b"1e2"), 100.0);
-    for not_a_number in [&b""[..], b"1 2", b"+1", b"x", b"1.2.3", b"-"] {
+    // each as Nokogiri 1.19.4 reads it: digits accumulate as a double
+    assert_eq!(string_to_number(b"1e"), 1.0);
+    assert_eq!(string_to_number(b"1e+"), 1.0);
+    assert_eq!(string_to_number(b" -.5 "), -0.5);
+    assert_eq!(string_to_number(b"1."), 1.0);
+    assert_eq!(string_to_number(b"1e-400"), 0.0);
+    assert_eq!(
+        string_to_number(b"12345678901234567890"),
+        1.234567890123457e19
+    );
+    assert_eq!(
+        string_to_number(b"0.1234567890123456789012345"),
+        0.12345678901234569
+    );
+    for not_a_number in [
+        &b""[..],
+        b"1 2",
+        b"+1",
+        b"x",
+        b"1.2.3",
+        b"-",
+        b".",
+        b"0e999999",
+    ] {
         assert!(string_to_number(not_a_number).is_nan(), "{not_a_number:?}");
     }
     // what Nokogiri 1.19.4's libxml2 returns for `string(…)` of each
@@ -437,41 +469,350 @@ fn syntax_errors_carry_libxml2_codes() {
 }
 
 #[test]
-fn constructs_outside_the_subset_are_named() {
-    for (xpath, construct) in [
-        ("string(//title)", "function string()"),
-        ("//p[nokogiri:thing(.)]", "function nokogiri:thing()"),
-        ("//p | //br", "unions"),
-        ("(//p)[1]", "parentheses"),
-        ("//p[$v]", "variable $v"),
-        ("//p[@a != 'x']", "the != operator"),
-        ("//p[@a and @b]", "the and operator"),
-        ("//p[1 or 2]", "the or operator"),
-        ("//p[1 + 1]", "the + operator"),
-        ("//p[2 div 1]", "the div operator"),
-        ("//p[@a < 1]", "the < operator"),
-        ("//p[-@a]", "unary minus"),
-        ("//p['x']", "literals as predicates"),
-        ("//p[@a = 'x' = 'y']", "chained comparisons"),
-        ("//svg:*", "the node test svg:*"),
-        ("//processing-instruction()", "processing-instruction()"),
-        ("//p/namespace::*", "the namespace axis"),
-        ("'x'[1]", "filter expressions"),
-        ("1 = 1", "expressions that aren't location paths"),
-        ("'x'", "expressions that aren't location paths"),
-    ] {
-        let result = parse_xpath(xpath.as_bytes()).map(|_| ());
-        assert_eq!(
-            result,
-            Err(ParseError::Unsupported(construct.into())),
-            "{xpath}"
-        );
-    }
+fn only_the_namespace_axis_is_left_out() {
+    assert_eq!(
+        parse_xpath(b"//p/namespace::*").map(|_| ()),
+        Err(ParseError::Unsupported("the namespace axis".into()))
+    );
     // libxml2 rejects it anyway
     assert_eq!(
         parse_xpath(b"string(//p").map(|_| ()),
         Err(ParseError::Syntax(Error::InvalidExpression))
     );
+}
+
+/// What an XPath string evaluates to, as Nokogiri would return it.
+#[derive(Debug, PartialEq)]
+enum Found {
+    Nodes(Vec<String>),
+    Boolean(bool),
+    Number(f64),
+    String(String),
+    Calls(Vec<String>),
+    Error(Error),
+}
+
+fn value(document: &Document, context: NodeId, xpath: &str) -> Found {
+    evaluate_with(document, context, xpath, &HashMap::new())
+}
+
+fn evaluate_with(
+    document: &Document,
+    context: NodeId,
+    xpath: &str,
+    variables: &HashMap<String, Vec<u8>>,
+) -> Found {
+    let query = parse_xpath(xpath.as_bytes()).unwrap_or_else(|e| panic!("{xpath}: {e:?}"));
+    match evaluate(
+        document,
+        &query,
+        context,
+        &HashMap::new(),
+        variables,
+        &HashMap::new(),
+    ) {
+        Ok(Outcome::Value(Value::NodeSet(nodes))) => Found::Nodes(describe(document, nodes)),
+        Ok(Outcome::Value(Value::Boolean(b))) => Found::Boolean(b),
+        Ok(Outcome::Value(Value::Number(n))) => Found::Number(n),
+        Ok(Outcome::Value(Value::String(s))) => {
+            Found::String(String::from_utf8(s.into_owned()).unwrap())
+        }
+        Ok(Outcome::Calls(calls)) => Found::Calls(
+            calls
+                .iter()
+                .map(|call| query.function(call.site).local.clone())
+                .collect(),
+        ),
+        Err(error) => Found::Error(error),
+    }
+}
+
+fn nodes(ids: &[&str]) -> Found {
+    Found::Nodes(ids.iter().map(|id| id.to_string()).collect())
+}
+
+fn string(s: &str) -> Found {
+    Found::String(s.into())
+}
+
+/// Each as Nokogiri 1.19.4 evaluates it.
+#[test]
+fn values_are_libxml2s() {
+    use Found::{Boolean, Error as E, Number};
+    let document = parse(
+        "<html lang=en><body><p id=a class='x y'>One <b>two</b></p><p id=b>3</p>\
+         <svg xml:lang=en-US><g id=g><a name=m></a></g></svg><math><mi xlink:href=u>x</mi></math>",
+    );
+    let a = element(&document, "a");
+    for (xpath, found) in [
+        ("count(//p)", Number(2.0)),
+        ("sum(//p)", Number(f64::NAN)),
+        ("sum(//p[2])", Number(3.0)),
+        ("sum(//nosuch)", Number(0.0)),
+        ("string()", string("One two")),
+        ("string(//p)", string("One two")),
+        ("string(1e30)", string("1e+30")),
+        ("string(-0)", string("0")),
+        ("string(0.1 + 0.2)", string("0.3")),
+        ("string(1 div 0)", string("Infinity")),
+        ("number('12')", Number(12.0)),
+        ("number()", Number(f64::NAN)),
+        ("boolean('')", Boolean(false)),
+        ("boolean(//p)", Boolean(true)),
+        ("local-name()", string("p")),
+        ("name()", string("p")),
+        ("name(//*[local-name() = 'svg'])", string("svg:svg")),
+        (
+            "namespace-uri(//*[local-name() = 'svg'])",
+            string("http://www.w3.org/2000/svg"),
+        ),
+        ("name(//*[local-name() = 'mi']/@*)", string("xlink:href")),
+        ("local-name(//*[local-name() = 'mi']/@*)", string("href")),
+        ("name(/)", string("")),
+        ("name(//text())", string("")),
+        ("substring('12345', 2, 3)", string("234")),
+        ("substring('12345', 1.5, 2.6)", string("234")),
+        ("substring('12345', 0, 3)", string("12")),
+        ("substring('12345', 0 div 0, 3)", string("")),
+        ("substring('12345', 1, 0 div 0)", string("")),
+        ("substring('12345', -42, 1 div 0)", string("12345")),
+        ("substring('12345', -1 div 0, 1 div 0)", string("")),
+        ("substring('ébc', 2)", string("bc")),
+        ("substring-before('a/b/c', '/')", string("a")),
+        ("substring-after('a/b/c', '/')", string("b/c")),
+        ("substring-after('abc', '')", string("abc")),
+        ("translate('bar', 'abc', 'ABC')", string("BAr")),
+        ("translate('--aaa--', 'abc-', 'ABC')", string("AAA")),
+        ("translate('éa', 'é', 'E')", string("Ea")),
+        ("string-length('héllo')", Number(5.0)),
+        ("string-length()", Number(7.0)),
+        ("normalize-space('  a  b ')", string("a b")),
+        ("concat('a', 1, true())", string("a1true")),
+        ("round(2.5)", Number(3.0)),
+        ("round(-2.5)", Number(-2.0)),
+        ("floor(-1.5)", Number(-2.0)),
+        ("1 + 2 * 3 - 4 div 8", Number(6.5)),
+        ("-5 mod 2", Number(-1.0)),
+        ("5.5 mod 2", Number(1.5)),
+        ("1 div -0", Number(f64::NEG_INFINITY)),
+        ("-(1)", Number(-1.0)),
+        ("--'3'", Number(3.0)),
+        ("- - 'x'", Number(f64::NAN)),
+        ("-//p", Number(-f64::NAN)),
+        ("2 div2", Number(1.0)),
+        ("1 < 2 < 3", Boolean(true)),
+        ("3 > 2 > 1", Boolean(false)),
+        ("1 = 1 != 0", Boolean(true)),
+        ("'a' < 'b'", Boolean(false)),
+        ("0 div 0 = 0 div 0", Boolean(false)),
+        ("true() > false()", Boolean(true)),
+        ("//p = 3", Boolean(true)),
+        ("//nosuch = false()", Boolean(true)),
+        ("//nosuch != //p", Boolean(false)),
+        ("false() and foo()", Boolean(false)),
+        ("true() or foo()", Boolean(true)),
+        ("'x'/.", string("x")),
+        ("1/.", Number(1.0)),
+        ("(//p)[2]", nodes(&["b"])),
+        ("(//p)[last()]/@id", nodes(&["b"])),
+        ("(//b/ancestor::*)[1]", nodes(&["?"])),
+        ("//b/ancestor::*[1]", nodes(&["a"])),
+        ("//p | //b", nodes(&["a", "?", "b"])),
+        ("//p[position() > 1]", nodes(&["b"])),
+        ("//p[last() - 1]", nodes(&["a"])),
+        ("//p[-(-2)]", nodes(&["b"])),
+        ("//p['x']", nodes(&["a", "b"])),
+        ("//p['']", nodes(&[])),
+        ("//nosuch[foo()]", nodes(&[])),
+        ("id('a b')", nodes(&["a", "b"])),
+        ("id(//p/@id)", nodes(&["a", "b"])),
+        ("id('m')", nodes(&["?"])),
+        ("//*[lang('en')]", nodes(&["?", "g", "?"])),
+        ("//*[lang('EN-us')]", nodes(&["?", "g", "?"])),
+        ("//*[lang('en-')]", nodes(&[])),
+        ("//p[lang('en')]", nodes(&[])),
+        (
+            "//p[nokogiri-builtin:local-name-is('p')]",
+            nodes(&["a", "b"]),
+        ),
+        ("nokogiri-builtin:css-class('a b', 'b')", Boolean(true)),
+        ("count(//p/self::processing-instruction())", Number(0.0)),
+        ("count('x')", E(Error::InvalidType)),
+        ("sum('1')", E(Error::InvalidType)),
+        ("name(1)", E(Error::InvalidType)),
+        ("'x'[1]", E(Error::InvalidType)),
+        ("'x'//.", E(Error::InvalidType)),
+        ("1 | //p", E(Error::InvalidType)),
+        ("count()", E(Error::InvalidArity)),
+        ("true(1)", E(Error::InvalidArity)),
+        ("concat('a')", E(Error::InvalidArity)),
+        ("substring('a')", E(Error::InvalidArity)),
+        ("nokogiri-builtin:css-class('a')", E(Error::InvalidArity)),
+        ("$x", E(Error::UndefinedVariable)),
+        ("$nokogiri:x", E(Error::UndefinedVariable)),
+        ("$bad:x", E(Error::UndefinedNamespacePrefix)),
+        ("bar:foo()", E(Error::UndefinedNamespacePrefix)),
+        ("foo()", Found::Calls(vec!["foo".into()])),
+        // the argument's error comes first
+        ("count(foo(), 'x')", Found::Calls(vec!["foo".into()])),
+    ] {
+        let actual = value(&document, a, xpath);
+        let same = match (&actual, &found) {
+            (Number(x), Number(y)) => x.to_bits() == y.to_bits() || (x.is_nan() && y.is_nan()),
+            _ => actual == found,
+        };
+        assert!(same, "{xpath}: {actual:?}, expected {found:?}");
+    }
+    // negative zero survives
+    assert_eq!(value(&document, a, "round(-0.4)"), Number(-0.0));
+    assert!(
+        matches!(value(&document, a, "ceiling(-0.5)"), Number(n) if n == 0.0 && n.is_sign_negative())
+    );
+}
+
+#[test]
+fn processing_instructions() {
+    let mut document = parse("<p id=p>");
+    let p = element(&document, "p");
+    let pi = document.create_processing_instruction(b"tgt".to_vec(), b"data".to_vec());
+    document.append_child(p, pi).unwrap();
+    let found = |xpath| value(&document, NodeId::DOCUMENT, xpath);
+    assert_eq!(found("//processing-instruction()"), nodes(&["data"]));
+    assert_eq!(found("//processing-instruction('tgt')"), nodes(&["data"]));
+    assert_eq!(found("//processing-instruction('x')"), nodes(&[]));
+    assert_eq!(found("name(//processing-instruction())"), string("tgt"));
+    assert_eq!(
+        found("local-name(//processing-instruction())"),
+        string("tgt")
+    );
+    assert_eq!(found("count(//p/node())"), Found::Number(1.0));
+}
+
+#[test]
+fn variables_are_strings() {
+    let document = parse("<p id=a>1</p><p id=b>2</p>");
+    let variables = HashMap::from([("x".to_string(), b"2".to_vec())]);
+    let found = |xpath| evaluate_with(&document, NodeId::DOCUMENT, xpath, &variables);
+    assert_eq!(found("$x"), string("2"));
+    assert_eq!(found("$x + 1"), Found::Number(3.0));
+    assert_eq!(found("//p[. = $x]"), nodes(&["b"]));
+    // a string, so not a position
+    assert_eq!(found("//p[$x]"), nodes(&["a", "b"]));
+    assert_eq!(found("$x[1]"), Found::Error(Error::InvalidType));
+    assert_eq!(found("$y"), Found::Error(Error::UndefinedVariable));
+}
+
+#[test]
+fn ids_are_the_first_of_each() {
+    let document = parse("<a name=n id=z></a><p id=a>1</p><p id=a>2</p><i id='x y'></i>");
+    let found = |xpath| value(&document, NodeId::DOCUMENT, xpath);
+    assert_eq!(found("id('n')"), nodes(&["z"]));
+    assert_eq!(found("count(id('a'))"), Found::Number(1.0));
+    assert_eq!(found("string(id('a'))"), string("1"));
+    // tokens split at blanks
+    assert_eq!(found("id('x y')"), nodes(&[]));
+}
+
+#[test]
+fn custom_calls_from_xpath_strings() {
+    let document = parse("<p id=a>1</p><p id=b>2</p>");
+    let query = parse_xpath(b"//p[nokogiri:keep(., 'x')]/@id | //p[mine()]").unwrap();
+    assert_eq!(
+        query.function(0),
+        &FunctionName {
+            prefix: Some("nokogiri".into()),
+            local: "keep".into()
+        }
+    );
+    assert_eq!(query.function(1).prefix, None);
+    let none = HashMap::new();
+    let Ok(Outcome::Calls(calls)) = evaluate(
+        &document,
+        &query,
+        NodeId::DOCUMENT,
+        &none,
+        &none_variables(),
+        &HashMap::new(),
+    ) else {
+        panic!("calls expected");
+    };
+    assert_eq!(calls.len(), 4);
+    assert_eq!(calls[0].arguments[1], Value::String(b"x"[..].into()));
+    let answers = calls
+        .iter()
+        .map(|call| ((call.site, call.node), Ok(Value::Boolean(call.site == 0))))
+        .collect();
+    let Ok(Outcome::Value(Value::NodeSet(found))) = evaluate(
+        &document,
+        &query,
+        NodeId::DOCUMENT,
+        &none,
+        &none_variables(),
+        &answers,
+    ) else {
+        panic!("nodes expected");
+    };
+    assert_eq!(describe(&document, found), ["a", "b"]);
+}
+
+/// The empty node set standing in for an answer can reach calls libxml2
+/// never makes; their errors count only once every call is answered.
+#[test]
+fn errors_answer_calls_only_when_reached() {
+    let document = parse("<p id=a>");
+    let query = parse_xpath(b"nokogiri:yes() or nokogiri:missing()").unwrap();
+    let none = HashMap::new();
+    let mut answers = HashMap::new();
+    let run = |answers: &HashMap<_, _>| {
+        evaluate(
+            &document,
+            &query,
+            NodeId::DOCUMENT,
+            &none,
+            &none_variables(),
+            answers,
+        )
+    };
+    let Ok(Outcome::Calls(calls)) = run(&answers) else {
+        panic!("calls expected");
+    };
+    assert_eq!(calls.len(), 2);
+    answers.insert((calls[0].site, calls[0].node), Ok(Value::Boolean(true)));
+    answers.insert(
+        (calls[1].site, calls[1].node),
+        Err(Error::UnregisteredFunction),
+    );
+    assert_eq!(run(&answers), Ok(Outcome::Value(Value::Boolean(true))));
+    answers.insert((calls[0].site, calls[0].node), Ok(Value::Boolean(false)));
+    assert_eq!(run(&answers), Err(Error::UnregisteredFunction));
+}
+
+fn none_variables() -> HashMap<String, Vec<u8>> {
+    HashMap::new()
+}
+
+/// Operators of one precedence make a list, so a long chain of them costs
+/// no stack to evaluate or drop.
+#[test]
+fn long_operator_chains_stay_flat() {
+    let document = parse("<p>");
+    let sum = format!("1{}", " + 1".repeat(100_000));
+    assert_eq!(
+        value(&document, NodeId::DOCUMENT, &sum),
+        Found::Number(100_001.0)
+    );
+    let signs = format!("{}1", "-".repeat(100_001));
+    assert_eq!(
+        value(&document, NodeId::DOCUMENT, &signs),
+        Found::Number(-1.0)
+    );
+    let comparisons = format!("1{}", " = 1".repeat(100_000));
+    assert_eq!(
+        value(&document, NodeId::DOCUMENT, &comparisons),
+        Found::Boolean(true)
+    );
+    let union = format!("//p{}", " | //p".repeat(10_000));
+    assert_eq!(value(&document, NodeId::DOCUMENT, &union), nodes(&["?"]));
 }
 
 #[test]
@@ -489,7 +830,10 @@ fn predicates_nest_32_deep() {
         (format!("{deep}x)"), Error::InvalidPredicate),
         (format!("{deep}x(]"), Error::InvalidExpression),
         (format!("{deep}'x"), Error::UnfinishedLiteral),
-        (format!("{}]", nested(MAX_NESTING + 1)), Error::InvalidExpression),
+        (
+            format!("{}]", nested(MAX_NESTING + 1)),
+            Error::InvalidExpression,
+        ),
     ] {
         assert_eq!(
             parse_xpath(xpath.as_bytes()).map(|_| ()),

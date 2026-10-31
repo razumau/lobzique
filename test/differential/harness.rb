@@ -26,15 +26,21 @@ module Differential
       "svg|svg", "* > text()", "p:contains('a')"
     ].freeze
 
-    # Run on every case but the selector tests: the XPath runtime callers in
-    # the inventory evaluate (inventory/summary.md), and an axis each
+    # Run on every case but the selector and XPath tests: the XPath runtime
+    # callers in the inventory evaluate (inventory/summary.md), an axis each,
+    # and XPath 1.0's functions on what the page holds
     XPATHS = [
       "/html/body", "./body", "./form", "//p[br[following-sibling::br]]", ".//text()", "//comment()", "li",
       "preceding::text()[1]", "html", "html/head", "html/head/meta", '//head/meta[@http-equiv="Set-Cookie"]',
       ".//a", ".//script", "//img/@onerror", "//*:svg", "//svg:svg", "/node()", ".//*[@id][1]",
       "descendant::*[2]/ancestor::*", "descendant::*[3]/preceding::node()[1]", "descendant::*[3]/following::*[1]",
       "descendant::*[1]/following-sibling::node()", "descendant::*[2]/preceding-sibling::*",
-      "descendant-or-self::node()[@lang]/@*", "//*[@class = 'x']", "..faulty_xpath"
+      "descendant-or-self::node()[@lang]/@*", "//*[@class = 'x']", "..faulty_xpath",
+      "count(//*)", "string(//title)", "string-length(/)", "normalize-space(//p)", "sum(//td | //li)",
+      "translate(substring(//title, 2, 9), 'aeiou', 'AEI')", "name(//*[namespace-uri()][1])",
+      "id(//@id)[last()]", "(//a/@href)[last()]", "//*[lang('en')][1]", "//*[contains(@class, 'a')][1]",
+      "substring-after(//meta[@charset]/@charset, '-')", "//*[@id][number(@id) = number(@id)]",
+      "boolean(//form) and not(//frameset)", "(//text()[normalize-space()])[position() < 3]"
     ].freeze
 
     # Errors that only the translators raise differently: Nokogiri's
@@ -97,7 +103,7 @@ module Differential
       end
       html = node.to_html
       {html: html.b, encoding: html.encoding.name, xml: xml(node), tree: dump(root, node), queries: queries(node),
-       selected: select(root, node, kase.selectors || SELECTORS) + evaluate(node, kase.selectors ? [] : XPATHS)}
+       selected: select(root, node, kase.selectors || SELECTORS) + evaluate(node, kase.xpaths || (kase.selectors ? [] : XPATHS))}
     rescue => e
       {error: "#{e.class.name.sub(ROOT_NAME, "")}: #{e.message}"}
     end
@@ -165,13 +171,15 @@ module Differential
       end
     end
 
-    # What each XPath finds from the top node and from its first element, as
-    # node paths, or the error it raises.
+    # What each XPath evaluates to from the top node and from its first
+    # element: node paths, another value, or the error it raises.
     def evaluate(top, xpaths)
       element = top.children.find(&:element?)
       xpaths.flat_map do |xpath|
         [top, element].compact.map do |from|
-          "#{xpath} from #{from.name}: #{from.xpath(xpath).map(&:path).join(" ")}"
+          value = from.xpath(xpath)
+          value = value.respond_to?(:map) ? value.map(&:path).join(" ") : value.inspect
+          "#{xpath} from #{from.name}: #{value}"
         rescue => e
           code = e.code if e.respond_to?(:code)
           "#{xpath} from #{from.name}: raises #{[e.class.name.sub(ROOT_NAME, ""), code].compact.join(" ")}"
