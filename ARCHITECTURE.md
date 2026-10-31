@@ -164,11 +164,25 @@ What Nokogiri guarantees, and how lobzique keeps it:
 
 ### Threads, Ractors and panics
 
-- **Threads.** Native methods hold the GVL throughout and none releases it,
-  as in Nokogiri. Ruby switches threads only while Ruby code runs, which
-  happens only with no borrow held, so other threads see a document before
-  or after a native call, never during one. `Thread#raise` and `Timeout`
-  wait until a parse or search returns.
+- **Threads.** Native methods hold the GVL, and Ruby switches threads only
+  while Ruby code runs, which happens only with no borrow held. So other
+  threads see a document before or after a native call, never during one.
+- **Parsing** is the exception, unlike Nokogiri, which holds the GVL
+  throughout. The parser builds in a document of its own and goes through
+  its input 64 KB at a time (`DocumentParser`, `FragmentParser`). Between
+  chunks, the extension lets Ruby handle interrupts and switch threads, as
+  it does between Ruby calls (`support::check_interrupts`), so `Timeout`
+  and `Thread#raise` stop a long parse.
+  - From 1 MB of input it parses without the GVL instead
+    (`support::without_gvl`), so other threads run meanwhile. An interrupt
+    stops it after the current chunk, and it goes on from there unless the
+    interrupt raised. Below 1 MB, getting the GVL back from a busy thread,
+    up to that thread's 100 ms time slice, would cost more than the parse.
+  - Code without the GVL can't reach Ruby: it is the `step` of a core type
+    (`support::Resumable`, sealed), which can't hold a Ruby value.
+  - The tree reaches the target document only after the parse, under a
+    borrow taken then, in whatever document the fragment or context node is
+    in by that time.
 
   XPath and CSS handlers run between evaluations
   (`XPathContext#evaluate`): if the handler or another thread edits the
@@ -273,13 +287,15 @@ assemble it.
 | `XML::Namespace` objects | one per libxml2 `xmlNs`, shared by the nodes that use it | a new object per call to `namespace`, `namespace_definitions` or `namespace_scopes` | the arena keeps namespaces as names, not objects; Loofah and rails-html-sanitizer read only `prefix` and `href` |
 | `Node#pointer_id` | the libxml2 node's address | the address of the document's data, which doesn't move, and the node id | arena nodes have no address of their own; the value is still unique among live nodes, which is what `==` needs |
 | native parser module | `Gumbo` | `Html5ever` | named after the engine it binds |
+| threads while parsing | the GVL is held throughout; `Timeout` waits for the parse | interrupts are handled between 64 KB chunks, and from 1 MB the GVL is released | a long parse stalls neither the process nor `Timeout` (Threads, Ractors and panics) |
 
 ## How a call flows
 
 - **Parsing.** `HTML5.parse(html)` → `HTML5::Document.parse` (Ruby: options,
   `HTML5.read_and_encode`) → `Html5ever.parse(string, url, self, …)` → the
-  core builds an arena → it is wrapped as `self`, which may be Loofah's
-  subclass → `initialize` → `@url`, `@quirks_mode`, `@errors`.
+  core builds an arena, a chunk at a time, without the GVL from 1 MB → it
+  is wrapped as `self`, which may be Loofah's subclass → `initialize` →
+  `@url`, `@quirks_mode`, `@errors`.
 - **Mutation.** `node.add_child("<b>x</b>")` → `coerce` → `fragment`, which
   parses in the context of `node` (`HTML5::Node#fragment`) →
   `add_child_node_and_reparent_attrs` → native `add_child_node` → core

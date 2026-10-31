@@ -3,14 +3,18 @@
 //! `HTML5::DocumentFragment#initialize`, and the parse behind
 //! `Node#in_context`.
 
-use crate::support::{c_string, c_string_with_length, call_initialize, check_string, string_bytes};
+use crate::support::{
+    c_string, c_string_with_length, call_initialize, check_interrupts, check_string, string_bytes,
+    without_gvl, Resumable,
+};
 use crate::xml::document::{self, wrap_document};
 use crate::xml::node::{utf8_string, Node};
 use crate::xml::node_set;
 use crate::xml::syntax_error::{self, XmlError};
 use crate::{HTML5EVER, XML};
 use lobzique_core::html5::{
-    self, Context, ContextNamespace, LimitError, Options, ParseError, QuirksMode,
+    self, Context, ContextNamespace, DocumentParser, FragmentParser, LimitError, Options,
+    ParseError, QuirksMode,
 };
 use magnus::{
     function,
@@ -29,10 +33,12 @@ fn parse(ruby: &Ruby, args: &[Value]) -> Result<Value, Error> {
     let (input, url, klass) = args.required;
     let options = options(args.keywords)?;
     let input = input_bytes(ruby, input)?;
+    let input_length = input.len();
     let klass = RClass::try_convert(klass)?;
 
-    let (arena, parsed) =
-        html5::parse_document(&input, &options).map_err(|error| limit_error(ruby, error))?;
+    let mut parser = DocumentParser::new(input, &options);
+    run(&mut parser, input_length)?;
+    let (arena, parsed) = parser.finish().map_err(|error| limit_error(ruby, error))?;
     let document = wrap_document(ruby, klass, arena)?;
     call_initialize(document, &[])?;
     let object = Obj::<Node>::try_convert(document)?;
@@ -53,15 +59,16 @@ fn fragment(ruby: &Ruby, args: &[Value]) -> Result<(), Error> {
     let context =
         context_for(ruby, context_arg)?.with_quirks_mode(quirks_mode_for(document, context_arg)?);
     let input = input_bytes(ruby, input)?;
-
-    // Nokogiri builds in the document `fragment.document` names; the nodes
-    // can only go into the arena the fragment itself is in
+    let input_length = input.len();
     let target = Obj::<Node>::try_convert(fragment)?;
-    let id = target.id(ruby)?;
-    let parsed = document::with_arena_mut(ruby, target.document(ruby)?, |arena| {
-        html5::parse_fragment(arena, id, &input, &context, &options)
-    })?
-    .map_err(|error| limit_error(ruby, error))?;
+
+    let mut parser = FragmentParser::new(input, &context, &options);
+    run(&mut parser, input_length)?;
+    let nodes = parser.finish().map_err(|error| limit_error(ruby, error))?;
+    // Nokogiri builds in the document `fragment.document` names; the nodes
+    // can only go into the arena the fragment itself is in, which another
+    // thread may have changed during the parse
+    let parsed = target.with_arena_mut(ruby, move |arena, id| nodes.append_to(arena, id))?;
     target.ivar_set("@quirks_mode", parsed.quirks_mode as u8)?;
     add_errors(
         ruby,
@@ -76,8 +83,8 @@ fn fragment(ruby: &Ruby, args: &[Value]) -> Result<(), Error> {
 /// unlinked, and the parse errors are added to the document's `@errors`.
 pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error> {
     let input = input_bytes(ruby, input)?;
-    let document = node.document(ruby)?;
-    let document_object = Obj::<Node>::try_convert(document)?;
+    let input_length = input.len();
+    let document_object = Obj::<Node>::try_convert(node.document(ruby)?)?;
     let parsed = !document_object
         .ivar_get::<_, Value>("@quirks_mode")?
         .is_nil();
@@ -87,15 +94,34 @@ pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error
         ..default_options(ruby)?
     };
 
-    let (ids, parsed) = node
-        .with_arena_mut(ruby, |arena, id| {
-            let context = Context::for_node(arena, id, parsed);
-            html5::parse_in_context(arena, &input, &context, &options)
-        })?
-        .map_err(|error| limit_error(ruby, error))?;
-    let errors = document_object.ivar_get::<_, RArray>("@errors")?;
+    let context = node.with_arena(ruby, |arena, id| Context::for_node(arena, id, parsed))?;
+    let mut parser = FragmentParser::new(input, &context, &options);
+    run(&mut parser, input_length)?;
+    let nodes = parser.finish().map_err(|error| limit_error(ruby, error))?;
+    // The node's document now, which another thread may have changed
+    // during the parse
+    let document = node.document(ruby)?;
+    let (ids, parsed) = document::with_arena_mut(ruby, document, move |arena| nodes.import(arena))?;
+    let errors = Obj::<Node>::try_convert(document)?.ivar_get::<_, RArray>("@errors")?;
     errors.concat(syntax_errors(ruby, parsed.errors, ruby.qnil().as_value())?)?;
     node_set::wrap(ruby, document, ids)
+}
+
+/// Inputs from this size (about 40 ms of parsing) are parsed without the
+/// GVL. Getting it back from a thread running Ruby can take that thread's
+/// whole time slice, 100 ms, which would more than double a shorter parse.
+const WITHOUT_GVL_FROM: usize = 1 << 20;
+
+/// Parses the input up to the end, so the parser's `finish` only ends the
+/// tree. Interrupts are handled between steps, as between Ruby calls.
+fn run(parser: &mut impl Resumable, input_length: usize) -> Result<(), Error> {
+    if input_length >= WITHOUT_GVL_FROM {
+        return without_gvl(parser);
+    }
+    while parser.step() {
+        check_interrupts()?;
+    }
+    Ok(())
 }
 
 /// The `Html5ever::DEFAULT_*` limits, which are constant once loaded.
