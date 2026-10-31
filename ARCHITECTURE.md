@@ -66,7 +66,8 @@ that isn't conversion belongs in the core.
 `lib.rs` defines the module tree and the native classes in the order of
 Nokogiri's `Init_nokogiri`. The Ruby files then reopen them. Pure-Ruby
 classes, such as the syntax errors, `SaveOptions` and `NodeSet`, are defined
-only in Ruby.
+only in Ruby; their native files (`xml/syntax_error.rs`, `xml/node_set.rs`)
+only build instances.
 
 ### Node objects
 
@@ -144,8 +145,9 @@ What Nokogiri guarantees, and how lobzique keeps it:
   `with_arena`/`with_arena_mut` and released before any call into Ruby:
   decorate, `initialize`, blocks, CSS handlers. The closures can't reach
   Ruby:
-  - they must be `Send`, and Ruby handles and values aren't, so they can
-    neither capture nor return one;
+  - they must be `Send`, and neither `&Ruby` nor `Value` is. `Opaque` and
+    `Lazy` are, but reading one takes a `&Ruby`, so a closure can carry one
+    and not use it;
   - the extension denies `unsafe` outside `support.rs`, which rules out
     raw rb-sys calls, and denies deprecated magnus API, which fetches a
     handle itself;
@@ -201,14 +203,12 @@ What Nokogiri guarantees, and how lobzique keeps it:
 
 ### Other native classes
 
-| class | role | Nokogiri counterpart | status |
-|---|---|---|---|
-| `Lobzique::Html5ever` | `parse(input, url, klass, **limits)`, `fragment(fragment, input, context, **limits)` and the `DEFAULT_MAX_*` limits | `Nokogiri::Gumbo` | built |
-| `XML::Namespace` | a node's namespace: `prefix`, `href` | same | built |
-| `XML::XPathContext` | `new(node)`, `node=`, `register_ns`, `register_variable`, `evaluate(path, handler)`: a `CSS::Selector` or an XPath string | same | built; the `namespace` axis raises `XPath::UnsupportedError` (plan.md decision 2) |
-| `CSS::Selector` | `new(rule, prefixes:, doctype:, namespaces:, builtins:, first:)`: a selector list compiled for the implied XPath contexts of the searching class, as Nokogiri's `XPathVisitor` is configured | none; Nokogiri translates CSS into XPath strings | built |
-
-Each arrives with the phase 2 step that needs it (plan.md).
+| class | role | Nokogiri counterpart |
+|---|---|---|
+| `Lobzique::Html5ever` | `parse(input, url, klass, **limits)`, `fragment(fragment, input, context, **limits)` and the `DEFAULT_MAX_*` limits | `Nokogiri::Gumbo` |
+| `XML::Namespace` | a node's namespace: `prefix`, `href` | same |
+| `XML::XPathContext` | `new(node)`, `node=`, `register_ns`, `register_variable`, `evaluate(path, handler)`: a `CSS::Selector` or an XPath string | same |
+| `CSS::Selector` | `new(rule, prefixes:, doctype:, namespaces:, builtins:, first:)`: a selector list compiled for the implied XPath contexts of the searching class, as Nokogiri's `XPathVisitor` is configured | none; Nokogiri translates CSS into XPath strings |
 
 ## Core (`crates/lobzique-core`)
 
@@ -225,17 +225,17 @@ each native method stays a single call. For example, reparenting with
 Nokogiri's copy-and-merge rules is one core operation. The ext does not
 assemble it.
 
-| module | holds | status |
-|---|---|---|
-| `dom` | `Document`, an arena of nodes addressed by `NodeId`; `NodeType` numbered as libxml2 numbers node types; `tree` (linking, unlinking, iterators, libxml2's sibling walks and document order); `attribute` (lookup by name, as each libxml2 reader does it); `namespace` (namespaces, definitions and scopes); `path` (`xmlGetNodePath`); `check` (invariants for tests and fuzzing) | built |
-| `dom::reparent` | Nokogiri's `reparent_node_with` over libxml2 2.13: hierarchy checks, copying text and cross-document nodes, merging adjacent text (`xmlAddChild` and `replace` only), `relink_namespace` | built |
-| `dom::copy` | `xmlDocCopyNode` at Nokogiri's three `dup` levels, `xmlCopyDoc`; a copy defines the foreign namespaces it uses on its root | built |
-| `dom::text` | content, `native_content=` (`xmlNodeSetContent`); `blank?`, `encode_special_chars` | built |
-| `html5::parse` | html5ever `TreeSink` into the arena: documents, fragments with a context node (appended to a fragment, or unlinked for `in_context`, whose context the core finds from the node; a fragment is parsed in a scratch document and copied in), a chunk of input at a time (`DocumentParser`, `FragmentParser`), `max_tree_depth`/`max_attributes`, quirks mode, errors; gumbo's text and CDATA nodes | built |
-| `html5::serialize` | `html_standard_serialize`, byte for byte with Nokogiri::HTML5 | built |
-| `xml::serialize` | `native_write_to`: libxml2's `xmlSaveTree` for XML and XHTML output, with its escaping, formatting, XHTML 1.0 appendix C rules and encoding switch; the binding transcodes the result | built |
-| `css` | Nokogiri's CSS front end, ported: `tokenizer` (rex rules in order), `parser` (racc's parse loop over `tables`, which `script/generate_css_tables` generates from Nokogiri's parser, and the grammar's actions), `translate` (`XPathVisitor`, building `xpath` trees where it writes strings) | built |
-| `xpath` | `ast` (expressions as trees, operators of one precedence as lists), `eval` (libxml2's evaluation: XPath 1.0 values, comparisons and functions, node sets in document order, positions per step, libxml2's evaluation errors, custom calls answered in rounds), `parse` (XPath strings read as libxml2 reads them, with its error codes); `XML::XPathContext` errors | built |
+| module | holds |
+|---|---|
+| `dom` | `Document`, an arena of nodes addressed by `NodeId`; `NodeType` numbered as libxml2 numbers node types; `tree` (linking, unlinking, iterators, libxml2's sibling walks and document order); `attribute` (lookup by name, as each libxml2 reader does it); `namespace` (namespaces, definitions and scopes); `path` (`xmlGetNodePath`); `check` (invariants for tests and fuzzing) |
+| `dom::reparent` | Nokogiri's `reparent_node_with` over libxml2 2.13: hierarchy checks, copying text and cross-document nodes, merging adjacent text (`xmlAddChild` and `replace` only), `relink_namespace` |
+| `dom::copy` | `xmlDocCopyNode` at Nokogiri's three `dup` levels, `xmlCopyDoc`; a copy defines the foreign namespaces it uses on its root |
+| `dom::text` | content, `native_content=` (`xmlNodeSetContent`); `blank?`, `encode_special_chars` |
+| `html5::parse` | html5ever `TreeSink` into the arena: documents, fragments with a context node (appended to a fragment, or unlinked for `in_context`, whose context the core finds from the node; a fragment is parsed in a scratch document and copied in), a chunk of input at a time (`DocumentParser`, `FragmentParser`), `max_tree_depth`/`max_attributes`, quirks mode, errors; gumbo's text and CDATA nodes |
+| `html5::serialize` | `html_standard_serialize`, byte for byte with Nokogiri::HTML5 |
+| `xml::serialize` | `native_write_to`: libxml2's `xmlSaveTree` for XML and XHTML output, with its escaping, formatting, XHTML 1.0 appendix C rules and encoding switch; the binding transcodes the result |
+| `css` | Nokogiri's CSS front end, ported: `tokenizer` (rex rules in order), `parser` (racc's parse loop over `tables`, which `script/generate_css_tables` generates from Nokogiri's parser, and the grammar's actions), `translate` (`XPathVisitor`, building `xpath` trees where it writes strings) |
+| `xpath` | `ast` (expressions as trees, operators of one precedence as lists), `eval` (libxml2's evaluation: XPath 1.0 values, comparisons and functions, node sets in document order, positions per step, libxml2's evaluation errors, custom calls answered in rounds), `parse` (XPath strings read as libxml2 reads them, with its error codes); `XML::XPathContext` errors |
 
 **Names.**
 - Elements and attributes use html5ever's `QualName`, shared by the parser
