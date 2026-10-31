@@ -1,12 +1,13 @@
 #![no_main]
 
 //! Parsing pieces of input in context, one after another in one document,
-//! must leave a consistent tree: each parse returns unlinked nodes and
-//! builds in the scaffolding the one before it left. The first byte picks
-//! the context; NUL bytes split the rest into pieces.
+//! must leave a consistent tree: each parse returns unlinked nodes and adds
+//! nothing to the document but them, and a parse that fails adds nothing.
+//! The first byte picks the context; NUL bytes split the rest into pieces.
 
 use libfuzzer_sys::fuzz_target;
 use lobzique_core::dom::{Document, DocumentKind};
+use std::iter;
 use lobzique_core::html5::{parse_in_context, serialize, Context, ContextNamespace, Options};
 
 const CONTEXTS: &[(ContextNamespace, &str)] = &[
@@ -39,9 +40,17 @@ fuzz_target!(|data: &[u8]| {
     };
     let mut document = Document::new(kind);
     for piece in input.split(|&byte| byte == 0) {
+        let before = document.node_ids().len();
         let Ok((nodes, _)) = parse_in_context(&mut document, piece, &context, &options) else {
+            assert_eq!(document.node_ids().len(), before);
             continue;
         };
+        let added: usize = nodes
+            .iter()
+            .flat_map(|&node| iter::once(node).chain(document.descendants(node)))
+            .map(|node| 1 + document.attributes(node).len())
+            .sum();
+        assert_eq!(document.node_ids().len(), before + added);
         for &node in &nodes {
             assert_eq!(document.parent(node), None);
             assert_eq!(document.previous_sibling(node), None);

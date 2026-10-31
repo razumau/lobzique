@@ -10,14 +10,14 @@ impl Document {
         }
         // Set when a node is reached from its parent's children or attributes
         let mut listed = vec![false; self.nodes.len()];
-        for id in self.arena_ids() {
+        for id in self.node_ids() {
             if id != NodeId::DOCUMENT && matches!(self.node_kind(id), NodeKind::Document) {
                 return Err(format!("{id:?} is a second document node"));
             }
             self.check_children(id, &mut listed)?;
             self.check_attributes(id, &mut listed)?;
         }
-        for id in self.arena_ids() {
+        for id in self.node_ids() {
             match self.parent(id) {
                 Some(parent) if !listed[id.index()] => {
                     return Err(format!("{id:?} isn't listed by its parent {parent:?}"));
@@ -26,15 +26,6 @@ impl Document {
                     return Err(format!("{id:?} has siblings but no parent"));
                 }
                 _ => {}
-            }
-        }
-        for (index, &id) in self.scaffolding.iter().enumerate() {
-            let blank = matches!(self.node_kind(id), NodeKind::DocumentFragment)
-                && self.parent(id).is_none()
-                && self.first_child(id).is_none()
-                && self.attributes(id).is_empty();
-            if !blank || self.scaffolding[..index].contains(&id) {
-                return Err(format!("{id:?} waits as scaffolding but isn't blank"));
             }
         }
         self.check_acyclic()?;
@@ -47,7 +38,7 @@ impl Document {
     /// prefix has a local part.
     fn check_names(&self) -> Result<(), String> {
         let default_namespace = self.default_namespace();
-        for id in self.arena_ids() {
+        for id in self.node_ids() {
             let name = match self.node_kind(id) {
                 NodeKind::Element(element) => {
                     let unqualified = element.name.prefix.is_none()
@@ -145,7 +136,7 @@ impl Document {
         }
         let mut walk = vec![Walk::Unvisited; self.nodes.len()];
         let mut path = Vec::new();
-        for start in self.arena_ids() {
+        for start in self.node_ids() {
             let mut next = Some(start);
             while let Some(id) = next {
                 match walk[id.index()] {

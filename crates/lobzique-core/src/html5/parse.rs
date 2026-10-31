@@ -2,7 +2,7 @@
 //! output of Nokogiri's gumbo binding (`ext/nokogiri/gumbo.c`).
 
 use super::{is_html, VOID_ELEMENTS};
-use crate::dom::{Doctype, Document, DocumentKind, NodeId, NodeKind, QualName};
+use crate::dom::{CopyDepth, Doctype, Document, DocumentKind, NodeId, NodeKind, QualName};
 use html5ever::tendril::StrTendril;
 use html5ever::tokenizer::{
     self, BufferQueue, Token, TokenSink, TokenSinkResult, Tokenizer, TokenizerOpts,
@@ -91,12 +91,7 @@ pub struct Parsed {
 /// decodes it.
 pub fn parse_document(input: &[u8], options: &Options) -> Result<(Document, Parsed), LimitError> {
     let mut document = Document::new(DocumentKind::Html);
-    let sink = Sink::new(
-        &mut document,
-        NodeId::DOCUMENT,
-        options,
-        options.max_tree_depth,
-    );
+    let sink = Sink::new(&mut document, options, options.max_tree_depth);
     let builder = TreeBuilder::new(sink, tree_builder_options(options, QuirksMode::NoQuirks));
     let parsed = run(builder, input, options, None)?;
     let roots: Vec<_> = document.element_children(NodeId::DOCUMENT).collect();
@@ -247,23 +242,23 @@ pub fn parse_fragment(
 }
 
 /// Parses a fragment in `context` and returns its top-level nodes, each
-/// unlinked from its parent and siblings. The parser's own scaffolding (a
-/// scratch fragment, its html root, the context and form elements) is
-/// reused by the document's next fragment parse.
+/// unlinked from its parent and siblings. The parse builds in a scratch
+/// document and copies its result in, so the parser's scaffolding (an html
+/// root, the context and form elements) and the nodes of a parse that fails
+/// never reach `document`.
 pub fn parse_in_context(
     document: &mut Document,
     input: &[u8],
     context: &Context,
     options: &Options,
 ) -> Result<(Vec<NodeId>, Parsed), LimitError> {
-    let scratch = document.create_scaffolding_fragment();
+    let mut scratch = Document::new(DocumentKind::Html);
     // The tree has an html element above the fragment's nodes, as gumbo's does
     let max_tree_depth = options.max_tree_depth.map(|depth| depth.saturating_add(1));
-    let sink = Sink::new(document, scratch, options, max_tree_depth);
+    let sink = Sink::new(&mut scratch, options, max_tree_depth);
     // The tree builder starts in this mode and never sets it in a fragment
     sink.quirks_mode.set(context.quirks_mode);
 
-    sink.building_scaffolding.set(true);
     let mut attributes = Vec::new();
     if let Some(encoding) = &context.encoding {
         attributes.push(Attribute {
@@ -282,29 +277,18 @@ pub fn parse_in_context(
         form,
         tree_builder_options(options, context.quirks_mode),
     );
-    builder.sink.building_scaffolding.set(false);
-    let first_parsed = builder.sink.document.borrow().arena_ids().len();
     let initial_state =
         builder.tokenizer_state_for_context_elem(options.parse_noscript_content_as_text);
-    let parsed = run(builder, input, options, Some(initial_state));
+    let parsed = run(builder, input, options, Some(initial_state))?;
 
-    let root = document.first_child(scratch);
-    let mut nodes = Vec::new();
-    if let (Some(root), Ok(_)) = (root, &parsed) {
-        while let Some(child) = document.first_child(root) {
-            document.detach(child);
-            if matches!(document.node_kind(child), NodeKind::Element(_)) {
-                define_namespaces(document, child);
-            }
-            nodes.push(child);
-        }
-    }
-    let scaffolding = [Some(scratch), root, Some(context_element), form];
-    for id in scaffolding.into_iter().flatten() {
-        document.release_scaffolding(id);
-    }
-    document.adopt_parsed_names(first_parsed);
-    Ok((nodes, parsed?))
+    // The copies get the names and namespace definitions `document` writes
+    let root = scratch.first_child(NodeId::DOCUMENT);
+    let nodes = root
+        .into_iter()
+        .flat_map(|root| scratch.children(root))
+        .filter_map(|child| document.import(&scratch, child, CopyDepth::Deep))
+        .collect();
+    Ok((nodes, parsed))
 }
 
 /// Gumbo's binding defines the foreign namespaces a top-level element and
@@ -355,7 +339,7 @@ pub fn quirks_mode_for_doctype(
     // doctype token, with the same table it uses for documents
     let mut document = Document::new(DocumentKind::Html);
     let options = Options::default();
-    let sink = Sink::new(&mut document, NodeId::DOCUMENT, &options, None);
+    let sink = Sink::new(&mut document, &options, None);
     let builder = TreeBuilder::new(sink, tree_builder_options(&options, QuirksMode::NoQuirks));
     let _ = builder.process_token(Token::DoctypeToken(doctype), 1);
     builder.sink.quirks_mode.get()
@@ -515,9 +499,6 @@ enum TextSource {
 /// as Nokogiri builds them.
 struct Sink<'a> {
     document: RefCell<&'a mut Document>,
-    /// What html5ever takes for the document node: the document itself, or
-    /// a scratch fragment when parsing a fragment.
-    root: NodeId,
     quirks_mode: Cell<QuirksMode>,
     line: Cell<u64>,
     errors: RefCell<Vec<ParseError>>,
@@ -527,20 +508,16 @@ struct Sink<'a> {
     /// MathML `annotation-xml` elements whose content parses as HTML.
     integration_points: RefCell<HashSet<NodeId>>,
     text_source: Cell<TextSource>,
-    /// Whether the elements being made are a fragment parse's scaffolding.
-    building_scaffolding: Cell<bool>,
 }
 
 impl<'a> Sink<'a> {
     fn new(
         document: &'a mut Document,
-        root: NodeId,
         options: &Options,
         max_tree_depth: Option<usize>,
     ) -> Sink<'a> {
         Sink {
             document: RefCell::new(document),
-            root,
             quirks_mode: Cell::new(QuirksMode::NoQuirks),
             line: Cell::new(1),
             errors: RefCell::new(Vec::new()),
@@ -549,7 +526,6 @@ impl<'a> Sink<'a> {
             too_deep: Cell::new(false),
             integration_points: RefCell::default(),
             text_source: Cell::new(TextSource::Data),
-            building_scaffolding: Cell::new(false),
         }
     }
 
@@ -684,7 +660,7 @@ impl TreeSink for Sink<'_> {
     }
 
     fn get_document(&self) -> NodeId {
-        self.root
+        NodeId::DOCUMENT
     }
 
     fn elem_name(&self, target: &NodeId) -> Name {
@@ -701,11 +677,7 @@ impl TreeSink for Sink<'_> {
         flags: ElementFlags,
     ) -> NodeId {
         let mut document = self.document.borrow_mut();
-        let element = if self.building_scaffolding.get() {
-            document.create_scaffolding_element(name)
-        } else {
-            document.create_element(name)
-        };
+        let element = document.create_element(name);
         for attribute in attributes {
             let node =
                 document.create_attribute(attribute.name, attribute.value.as_bytes().to_vec());
@@ -762,9 +734,9 @@ impl TreeSink for Sink<'_> {
             public_id: optional(public_id),
             system_id: optional(system_id),
         });
-        let _ = match document.first_child(self.root) {
+        let _ = match document.first_child(NodeId::DOCUMENT) {
             Some(first) => document.insert_before(first, doctype),
-            None => document.append_child(self.root, doctype),
+            None => document.append_child(NodeId::DOCUMENT, doctype),
         };
     }
 

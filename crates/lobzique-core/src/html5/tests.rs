@@ -162,23 +162,29 @@ fn parsing_in_context_leaves_each_node_unlinked() {
 }
 
 #[test]
-fn parsing_in_context_reuses_its_scaffolding() {
+fn parsing_in_context_adds_only_what_it_returns() {
     let mut document = Document::new(DocumentKind::Html);
     let context = Context::new(ContextNamespace::Html, "div").with_form_ancestor(true);
-    let parse = |document: &mut Document, input: &[u8]| {
-        parse_in_context(document, input, &context, &Options::default())
-            .unwrap()
-            .0
-    };
-    let first = parse(&mut document, b"<html lang=en><p>a</p>");
-    let before = document.arena_ids().len();
-    let second = parse(&mut document, b"<p>b</p>");
+    let before = document.node_ids().len();
+    let (nodes, _) = parse_in_context(
+        &mut document,
+        b"<html lang=en><p>a</p>",
+        &context,
+        &Options::default(),
+    )
+    .unwrap();
     // the p and its text
-    assert_eq!(document.arena_ids().len(), before + 2);
-    assert_eq!(document.node_ids().count() + 4, document.arena_ids().len());
+    assert_eq!(document.node_ids().len(), before + 2);
+    assert_eq!(html(&document, nodes[0]), "<p>a</p>");
+
+    let options = Options {
+        max_tree_depth: Some(1),
+        ..Options::default()
+    };
+    let error = parse_in_context(&mut document, b"<p><b>c</b></p>", &context, &options);
+    assert_eq!(error.unwrap_err(), LimitError::TreeTooDeep);
+    assert_eq!(document.node_ids().len(), before + 2);
     document.check_invariants().unwrap();
-    assert_eq!(html(&document, first[0]), "<p>a</p>");
-    assert_eq!(html(&document, second[0]), "<p>b</p>");
 }
 
 /// Parses `input` in the context `Context::for_node` finds for the first
@@ -450,7 +456,7 @@ fn fragments_in_xml_documents_have_no_namespace() {
     );
     assert_eq!(html(&document, fragment), "<p>a<svg></svg></p>");
 
-    // The second parse builds in older nodes, and renames only what it made
+    // A parse renames only what it made
     let html_p = document.create_element(QualName::new(
         None,
         ns!(html),
