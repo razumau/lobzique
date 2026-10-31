@@ -5,7 +5,7 @@
 use super::namespace::split_qualified_name;
 use super::{CopyDepth, Document, NodeId, NodeKind, NodeType, QualName};
 use html5ever::{LocalName, Namespace, Prefix};
-use std::fmt;
+use std::{fmt, mem};
 
 /// Where a node goes relative to the pivot, one per native method.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,19 +189,21 @@ impl Document {
         Ok(merged)
     }
 
-    /// Appends the text of `second` to `first` if both are text nodes.
+    /// Moves the text of `second` to the end of `first` if both are text
+    /// nodes. `second` is always a copy nothing refers to, which libxml2
+    /// would free; here it stays behind as an empty slot.
     fn merge_text(&mut self, first: NodeId, second: NodeId) -> bool {
-        let NodeKind::Text(text) = self.node_kind(second) else {
+        if !matches!(self.node_kind(first), NodeKind::Text(_)) {
+            return false;
+        }
+        let NodeKind::Text(text) = &mut self.node_mut(second).kind else {
             return false;
         };
-        let text = text.clone();
-        match &mut self.node_mut(first).kind {
-            NodeKind::Text(first) => {
-                first.extend_from_slice(&text);
-                true
-            }
-            _ => false,
+        let text = mem::take(text);
+        if let NodeKind::Text(first) = &mut self.node_mut(first).kind {
+            first.extend_from_slice(&text);
         }
+        true
     }
 
     /// Nokogiri's `relink_namespace` on a reparented node, walking into

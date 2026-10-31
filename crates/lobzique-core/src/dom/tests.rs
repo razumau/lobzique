@@ -588,6 +588,16 @@ fn replacing_with_text_merges_both_neighbors_into_the_previous_one() {
 }
 
 #[test]
+fn a_merged_copy_keeps_no_text() {
+    let (mut doc, p, _, [.., i]) = paragraph();
+    doc.detach(i);
+    let x = doc.create_text(vec![b'x'; 100_000]);
+    let before = doc.heap_size();
+    doc.reparent(p, Position::LastChild, x, false).unwrap();
+    assert!(doc.heap_size() - before < 150_000, "text held twice");
+}
+
+#[test]
 fn refused_reparenting_follows_nokogiri() {
     let (mut doc, p, [id, _], [a, b, ..]) = paragraph();
     let snapshot = |doc: &Document| children(doc, p);
