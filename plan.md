@@ -44,12 +44,16 @@ HTML (and XML) parsing has a lot of existing tests, specs, and data. We should u
 The Safety workflow already runs Miri, ASan (Rust and Ruby), GC.stress and
 fuzzing (see README). To add once there is real code, roughly by value:
 
-1. **Sanitizer fuzz targets.** Sanitizing untrusted HTML is the point of the
+1. **Sanitizer properties.** Sanitizing untrusted HTML is the point of the
    gem, so these matter most:
    - re-parsing serialized output gives the same tree (mutation XSS, the
      classic sanitizer bypass);
    - sanitizing twice gives the same result as sanitizing once;
    - output matches Nokogiri::HTML5 (differential).
+
+   Scrubbing runs in Ruby (`sanitizer.md`), so cargo-fuzz covers only the
+   first, as a parse → serialize round-trip target; the others are Ruby
+   property tests and a differential mode over the fixture corpus.
 2. **DoS limits.** A Rust stack overflow on deeply nested HTML aborts the
    whole process instead of raising. Needs a depth limit (Nokogiri::HTML5
    has `max_tree_depth`), tests with very deep nesting, and fuzz
@@ -161,11 +165,17 @@ html5lib tokenizer inputs.
    Later, once profiling shows where it pays: move hot ported Ruby methods
    into Rust. Methods that subclasses and mixins override (`to_s`,
    `serialize`, `fragment`, `initialize`, `coerce`) stay Ruby entry points.
-3. Sanitizer vendor. Seam already exists: rails-html-sanitizer vendor classes,
-   `best_supported_vendor`, `config.action_view.sanitizer_vendor` and
-   `config.action_text.sanitizer_vendor`. It is native: Loofah subclasses
-   Nokogiri classes, so it can't run on `Lobzique` objects in seam mode. It
-   can still read Loofah's safelist data.
+3. Sanitizer vendor, detailed in `sanitizer.md`. Seam already exists:
+   rails-html-sanitizer vendor classes, `config.action_view.sanitizer_vendor`
+   and `config.action_text.sanitizer_vendor`. Loofah's documents and
+   `scrub!` are tied to Nokogiri's classes, so `Lobzique::Sanitizer`
+   replaces those, but Loofah's and Rails' scrubbers and
+   `Loofah::HTML5::Scrub` are duck-typed and run on lobzique nodes
+   unchanged. App-defined scrubbers (`sanitize(html, scrubber:)`,
+   `ActionText::ContentHelper.scrubber`) need that anyway. The vendor reuses
+   rails-html-sanitizer's concerns with the parser swapped. A Rust scrubber
+   for the default safe list waits for profiling. Built; what is open is at
+   the end of `sanitizer.md`.
 4. Action Text + assert_select: actiontext and actionview suites green, with
    rails-dom-testing's `default_html_version` set to `:html5` (decision 3).
 

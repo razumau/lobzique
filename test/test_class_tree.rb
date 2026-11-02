@@ -18,6 +18,9 @@ class TestClassTree < Minitest::Test
   # Ours, with no counterpart: compiled CSS, where Nokogiri has XPath
   # strings, and the error for XPath outside the subset
   OWN = ["Lobzique::CSS::Selector", "Lobzique::XML::XPath::UnsupportedError"]
+  # Ours with everything under it: the sanitizer vendor mirrors Loofah and
+  # rails-html-sanitizer, not Nokogiri
+  OWN_TREES = ["Lobzique::Sanitizer"]
 
   def self.counterpart(path)
     RENAMED.reduce(path) { |p, (ours, theirs)| p.sub(/\A#{ours}\b/, theirs) }.sub(ROOT, "Nokogiri")
@@ -38,6 +41,7 @@ class TestClassTree < Minitest::Test
 
   each_constant(Lobzique) do |path, value|
     next if OWN_VALUE.include?(path) || OWN.include?(path)
+    next if OWN_TREES.any? { |tree| path == tree || path.start_with?("#{tree}::") }
 
     define_method(test_name(path)) do
       theirs = Object.const_get(self.class.counterpart(path))

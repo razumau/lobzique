@@ -1,5 +1,6 @@
-# libFuzzer dictionary for the html5 target: tokens the tokenizer and tree
-# builder branch on, which random mutation rarely spells out.
+# libFuzzer dictionary for the html5, html5_round_trip and dom targets:
+# tokens the tokenizer and tree builder branch on, which random mutation
+# rarely spells out.
 
 # Tokenizer
 "<"

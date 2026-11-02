@@ -431,6 +431,16 @@ module NodeReparentingContract
     assert_equal "", id.value
   end
 
+  # Loofah writes scrubbed style and URI values back with value=
+  def test_attribute_values_lose_c0_controls
+    div = at(document, "div")
+    id = div.attribute("id")
+    id.value = "\u0001\b\t\n\v\f\r\u000E\u001F \u007F\u0080￾"
+    assert_equal "\t\n\r \u007F\u0080￾", div["id"]
+    div["id"] = "\u0001\f"
+    assert_equal "\u0001\f", div["id"]
+  end
+
   def test_names_and_lang
     doc = document
     div = at(doc, "div")

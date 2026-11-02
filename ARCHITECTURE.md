@@ -54,6 +54,29 @@ when the Nokogiri version in `Gemfile.lock` moves.
 - So a facade that sets `Lobzique = Nokogiri` gets `Nokogiri::…` in every
   message (plan.md decision 1).
 
+### Sanitizer vendor (`lib/lobzique/sanitizer`)
+
+`require "lobzique/sanitizer"`, not loaded by `require "lobzique"`
+(sanitizer.md). It ports from Loofah only what names Nokogiri's classes:
+- `Document` and `DocumentFragment`, subclasses of lobzique's HTML5 ones,
+  with Loofah's decorators, fragment parsing and serialization
+  (`concerns.rb`);
+- `scrub!` for nodes, node sets, fragments and documents, whose `case`
+  names lobzique's classes;
+- the `:escape` and `:newline_block_elements` scrubbers, which build text
+  nodes with `Nokogiri::XML::Text.new`.
+
+Everything else is Loofah's and rails-html-sanitizer's code, unchanged:
+the scrubbers, `Loofah::HTML5::Scrub` and the sanitizer concerns, which
+`FullSanitizer`, `LinkSanitizer` and `SafeListSanitizer` include with
+lobzique's parser in place of Loofah's. Ported files name their Loofah
+source, and changes carry `# lobzique:` comments, as in the rest of `lib/`.
+
+One addition of lobzique's own: `scrub!` escapes the text of raw-text
+elements (`style`, `xmp`, …) inside a `select` (`EscapeRawTextInSelect`). html5ever keeps them there, following the
+standard's customizable select; browsers on the older rules ignore their
+tags and would parse the text as markup.
+
 ## Native boundary (`ext/lobzique`)
 
 The extension defines the classes and methods that Nokogiri's C extension

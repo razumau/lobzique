@@ -9,6 +9,8 @@
 #   script/differential --corpus crawl       the Common Crawl sample (script/fetch_crawl first)
 #   script/differential --only 'tests1\.dat' cases whose id matches
 #   script/differential --oracle-only        run Nokogiri alone, to check the corpus loads
+#   script/differential --mode sanitize      sanitize instead of parse (Rails::HTML5 against
+#                                            Lobzique::Sanitizer, sanitizer.md)
 #
 # Until Lobzique can parse, it reports itself skipped and exits 0.
 
@@ -17,9 +19,10 @@ require "nokogiri"
 require "lobzique"
 require_relative "../test/differential/harness"
 
-options = {corpus: "fixtures", only: nil, show: 10, oracle_only: false}
+options = {corpus: "fixtures", mode: "parse", only: nil, show: 10, oracle_only: false}
 OptionParser.new do |opts|
   opts.on("--corpus NAME", Differential::Corpus.names) { options[:corpus] = _1 }
+  opts.on("--mode MODE", %w[parse sanitize]) { options[:mode] = _1 }
   opts.on("--only REGEXP", Regexp) { options[:only] = _1 }
   opts.on("--show N", Integer, "failures to print (default 10)") { options[:show] = _1 }
   opts.on("--oracle-only", "parse with Nokogiri only") { options[:oracle_only] = true }
@@ -33,10 +36,18 @@ implementation = unless options[:oracle_only]
   Lobzique
 end
 
-cases = Differential::Corpus.each(options[:corpus])
+if options[:mode] == "sanitize"
+  require "lobzique/sanitizer"
+  require_relative "../test/differential/sanitize"
+  cases = Differential::Corpus.each_sanitize(options[:corpus])
+  harness_class = Differential::SanitizeHarness
+else
+  cases = Differential::Corpus.each(options[:corpus])
+  harness_class = Differential::Harness
+end
 cases = cases.select { |c| options[:only].match?(c.id) } if options[:only]
 
-harness = Differential::Harness.new(implementation: implementation)
+harness = harness_class.new(implementation: implementation)
 harness.run(cases).report(show: options[:show])
 # A filtered run can't tell which known entries went stale
 exit(harness.ok? && (options[:only] ? true : harness.stale.empty?))

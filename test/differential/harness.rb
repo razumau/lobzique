@@ -54,7 +54,7 @@ module Differential
 
     attr_reader :counts, :failures, :stale
 
-    def initialize(implementation:, oracle: Nokogiri, known: self.class.load_known)
+    def initialize(implementation:, oracle: Nokogiri, known: self.class.load_known(self.class::MODE))
       @oracle = oracle
       @implementation = implementation
       @known = known
@@ -63,10 +63,16 @@ module Differential
       @stale = []
     end
 
-    def self.load_known
+    MODE = "parse"
+
+    # The entries of known.yml for one mode; an entry without `mode` is for
+    # parsing.
+    def self.load_known(mode)
       return [] unless File.exist?(KNOWN)
 
-      (YAML.safe_load_file(KNOWN) || []).map do |entry|
+      (YAML.safe_load_file(KNOWN) || []).filter_map do |entry|
+        next unless entry.fetch("mode", "parse") == mode
+
         {pattern: Regexp.new(entry.fetch("match")), reason: entry.fetch("reason")}
       end
     end

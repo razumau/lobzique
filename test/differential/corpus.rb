@@ -61,6 +61,30 @@ module Differential
       end
     end
 
+    # Inputs for the sanitize mode: attack payloads and parser edge cases,
+    # each a string a sanitizer takes as it is
+    def each_sanitize(name, &block)
+      return enum_for(:each_sanitize, name) unless block
+      return each_crawl(&block) if name == "crawl"
+      raise ArgumentError, "unknown corpus #{name.inspect} (known: #{names.join(", ")})" unless name == "fixtures"
+
+      each_dompurify(&block)
+      fixture_glob("wpt-sanitizer-api/*.dat").each { |path| each_dat(path, "wpt-sanitizer-api", &block) }
+      each_loofah_sanitizer(&block)
+      fixture_glob("wpt-parsing/tree-construction/*.dat").each { |path| each_dat(path, "wpt-parsing", &block) }
+      fixture_glob("html5lib-tests/tokenizer/*.test").each { |path| each_tokenizer(path, &block) }
+    end
+
+    # Loofah's html5lib-derived sanitizer cases; the expected outputs are
+    # libxml2's, so only the inputs are used
+    def each_loofah_sanitizer
+      path = File.join(FIXTURES, "loofah", "assets", "testdata_sanitizer_tests1.dat")
+      JSON.parse(File.read(path), allow_comments: true).each do |test|
+        yield Case.new(id: "#{relative(path)}##{test.fetch("name")}", source: "loofah",
+          kind: :fragment, input: test.fetch("input"))
+      end
+    end
+
     def each_case
       YAML.safe_load_file(CASES).each do |test|
         context = test["context"]

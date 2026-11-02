@@ -4,6 +4,7 @@
 #
 #   - match: regexp against the case id (e.g. \Awpt-parsing/tree-construction/tests1\.dat#12\z)
 #     reason: why lobzique differs and why that is acceptable
+#     mode: sanitize, for script/differential --mode sanitize (default: parse)
 - match: \Awpt-parsing/tree-construction/(menuitem-element\.dat#14|tests1\.dat#(30|100)|tests10\.dat#(4|5|17|18)|tests18\.dat#(14|15)|tests7\.dat#34|tests9\.dat#(5|6|18|19)|tests_innerHTML_1\.dat#(77|78)|webkit02\.dat#(19|36|38|39|40|41|42|43))\z
   reason: >-
     html5ever implements the 2025 customizable <select> parsing, which keeps
@@ -32,3 +33,11 @@
     The namespace axis raises XPath::UnsupportedError (plan.md decision 2):
     Nokogiri returns XML::Namespace objects in node sets, which lobzique
     doesn't make.
+- mode: sanitize
+  match: \A(wpt-parsing/tree-construction/(menuitem-element\.dat#14|tests1\.dat#(30|100)|tests10\.dat#(4|5|17|18)|tests18\.dat#(14|15)|tests7\.dat#34|tests9\.dat#(5|6|18|19)|webkit02\.dat#(36|38|39|40|41|42|43|45|46|47|48))|crawl/CC-MAIN-20261005105623-20261005135623-00000\.warc\.gz@2555606|crawl/CC-MAIN-20261009160033-20261009190033-00333\.warc\.gz@(604984|22178628)|crawl/CC-MAIN-20261013211541-20261014001541-00666\.warc\.gz@(976107|25147464|39767012))\z
+  reason: >-
+    Customizable <select> parsing (above) keeps elements inside a select
+    that gumbo drops or moves, so the sanitizer keeps markup Rails::HTML5
+    doesn't. The text of raw-text elements in a select is escaped, so
+    browsers with the older rules parse the output the same way
+    (Lobzique::Sanitizer::EscapeRawTextInSelect).

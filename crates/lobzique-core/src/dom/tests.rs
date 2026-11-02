@@ -200,6 +200,15 @@ fn attributes_belong_to_their_element_but_are_not_children() {
     assert_eq!(doc.parent(href), Some(a));
     assert_eq!(doc.children(a).count(), 0);
 
+    doc.set_attribute_value(
+        href,
+        b"\x01\x08\t\n\x0b\x0c\r\x0e\x1f /\x7f\xc2\x80\xff".to_vec(),
+    );
+    assert_eq!(
+        doc.attribute_value(a, b"href"),
+        Some(&b"\t\n\r /\x7f\xc2\x80\xff"[..])
+    );
+
     doc.append_attribute(b, href).unwrap();
     assert_eq!(doc.attributes(a), []);
     assert_eq!(doc.attributes(b), [href]);

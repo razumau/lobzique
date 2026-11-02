@@ -11,8 +11,12 @@ if ENV["LOBZIQUE_GC_STRESS"]
   module GCStress
     def before_setup
       super
-      # Nokogiri's C code isn't GC.stress-safe (XPath handler results lose their node set)
-      GC.stress = true unless defined?(root) && root.equal?(Nokogiri)
+      GC.stress = true if gc_stress?
+    end
+
+    # Nokogiri's C code isn't GC.stress-safe (XPath handler results lose their node set)
+    def gc_stress?
+      !(defined?(root) && root.equal?(Nokogiri))
     end
 
     def after_teardown

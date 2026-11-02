@@ -49,3 +49,10 @@ path = "fuzz_targets/html5_in_context.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "html5_round_trip"
+path = "fuzz_targets/html5_round_trip.rs"
+test = false
+doc = false
+bench = false

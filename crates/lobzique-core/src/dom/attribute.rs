@@ -83,9 +83,12 @@ impl Document {
         Some(self.set_attribute_name(element, name, value))
     }
 
-    /// `Attr#value=`. Nokogiri escapes the value and libxml2 unescapes it
-    /// again, so it is stored as given.
-    pub fn set_attribute_value(&mut self, attribute: NodeId, value: Vec<u8>) {
+    /// `Attr#value=`. Nokogiri escapes the value with
+    /// `xmlEncodeEntitiesReentrant` and libxml2 unescapes it again, so it is
+    /// stored as given, except the C0 controls the escaping drops: all but
+    /// tab, LF and CR.
+    pub fn set_attribute_value(&mut self, attribute: NodeId, mut value: Vec<u8>) {
+        value.retain(|&byte| byte >= 0x20 || matches!(byte, b'\t' | b'\n' | b'\r'));
         if let NodeKind::Attribute(attribute) = &mut self.node_mut(attribute).kind {
             attribute.value = value;
         }
