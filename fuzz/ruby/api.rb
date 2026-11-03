@@ -37,6 +37,8 @@ module RubyApiFuzz
   SELECTOR_ERRORS = Differential::Harness::SELECTOR_ERRORS
   ROOT_NAME = Differential::Harness::ROOT_NAME
   POOL_LIMIT = 256
+  # Deeper than 64 operations can nest
+  ANCESTRY_LIMIT = 10_000
   # Below libFuzzer's -timeout (rake fuzz:ruby)
   ORACLE_SECONDS = 3
   ENCODINGS = %w[UTF-8 ISO-8859-1 US-ASCII UTF-16LE Shift_JIS].freeze
@@ -191,6 +193,8 @@ module RubyApiFuzz
       # A node or markup, for the methods that take either
       arg = (flags & 1 == 0) ? b : text(y, flags)
       @log[-1] = [kind % 32, a&.class&.name, b&.class&.name, arg.is_a?(String) ? arg : nil]
+      return if [a, b].any? { |node| own_ancestor?(node) }
+
       case kind % 32
       when 0 then keep(a.add_child(arg))
       when 1 then keep(a.prepend_child(arg))
@@ -225,6 +229,18 @@ module RubyApiFuzz
       when 30 then GC.start
       else compact(flags)
       end
+    end
+
+    # A node moved to another document is copied, and its object points at
+    # the copy; the original keeps the object as its node's, so a node left
+    # under the original can be its own ancestor (as in Nokogiri), and
+    # walking up never ends
+    def own_ancestor?(node)
+      ancestor = node
+      ANCESTRY_LIMIT.times do
+        return false unless ancestor.respond_to?(:parent) && !ancestor.document? && (ancestor = ancestor.parent)
+      end
+      true
     end
 
     # Up to 63 bytes of the markup, from where `at` points
