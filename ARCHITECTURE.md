@@ -57,7 +57,7 @@ when the Nokogiri version in `Gemfile.lock` moves.
 ### Sanitizer vendor (`lib/lobzique/sanitizer`)
 
 `require "lobzique/sanitizer"`, not loaded by `require "lobzique"`
-(sanitizer.md). It ports from Loofah only what names Nokogiri's classes:
+(plan.md phase 3). It ports from Loofah only what names Nokogiri's classes:
 - `Document` and `DocumentFragment`, subclasses of lobzique's HTML5 ones,
   with Loofah's decorators, fragment parsing and serialization
   (`concerns.rb`);

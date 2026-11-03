@@ -57,7 +57,7 @@ module LoofahSuite
       /scrubbing shortcuts/ => "Loofah's shortcuts, tested with Minitest 5's MiniTest::Mock",
       /double_breakpoint#test_0002_/ => "the fixture is ahead of Loofah 2.25.2, which has the bug it tests"
     },
-    # The copy only: Loofah's document API rather than scrubbing (sanitizer.md).
+    # The copy only: Loofah's document API rather than scrubbing (plan.md phase 3).
     lobzique: {
       /#text/ => "TextBehavior (text, to_text) isn't ported"
     }

@@ -51,9 +51,12 @@ fuzzing (see README). To add once there is real code, roughly by value:
    - sanitizing twice gives the same result as sanitizing once;
    - output matches Nokogiri::HTML5 (differential).
 
-   Scrubbing runs in Ruby (`sanitizer.md`), so cargo-fuzz covers only the
-   first, as a parse → serialize round-trip target; the others are Ruby
-   property tests and a differential mode over the fixture corpus.
+   Done. Scrubbing runs in Ruby (phase 3), so cargo-fuzz covers only the
+   first, with the `html5_round_trip` target. `script/differential --mode
+   sanitize` checks all three on the fixtures and the crawl. Rails::HTML5
+   breaks the first two on some inputs as well, so lobzique has to break
+   them on the same inputs. On the fixtures the two differ only in known
+   `<select>` cases.
 2. **DoS limits.** A Rust stack overflow on deeply nested HTML aborts the
    whole process instead of raising. Needs a depth limit (Nokogiri::HTML5
    has `max_tree_depth`), tests with very deep nesting, and fuzz
@@ -165,17 +168,44 @@ html5lib tokenizer inputs.
    Later, once profiling shows where it pays: move hot ported Ruby methods
    into Rust. Methods that subclasses and mixins override (`to_s`,
    `serialize`, `fragment`, `initialize`, `coerce`) stay Ruby entry points.
-3. Sanitizer vendor, detailed in `sanitizer.md`. Seam already exists:
-   rails-html-sanitizer vendor classes, `config.action_view.sanitizer_vendor`
-   and `config.action_text.sanitizer_vendor`. Loofah's documents and
-   `scrub!` are tied to Nokogiri's classes, so `Lobzique::Sanitizer`
-   replaces those, but Loofah's and Rails' scrubbers and
-   `Loofah::HTML5::Scrub` are duck-typed and run on lobzique nodes
-   unchanged. App-defined scrubbers (`sanitize(html, scrubber:)`,
-   `ActionText::ContentHelper.scrubber`) need that anyway. The vendor reuses
-   rails-html-sanitizer's concerns with the parser swapped. A Rust scrubber
-   for the default safe list waits for profiling. Built; what is open is at
-   the end of `sanitizer.md`.
+3. Sanitizer vendor. Built: `Lobzique::Sanitizer`, set as
+   `config.action_view.sanitizer_vendor` and
+   `config.action_text.sanitizer_vendor` (README). It parses, scrubs and
+   serializes with lobzique and matches `Rails::HTML5::Sanitizer` byte for
+   byte.
+   - **Scrubbing stays in Ruby.** App scrubbers (`sanitize(html,
+     scrubber:)`, `ActionText::ContentHelper.scrubber`) are public API and
+     have to run on lobzique nodes anyway. Running Loofah's and Rails'
+     scrubbers and `Loofah::HTML5::Scrub` on both sides keeps the safe
+     lists and the URI and CSS rules identical without a copy to maintain.
+     Only what names Nokogiri's classes is ported (`ARCHITECTURE.md`). The
+     sanitizers are rails-html-sanitizer's concerns with the parser
+     swapped, so `require "lobzique/sanitizer"` accepts only
+     rails-html-sanitizer 1.7.1–1.7.x. Neither gem is a runtime dependency.
+   - **Tests.** rails-html-sanitizer's sanitizer, scrubber and Rails API
+     suites, actionview's vendor tests and Loofah's scrubbing suites run
+     from `test/fixtures` on both Loofah and lobzique. Every sanitizer
+     result is checked against what `Rails::HTML5` gives.
+     `script/differential --mode sanitize` compares six configurations on
+     the fixtures (every push) and on the crawl (weekly).
+   - **Departure.** html5ever keeps markup inside `<select>` (customizable
+     select), so output differs when `select` is allowed. The text of
+     raw-text elements inside a `select` is escaped, so browsers on either
+     set of rules parse it the same way (README, `known.yml`).
+
+   Open:
+   - one public app's test suite passing with both `sanitizer_vendor`s set
+     to `Lobzique::Sanitizer`;
+   - loofah 2.25.3 and rails-html-sanitizer 1.7.2 wait until the oracle
+     moves to Nokogiri 1.19.5 (`Gemfile`).
+
+   Later:
+   - a Rust scrubber for calls without an app scrubber (`PermitScrubber`
+     with the default or given lists, `TextOnlyScrubber`,
+     `TargetScrubber`), if profiling shows Ruby scrubbing matters. It would
+     be checked against the Ruby path in the differential harness;
+   - for the facade: Loofah's `text`/`to_text`, `Document.parse`'s removal
+     of comments before `<html>`, and the HTML4 sanitizer names.
 4. Action Text + assert_select: actiontext and actionview suites green, with
    rails-dom-testing's `default_html_version` set to `:html5` (decision 3).
 
@@ -234,6 +264,11 @@ are in `inventory/raw/src`.
      `Nokogiri::VERSION` to its own gem version before requiring lobzique,
      and `Lobzique::VERSION` is only defined when absent. The core keeps
      `Lobzique::VERSION` until then.
+   - **`libxml2?`.** Loofah's `force_correct_attribute_escaping!`
+     percent-escapes spaces and quotes in `href`, `action`, `src` and `a`'s
+     `name` when `Nokogiri::VersionInfo.instance.libxml2?` is true. In seam
+     mode it is true, and the vendor matches `Rails::HTML5` because of
+     that, so the facade has to answer true as well.
    - **HTML4 parsing.** Decided in decision 3, built with the facade.
 2. **XPath.** Decided: XPath 1.0 as libxml2 evaluates it, without the
    namespace axis.

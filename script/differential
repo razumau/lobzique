@@ -10,7 +10,7 @@
 #   script/differential --only 'tests1\.dat' cases whose id matches
 #   script/differential --oracle-only        run Nokogiri alone, to check the corpus loads
 #   script/differential --mode sanitize      sanitize instead of parse (Rails::HTML5 against
-#                                            Lobzique::Sanitizer, sanitizer.md)
+#                                            Lobzique::Sanitizer, plan.md phase 3)
 #
 # Until Lobzique can parse, it reports itself skipped and exits 0.
 

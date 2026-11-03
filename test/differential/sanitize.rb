@@ -3,7 +3,7 @@
 require_relative "harness"
 
 module Differential
-  # The sanitize mode (sanitizer.md): each case goes through Rails::HTML5's
+  # The sanitize mode (plan.md phase 3): each case goes through Rails::HTML5's
   # sanitizers on Nokogiri and through lobzique's vendor, in the
   # configurations below, and the bytes are compared. So are what
   # sanitizing the output again gives and what parsing and serializing it

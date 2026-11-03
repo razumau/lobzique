@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # A rails-html-sanitizer vendor that parses, scrubs and serializes with
-# lobzique (sanitizer.md):
+# lobzique (plan.md phase 3):
 #
 #   config.action_view.sanitizer_vendor = Lobzique::Sanitizer
 #   config.action_text.sanitizer_vendor = Lobzique::Sanitizer
