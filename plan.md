@@ -193,9 +193,17 @@ html5lib tokenizer inputs.
      raw-text elements inside a `select` is escaped, so browsers on either
      set of rules parse it the same way (README, `known.yml`).
 
+   - **An app's suite.** `mise run measure:apps` (`script/apps`) runs
+     Campfire's suite (`apps.tsv` ref) as checked out, then with lobzique
+     in its Gemfile and both `sanitizer_vendor`s set in
+     `config/application.rb` as the README says. Campfire renders Action
+     Text, and its content filters and Opengraph metadata sanitize with
+     `ActionText::ContentHelper.sanitizer.class`. Both runs pass: 649 runs,
+     3921 assertions, Ruby 4.0.6. DNS is answered locally in both runs,
+     because Campfire's SSRF guard resolves hosts before WebMock stubs the
+     request.
+
    Open:
-   - one public app's test suite passing with both `sanitizer_vendor`s set
-     to `Lobzique::Sanitizer`;
    - loofah 2.25.3 and rails-html-sanitizer 1.7.2 wait until the oracle
      moves to Nokogiri 1.19.5 (`Gemfile`).
 

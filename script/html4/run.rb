@@ -12,6 +12,7 @@
 require "fileutils"
 require "json"
 require "yaml"
+require_relative "../suite_runner"
 
 SUITES = %w[
   roadie reverse_markdown html2text inky-rb premailer html-pipeline mechanize
@@ -25,12 +26,6 @@ shim = File.join(__dir__, "shim.rb")
 targets = YAML.safe_load_file(File.join(root, "script/inventory/targets.yml"))
 targets = %w[tier1 tier2].map { |tier| targets.fetch(tier) }.reduce(:merge)
 nokogiri = File.read(File.join(root, "Gemfile.lock"))[/^    nokogiri \(([\d.]+)/, 1]
-# Keep checkouts' own .ruby-version files from switching Rubies under shims.
-path = {"PATH" => "#{RbConfig::CONFIG["bindir"]}:#{ENV["PATH"]}"}
-
-def run(env, *cmd, chdir:)
-  system(env, *cmd, chdir: chdir, exception: true)
-end
 
 # Pins the oracle's Nokogiri over whatever the checkout's Gemfile asks for.
 def pin_nokogiri(dir, version)
@@ -39,18 +34,13 @@ def pin_nokogiri(dir, version)
   File.write(gemfile, lines.join + %(\ngem "nokogiri", "#{version}"\n))
 end
 
-def setup(name, target, src, bundle, nokogiri, env)
+def setup(name, target, src, bundle, nokogiri)
   source = target.fetch("source")
   dir = File.join(src, name)
-  unless Dir.exist?(dir)
-    run(env, "git", "init", "-q", dir, chdir: src)
-    run(env, "git", "fetch", "-q", "--depth", "1", "https://github.com/#{source["repo"]}.git", source["ref"], chdir: dir)
-    run(env, "git", "checkout", "-q", "FETCH_HEAD", chdir: dir)
-  end
-  run(env, "git", "checkout", "-q", "--", "Gemfile", chdir: dir)
+  SuiteRunner.checkout({}, source["repo"], source["ref"], dir)
   pin_nokogiri(dir, nokogiri)
-  run(env, "bundle", "config", "set", "--local", "path", bundle, chdir: dir)
-  run(env, "bundle", "install", "--quiet", chdir: dir)
+  SuiteRunner.run({}, "bundle", "config", "set", "--local", "path", bundle, chdir: dir)
+  SuiteRunner.run({}, "bundle", "install", "--quiet", chdir: dir)
   dir
 end
 
@@ -58,20 +48,19 @@ def failures(log, json)
   if File.exist?(json)
     JSON.parse(File.read(json))["examples"].select { |e| e["status"] == "failed" }.map { |e| e["full_description"] }
   else
-    File.read(log).scan(/^\s*\d+\) (?:Failure|Error):\n(.+?)(?: \[[^\]]+\])?:$/).flatten
+    SuiteRunner.read(log).scan(/^\s*\d+\) (?:Failure|Error):\n(.+?)(?: \[[^\]]+\])?:$/).flatten
   end
 end
 
 def summary(log, json)
   return JSON.parse(File.read(json))["summary_line"] if File.exist?(json)
 
-  File.read(log).scan(/^\d+ runs, .*$/).last || "no summary, see #{log}"
+  SuiteRunner.minitest_summary(log)
 end
 
 names = ARGV.empty? ? SUITES : ARGV
 src = File.join(tmp, "src")
-FileUtils.mkdir_p(src)
-dirs = names.to_h { |name| [name, setup(name, targets.fetch(name), src, File.join(tmp, "bundle"), nokogiri, path)] }
+dirs = names.to_h { |name| [name, setup(name, targets.fetch(name), src, File.join(tmp, "bundle"), nokogiri)] }
 
 results = names.map do |name|
   Thread.new do
@@ -84,14 +73,14 @@ results = names.map do |name|
       suite = targets.fetch(name).fetch("suite")
       suite += " --format json --out #{json}" if suite.include?("rspec")
       shimmed = mode != "baseline"
-      env = path.merge(
+      env = {
         "HTML4_MODE" => (mode if shimmed),
         "RUBYOPT" => ("-rbundler/setup -r#{shim}" if shimmed)
-      )
-      system(env, suite, chdir: dirs.fetch(name), out: log, err: [:child, :out])
+      }
+      status = SuiteRunner.run_suite(env, suite, chdir: dirs.fetch(name), log:)
       failed = failures(log, json).sort
       File.write(File.join(out, "#{mode}.failures"), failed.map { "#{_1}\n" }.join)
-      [mode, {summary: summary(log, json), failed: failed.to_set}]
+      [mode, {summary: summary(log, json), status:, log:, failed: failed.to_set}]
     end
   end
 end.map(&:value)
@@ -101,7 +90,13 @@ puts
 puts "| suite | baseline | html5-tree: new failures | html5: new failures | only in html5 |"
 puts "|---|---|---|---|---|"
 names.zip(results).each do |name, by_mode|
-  base, tree, html5 = by_mode.values_at(*MODES).map { _1[:failed] }
-  only_html5 = html5 - base - tree
-  puts "| #{name} | #{by_mode["baseline"][:summary]} | #{(tree - base).size} | #{(html5 - base).size} | #{only_html5.size} |"
+  results = by_mode.values_at(*MODES)
+  base, tree, html5 = results.map { _1[:failed] }
+  cells = [
+    SuiteRunner.summary_cell(results.first),
+    SuiteRunner.count(tree - base, results[0], results[1]),
+    SuiteRunner.count(html5 - base, results[0], results[2]),
+    SuiteRunner.count(html5 - base - tree, *results)
+  ]
+  puts "| #{name} | #{cells.join(" | ")} |"
 end
