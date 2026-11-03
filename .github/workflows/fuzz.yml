@@ -1,4 +1,4 @@
-# Fuzzes each target in fuzz/fuzz_targets/ in turn
+# Fuzzes each target in fuzz/fuzz_targets/ in turn, and the Ruby API (fuzz/ruby/)
 name: Fuzz
 on:
   workflow_call:
@@ -81,3 +81,49 @@ jobs:
         with:
           name: fuzz-artifacts
           path: fuzz/artifacts/
+
+  ruby:
+    name: Fuzz the Ruby API
+    runs-on: ubuntu-24.04
+    env:
+      FUZZ_SECONDS: ${{ inputs.seconds }}
+      FUZZ_WORKERS: ${{ inputs.workers }}
+      BUNDLE_WITH: fuzz
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # Ruzzy builds its ASan runtime from clang's
+      - name: Install clang's sanitizer runtimes
+        run: sudo apt-get update && sudo apt-get install -y libclang-rt-18-dev
+      - uses: ruby/setup-ruby@v1
+        # Ruzzy's extension links libFuzzer, so it builds with clang
+        env:
+          CC: clang
+          CXX: clang++
+          LDSHARED: clang -shared
+          LDSHAREDXX: clang++ -shared
+          MAKE: make --environment-overrides V=1
+        with:
+          bundler-cache: true
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - uses: actions/cache@v6
+        with:
+          path: fuzz/corpus/ruby_api
+          key: fuzz-ruby-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: fuzz-ruby-corpus-
+      - name: Fuzz for ${{ env.FUZZ_SECONDS }}s
+        run: |
+          fork=""
+          if [ "$FUZZ_WORKERS" -gt 1 ]; then
+            fork="-fork=$FUZZ_WORKERS"
+          fi
+          FUZZOPTS="-max_total_time=$FUZZ_SECONDS $fork" bundle exec rake fuzz:ruby
+      - name: Upload crashing inputs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-ruby-artifacts
+          path: fuzz/artifacts/ruby_api/
