@@ -25,8 +25,18 @@ module UpstreamSuite
 
   # Under GC.stress these suites, on Nokogiri and on lobzique, would take
   # hours; they run Ruby over native methods the other suites stress.
+  # The gc-stress build collects around every C API call whatever
+  # GC.stress is, so there they don't run at all.
   module NoGCStress
     def gc_stress? = false
+
+    module Skipped
+      def runnable_methods = []
+    end
+
+    def self.included(test_class)
+      test_class.extend(Skipped) if ENV["LOBZIQUE_GC_STRESS_BUILD"]
+    end
   end
 
   # Upstream classes left over after the reuse, testing HTML4 or
