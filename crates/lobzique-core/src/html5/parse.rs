@@ -545,6 +545,7 @@ impl TokenSink for Tokens {
     type Handle = NodeId;
 
     fn process_token(&self, token: Token, line_number: u64) -> TokenSinkResult<NodeId> {
+        crate::work::add(1);
         if let Token::TagToken(tag) = &token {
             if self.max_attributes.is_some_and(|max| tag.attrs.len() > max) {
                 self.exceeded.set(true);
@@ -672,6 +673,7 @@ impl Sink {
         before: Option<NodeId>,
         text: &[u8],
     ) -> Option<NodeId> {
+        crate::work::add(text.len());
         if text.is_empty() {
             return None;
         }
@@ -731,6 +733,7 @@ impl TreeSink for Sink {
     fn finish(self) {}
 
     fn parse_error(&self, message: Cow<'static, str>) {
+        crate::work::add(1);
         let mut errors = self.errors.borrow_mut();
         if self.max_errors.is_none_or(|max| errors.len() < max) {
             errors.push(ParseError {
@@ -826,6 +829,7 @@ impl TreeSink for Sink {
     }
 
     fn same_node(&self, x: &NodeId, y: &NodeId) -> bool {
+        crate::work::add(1);
         x == y
     }
 
@@ -869,6 +873,7 @@ impl TreeSink for Sink {
     }
 
     fn is_mathml_annotation_xml_integration_point(&self, handle: &NodeId) -> bool {
+        crate::work::add(1);
         self.integration_points.borrow().contains(handle)
     }
 

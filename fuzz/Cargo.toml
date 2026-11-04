@@ -56,3 +56,10 @@ path = "fuzz_targets/html5_round_trip.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "html5_scaling"
+path = "fuzz_targets/html5_scaling.rs"
+test = false
+doc = false
+bench = false

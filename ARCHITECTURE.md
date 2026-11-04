@@ -259,6 +259,7 @@ assemble it.
 | `xml::serialize` | `native_write_to`: libxml2's `xmlSaveTree` for XML and XHTML output, with its escaping, formatting, XHTML 1.0 appendix C rules and encoding switch; the binding transcodes the result |
 | `css` | Nokogiri's CSS front end, ported: `tokenizer` (rex rules in order), `parser` (racc's parse loop over `tables`, which `script/generate_css_tables` generates from Nokogiri's parser, and the grammar's actions), `translate` (`XPathVisitor`, building `xpath` trees where it writes strings) |
 | `xpath` | `ast` (expressions as trees, operators of one precedence as lists), `eval` (libxml2's evaluation: XPath 1.0 values, comparisons and functions, node sets in document order, positions per step, libxml2's evaluation errors, custom calls answered in rounds), `parse` (XPath strings read as libxml2 reads them, with its error codes); `XML::XPathContext` errors |
+| `work` | a count of nodes read, bytes escaped and parser calls, kept only under `cfg(fuzzing)`, so `html5_scaling` can check that work grows linearly |
 
 **Names.**
 - Elements and attributes use html5ever's `QualName`, shared by the parser
