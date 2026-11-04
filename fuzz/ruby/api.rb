@@ -23,6 +23,7 @@
 # Nokogiri runs only to judge such an input, in a child process: it can
 # loop forever or crash on the trees the operations make.
 
+require "fiddle"
 require "ruzzy"
 require "stringio"
 require "nokogiri"
@@ -34,26 +35,28 @@ module RubyApiFuzz
   CONFIGS = Differential::SanitizeHarness::CONFIGS.values
   SELECTORS = Differential::Harness::SELECTORS
   XPATHS = Differential::Harness::XPATHS
-  SELECTOR_ERRORS = Differential::Harness::SELECTOR_ERRORS
   ROOT_NAME = Differential::Harness::ROOT_NAME
   POOL_LIMIT = 256
   # Deeper than 64 operations can nest
   ANCESTRY_LIMIT = 10_000
-  # Below libFuzzer's -timeout (rake fuzz:ruby)
+  # For all of an input's oracles, well below libFuzzer's -timeout (rake
+  # fuzz:ruby)
   ORACLE_SECONDS = 3
   ENCODINGS = %w[UTF-8 ISO-8859-1 US-ASCII UTF-16LE Shift_JIS].freeze
   SCRUBBERS = %i[strip prune escape whitewash unprintable targetblank noopener noreferrer].freeze
 
   # Operations, by Run#operate's numbers
-  REPARENTING = [0, 1, 2, 3, 4, 5, 6, 9, 10].freeze
-  SELECTING = [17, 19, 20].freeze
+  REPARENTING = [0, 1, 2, 3, 4, 5, 9, 10].freeze
+  REPARENTING_TO_B = 6
+  SCRUBBING = 24
 
-  # Raised for bad arguments, as Nokogiri raises them, so they aren't
-  # replayed on Nokogiri
+  # Raised, with their subclasses, for bad arguments, as Nokogiri raises
+  # them, or for what lobzique leaves out (ARCHITECTURE.md, "Departures from
+  # Nokogiri": XPath::UnsupportedError is an XPath::SyntaxError), so they
+  # aren't replayed on Nokogiri
   EXPECTED = %w[
-    ArgumentError TypeError RangeError EncodingError Encoding::CompatibilityError
-    Encoding::UndefinedConversionError Encoding::InvalidByteSequenceError Encoding::ConverterNotFoundError
-    XML::SyntaxError XML::XPath::SyntaxError CSS::SyntaxError
+    ArgumentError TypeError RangeError EncodingError NotImplementedError
+    XML::SyntaxError CSS::SyntaxError
   ].freeze
 
   class Failure < StandardError; end
@@ -70,29 +73,35 @@ module RubyApiFuzz
     fragment: Loofah::HTML5::DocumentFragment, vendor: Rails::HTML5::Sanitizer
   )
 
-  # XPath functions the fuzzed queries can call. The first call to edit
-  # the tree does, as a handler may (ARCHITECTURE.md, "XPath and CSS
-  # handlers"); only one does, since lobzique evaluates again on the edited
-  # tree, and an edit that adds a node on every call (reparented text is a
-  # copy) never lets it finish.
+  # XPath functions the fuzzed queries can call, one Handler a query. The
+  # first call with something to edit edits the tree, as a handler may
+  # (ARCHITECTURE.md, "XPath and CSS handlers"); only one does, since
+  # lobzique evaluates again on the edited tree, and an edit that adds a
+  # node on every call (reparented text is a copy) never lets it finish.
   class Handler
     def initialize(run)
       @run = run
     end
 
     def f(nodes, *)
-      edit { @run.pool_node(nodes.length)&.unlink }
+      edit(pool_node(nodes.length), &:unlink)
       nodes
     end
 
     def g(nodes, *)
       GC.start
-      edit { nodes.first&.add_next_sibling("<i>g</i>") }
+      edit(walkable(nodes.first)) { |node| node.add_next_sibling("<i>g</i>") }
       nodes.to_a.length.to_s
     end
 
     def h(nodes, *)
-      edit { nodes.each { |node| node.parent = @run.pool_node(node.name.length) if node.respond_to?(:parent=) } }
+      children = nodes.select { |node| node.respond_to?(:parent=) && walkable(node) }
+      edit(children.empty? ? nil : children) do
+        children.each do |node|
+          parent = pool_node(node.name.length)
+          node.parent = parent if parent
+        end
+      end
       true
     rescue ArgumentError, RuntimeError
       false
@@ -100,12 +109,17 @@ module RubyApiFuzz
 
     private
 
-    def edit
-      return if @edited
+    def edit(target)
+      return if @edited || target.nil?
 
       @edited = true
-      yield
+      yield target
     end
+
+    def pool_node(byte) = walkable(@run.pool_node(byte))
+
+    # As Run#operate skips them
+    def walkable(node) = (node unless @run.own_ancestor?(node))
   end
 
   # The operations on one implementation
@@ -120,7 +134,6 @@ module RubyApiFuzz
       @states = states
       @log = []
       @pool = []
-      @handler = Handler.new(self)
     end
 
     # Parses, runs the operations and serializes everything. Returns, for
@@ -140,6 +153,18 @@ module RubyApiFuzz
 
     def pool_node(byte)
       @pool.empty? ? nil : @pool[byte % @pool.length]
+    end
+
+    # A node moved to another document is copied, and its object points at
+    # the copy; the original keeps the object as its node's, so a node left
+    # under the original can be its own ancestor (as in Nokogiri), and
+    # walking up never ends
+    def own_ancestor?(node)
+      ancestor = node
+      ANCESTRY_LIMIT.times do
+        return false unless ancestor.respond_to?(:parent) && !ancestor.document? && (ancestor = ancestor.parent)
+      end
+      true
     end
 
     private
@@ -176,14 +201,14 @@ module RubyApiFuzz
 
     def html(top)
       top.to_html.b
-    rescue => e
+    rescue StandardError, NotImplementedError => e
       e.class.name.sub(ROOT_NAME, "")
     end
 
     def attempt
       yield
       nil
-    rescue => e
+    rescue StandardError, NotImplementedError => e
       e
     end
 
@@ -213,8 +238,8 @@ module RubyApiFuzz
       when 14 then (flags & 2 == 0) ? a.add_class(text(y, flags)) : a.remove_class(text(y, flags))
       when 15 then a.name = text(y, flags)
       when 16 then a.content = text(y, flags)
-      when 17 then keep(a.css(selector(y, flags), @handler))
-      when 18 then keep(a.xpath(xpath(y, flags), @handler))
+      when 17 then keep(a.css(selector(y, flags), Handler.new(self)))
+      when 18 then keep(a.xpath(xpath(y, flags), Handler.new(self)))
       when 19 then a.matches?(selector(y, flags))
       when 20 then keep(a.ancestors(selector(y, flags)))
       when 21 then keep(a.fragment(text(y, flags)))
@@ -231,22 +256,12 @@ module RubyApiFuzz
       end
     end
 
-    # A node moved to another document is copied, and its object points at
-    # the copy; the original keeps the object as its node's, so a node left
-    # under the original can be its own ancestor (as in Nokogiri), and
-    # walking up never ends
-    def own_ancestor?(node)
-      ancestor = node
-      ANCESTRY_LIMIT.times do
-        return false unless ancestor.respond_to?(:parent) && !ancestor.document? && (ancestor = ancestor.parent)
-      end
-      true
-    end
-
-    # Up to 63 bytes of the markup, from where `at` points
+    # Up to 63 bytes of the markup, from where `at` points. The length is
+    # the top six bits of its byte, apart from the two that pick a branch
+    # in the callers.
     def text(at, length)
       start = @markup.bytesize * at / 256
-      @markup.byteslice(start, length % 64)
+      @markup.byteslice(start, length >> 2)
     end
 
     def selector(at, flags) = (flags & 2 == 0) ? SELECTORS[at % SELECTORS.length] : text(at, flags)
@@ -255,7 +270,7 @@ module RubyApiFuzz
       return text(at, flags) if flags & 2 != 0
 
       expression = XPATHS[at % XPATHS.length]
-      (flags & 4 == 0) ? expression : "#{expression}[#{%w[f g h][at % 3]}(.)]"
+      (flags & 4 == 0) ? expression : "#{expression}[#{%w[f g h][(flags >> 3) % 3]}(.)]"
     end
 
     def document(flags) = @documents[flags & 1]
@@ -327,6 +342,7 @@ module RubyApiFuzz
   class << self
     def test_one_input(data)
       options = data.getbyte(0) or return
+      @oracle_deadline = now + ORACLE_SECONDS
       markup, ops = data.byteslice(1..).split("\0", 2)
       markup ||= +""
       markup.force_encoding(Encoding::UTF_8) if options & 0x40 != 0
@@ -342,7 +358,7 @@ module RubyApiFuzz
 
     def check_api(options, markup, ops)
       outcomes, = Run.new(LOBZIQUE, options, markup, ops).call
-      return if outcomes.all? { |error| error.nil? || EXPECTED.include?(name(error)) }
+      return if outcomes.all? { |error| error.nil? || expected?(error) }
 
       # Again, with the states to compare
       run = Run.new(LOBZIQUE, options, markup, ops, states: true)
@@ -359,9 +375,9 @@ module RubyApiFuzz
       index = comparable.find do |step|
         error = outcomes[step]
         expected_name, = expected_outcomes[step]
-        error && !EXPECTED.include?(name(error)) && !(expected_name && same_error?(expected_name, error, run.log[step]))
+        error && !expected?(error) && expected_name != name(error) && !departure?(run.log[step], error)
       end
-      return if index.nil? || departure?(run.log[index], outcomes[index])
+      return if index.nil?
 
       error = outcomes[index]
       expected_name, expected_message = expected_outcomes[index]
@@ -373,44 +389,63 @@ module RubyApiFuzz
       MESSAGE
     end
 
-    def same_error?(expected_name, actual, (kind, *))
-      names = [expected_name]
-      names << SELECTOR_ERRORS[expected_name] if SELECTING.include?(kind)
-      names.include?(name(actual))
+    def expected?(error)
+      error.class.ancestors.any? { |ancestor| ancestor.name && EXPECTED.include?(ancestor.name.sub(ROOT_NAME, "")) }
     end
 
     # Where lobzique refuses on purpose what Nokogiri does (ARCHITECTURE.md,
     # "Departures from Nokogiri")
-    def departure?((kind, a, b), error)
+    def departure?((kind, a, b, markup), error)
       # "attribute values": an Attr has no children, and nothing is linked
-      # next to one or in its place, where its element may be a cycle away
-      REPARENTING.include?(kind) && [a, b].any? { |name| name&.end_with?("::Attr") } &&
-        error.instance_of?(RuntimeError) &&
+      # next to one or in its place, where its element may be a cycle away.
+      # The escape scrubber links text next to the node it scrubs.
+      nodes = case kind
+      when REPARENTING_TO_B then [a, b]
+      when *REPARENTING then markup ? [a] : [a, b]
+      when SCRUBBING then [a]
+      else []
+      end
+      nodes.any? { |name| name&.end_with?("::Attr") } && error.instance_of?(RuntimeError) &&
         (error.message == "Could not reparent node" || error.message.start_with?("cycle detected"))
     end
 
     def name(error) = error.class.name.sub(ROOT_NAME, "")
 
+    def now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
     # What the block returns, run in a child process. Nil if the child
-    # fails or takes longer than ORACLE_SECONDS, so the input isn't judged.
+    # fails or the input's ORACLE_SECONDS run out, so the input isn't judged.
     def oracle
       reader, writer = IO.pipe
       pid = fork do
         reader.close
         $stderr.reopen(File::NULL)
+        quiet_crashes
         writer.write(Marshal.dump(yield))
         exit!(0)
       rescue Exception # rubocop:disable Lint/RescueException
         exit!(1)
       end
       writer.close
-      Marshal.load(reader.read) if reader.wait_readable(ORACLE_SECONDS) # rubocop:disable Security/MarshalLoad
+      Marshal.load(reader.read) if reader.wait_readable([@oracle_deadline - now, 0].max) # rubocop:disable Security/MarshalLoad
     rescue ArgumentError, TypeError
       nil
     ensure
       reader.close
       Process.kill(:KILL, pid)
       Process.wait(pid)
+    end
+
+    # Ends a crash in the oracle's child without the hooks libFuzzer set
+    # in its parent, which would save the input as a crash: ASan's death
+    # callback, and the handler for the SIGABRT Ruby's crash report ends in
+    def quiet_crashes
+      Fiddle::Function.new(Fiddle::Handle::DEFAULT["__sanitizer_set_death_callback"], [Fiddle::TYPE_VOIDP],
+        Fiddle::TYPE_VOID).call(nil)
+    rescue Fiddle::DLError
+      # Without ASan
+    ensure
+      Signal.trap("ABRT", "SYSTEM_DEFAULT")
     end
 
     # One of the differential's configurations, picked by the options byte
@@ -422,12 +457,13 @@ module RubyApiFuzz
       expected_parsed, expected = oracle do
         [parsed(NOKOGIRI, markup), properties(NOKOGIRI, markup, *config).transform_values(&:first)]
       end
-      # Input parsed differently (known.yml) gives different output, whose
-      # properties don't compare
-      return unless expected && expected_parsed == parsed(LOBZIQUE, markup)
+      return unless expected
 
+      # Input parsed differently (as known.yml's is) gives different output,
+      # whose properties don't compare; an exception is wrong either way
+      same_parse = expected_parsed == parsed(LOBZIQUE, markup)
       broken.each do |property, (before, after)|
-        next if expected.key?(property) && (property != :raises || expected[property] == before)
+        next if (property == :raises) ? expected[:raises] == before : !same_parse || expected.key?(property)
 
         message = if property == :raises
           "raises #{before}: #{after}; Rails::HTML5 #{expected[:raises] ? "raises #{expected[:raises]}" : "doesn't"}"
@@ -449,7 +485,7 @@ module RubyApiFuzz
         twice: instance.sanitize(output, options),
         reparsed: impl.root::HTML5::DocumentFragment.parse(output).to_html
       }.filter_map { |property, again| [property, [output, again]] if again.b != output.b }.to_h
-    rescue => e
+    rescue StandardError, NotImplementedError => e
       {raises: [name(e), e.message]}
     end
 

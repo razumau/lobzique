@@ -8,6 +8,7 @@
 
 $LOAD_PATH.unshift(File.expand_path("../../lib", __dir__))
 
+require "fiddle"
 require "ruzzy"
 require "nokogiri"
 require "loofah"
