@@ -5,19 +5,28 @@
 //! by a browser, and output that keeps changing is how mutation XSS gets
 //! past a sanitizer. The HTML standard's serialization isn't a round trip
 //! (a CR in text comes back as LF, nested <a> and <form> elements flatten),
-//! so the first rounds may change the output; ROUNDS more may not.
+//! so the first rounds may change the output; ROUNDS more may not. The
+//! adoption agency algorithm gives up after 8 misnested levels, so a
+//! formatting element reopened under deep misnesting moves down 8 levels
+//! a round, as gumbo's does: ROUNDS grows with the depth limit.
 //! <plaintext> and <noscript> never settle, by the standard's design:
 //! <plaintext>'s end tag is text, so each round adds one, and <noscript>
 //! content parsed with scripting off is markup but serialized as raw text,
-//! so each round decodes another level of character references. Inputs
-//! that parse into either are skipped; a later round that creates one
-//! made markup out of text.
+//! so each round decodes another level of character references. Nor does
+//! an SVG or MathML <pre>, <textarea> or <listing> that starts with a
+//! newline, by Nokogiri's: `preserve_newline` doubles that newline as for
+//! HTML ones, but the parser drops one only in HTML. Inputs that parse into
+//! any of these are skipped; a later round that creates one made markup out
+//! of text.
 
 use libfuzzer_sys::fuzz_target;
 use lobzique_core::dom::{Document, DocumentKind, NodeKind};
-use lobzique_core::html5::{parse_fragment, serialize, Context, ContextNamespace, Options};
+use lobzique_core::html5::{
+    parse_fragment, prepend_newline, serialize, Context, ContextNamespace, Options,
+};
 
-const ROUNDS: usize = 4;
+const MAX_TREE_DEPTH: usize = 400;
+const ROUNDS: usize = 4 + MAX_TREE_DEPTH / 8;
 const HTML: &str = "http://www.w3.org/1999/xhtml";
 
 #[derive(Debug)]
@@ -55,7 +64,7 @@ fn round_trip(input: &[u8]) -> Result<Vec<u8>, Skip> {
     let options = Options {
         max_attributes: Some(400),
         max_errors: Some(0),
-        max_tree_depth: Some(400),
+        max_tree_depth: Some(MAX_TREE_DEPTH),
         parse_noscript_content_as_text: false,
     };
     let context = Context::new(ContextNamespace::Html, "body");
@@ -66,10 +75,10 @@ fn round_trip(input: &[u8]) -> Result<Vec<u8>, Skip> {
     let never_settles = document
         .descendants(fragment)
         .any(|id| match document.node_kind(id) {
-            NodeKind::Element(element) => {
+            NodeKind::Element(element) if &*element.name.ns == HTML => {
                 matches!(&*element.name.local, "plaintext" | "noscript")
-                    && &*element.name.ns == HTML
             }
+            NodeKind::Element(_) => prepend_newline(&document, id),
             _ => false,
         });
     if never_settles {
