@@ -1198,8 +1198,8 @@ pub(super) fn scan_number(s: &[u8]) -> Option<(f64, usize)> {
 /// its float parsing is correctly rounded, and powers to 22 are exact.
 fn power_of_ten(exponent: i32) -> f64 {
     const EXACT: [f64; 23] = [
-        1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15,
-        1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22,
+        1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16,
+        1e17, 1e18, 1e19, 1e20, 1e21, 1e22,
     ];
     match usize::try_from(exponent).ok().and_then(|e| EXACT.get(e)) {
         Some(&power) => power,

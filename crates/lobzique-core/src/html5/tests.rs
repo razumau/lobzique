@@ -486,7 +486,10 @@ fn parsers_go_a_chunk_at_a_time() {
     }
     assert_eq!(steps, input.len().div_ceil(parse::CHUNK));
     let (document, _) = parser.finish().unwrap();
-    assert_eq!(html(&document, NodeId::DOCUMENT), html(&parse(&input), NodeId::DOCUMENT));
+    assert_eq!(
+        html(&document, NodeId::DOCUMENT),
+        html(&parse(&input), NodeId::DOCUMENT)
+    );
 
     let body = Context::new(ContextNamespace::Html, "body");
     let mut parser = FragmentParser::new(input.into_bytes(), &body, &Options::default());
@@ -503,7 +506,11 @@ fn parsers_stop_stepping_past_a_limit() {
         max_tree_depth: Some(10),
         ..Options::default()
     };
-    let input = format!("{}{}", "<div>".repeat(11), "<p>".repeat(if cfg!(miri) { 300 } else { 30_000 }));
+    let input = format!(
+        "{}{}",
+        "<div>".repeat(11),
+        "<p>".repeat(if cfg!(miri) { 300 } else { 30_000 })
+    );
     let mut parser = DocumentParser::new(input.into_bytes(), &options);
     assert!(parser.step());
     assert!(!parser.step());
