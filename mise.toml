@@ -55,6 +55,15 @@ arg "[suites]..." help="Suite names from script/html4/run.rb, default all" var=#
 '''
 run = "ruby script/html4/run.rb {{usage.suites | default(value=[]) | join(sep=' ')}}"
 
+[tasks."measure:apps"]
+description = "Run public apps' suites with Lobzique::Sanitizer as both sanitizer vendors (plan.md phase 3)"
+usage = '''
+arg "[apps]..." help="App names from script/apps/run.rb, default all" var=#true
+'''
+# Campfire needs Ruby >= 3.4.5; the script leaves a 4.0 build in lib/
+tools = { ruby = "4.0" }
+run = "ruby script/apps/run.rb {{usage.apps | default(value=[]) | join(sep=' ')}}"
+
 [tasks."crawl:fetch"]
 description = "Download the pinned Common Crawl sample into tmp/crawl/"
 run = "script/fetch_crawl"
