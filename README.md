@@ -55,10 +55,29 @@ The CI workflow runs these checks on every PR and daily. Locally they need night
 | ASan (Ruby) | CI only: ASan builds of Ruby exist for Linux x64 only | memory errors in the extension and at the Ruby boundary |
 | GC.stress | `bundle exec rake test:gc_stress` | Ruby objects that Rust holds without the GC knowing |
 | Fuzzing | `cargo +nightly fuzz run <target>` | panics and failed assertions on arbitrary input |
+| Fuzzing the Ruby API | `bundle exec rake fuzz:ruby` (Linux, see below) | memory errors in the extension, GC and compaction mistakes, and errors Nokogiri doesn't raise, on fuzzed sequences of Ruby calls |
 
-`rake test:gc_stress` leaves a slow debug build in `lib/`; `rake compile` replaces it.
+`rake test:gc_stress` and `rake fuzz:ruby` leave a special build in `lib/`; `rake compile` replaces it.
 
 Every entry point that takes untrusted input gets a fuzz target in `fuzz/fuzz_targets/`, plus a `[[bin]]` entry in `fuzz/Cargo.toml`. CI fuzzes each target for 60 seconds on PRs; for a long run, dispatch the Fuzz workflow (`gh workflow run fuzz.yml -f seconds=7200`). A target's libFuzzer dictionary goes in `fuzz/<target>.dict`.
+
+The Rust targets never reach the bindings or the Ruby layer. `fuzz/ruby/api.rb` does: with [Ruzzy](https://github.com/trailofbits/ruzzy), it runs fuzzed sequences of Ruby calls (editing, copying, searching, scrubbing and serializing nodes, XPath functions that edit the tree, GC and compaction in between) on an extension built with ASan and coverage instrumentation. It fails on a crash, an ASan report or a panic; on an exception that Nokogiri doesn't raise on the same calls from the same tree, apart from the departures in `ARCHITECTURE.md`; and on sanitized output that isn't idempotent or doesn't survive a reparse where Rails::HTML5's does. Nokogiri runs in a child process, only to judge an input; trees it builds differently (as `known.yml` lists) aren't compared from where they differ, and neither are the sanitizer's properties on markup it parses differently, though a sanitizer exception still is. Ruzzy is Linux-only and needs clang with its sanitizer runtimes (`libclang-rt-18-dev` on Ubuntu) and nightly Rust:
+
+```sh
+bundle config set --local with fuzz
+CC=clang CXX=clang++ LDSHARED="clang -shared" LDSHAREDXX="clang++ -shared" \
+  MAKE="make --environment-overrides" bundle install
+bundle exec rake fuzz:ruby FUZZOPTS="-max_total_time=600 -fork=4"
+```
+
+Failing inputs go to `fuzz/artifacts/ruby_api/`. To run one again, after `rake fuzz:ruby` has built the extension:
+
+```sh
+LD_PRELOAD=$(ruby -e 'require "ruzzy"; print Ruzzy::ASAN_PATH') ASAN_OPTIONS=detect_leaks=0:use_sigaltstack=0 \
+  bundle exec fuzz/ruby/trace.rb fuzz/artifacts/ruby_api/crash-...
+```
+
+CI runs it next to the Rust targets.
 
 ### Differential test against Nokogiri::HTML5
 

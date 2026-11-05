@@ -41,6 +41,13 @@ arg "[libfuzzer_args]..." help="Passed to libFuzzer, e.g. -max_total_time=60" va
 '''
 run = "cargo +nightly fuzz run {{usage.target}} -- {{usage.libfuzzer_args | default(value=[]) | join(sep=' ')}}"
 
+[tasks."fuzz:ruby"]
+description = "Fuzz the Ruby API under ASan with Ruzzy (Linux; leaves an instrumented build, run compile afterwards)"
+usage = '''
+arg "[libfuzzer_args]..." help="Passed to libFuzzer, e.g. -max_total_time=60" var=#true
+'''
+run = "FUZZOPTS='{{usage.libfuzzer_args | default(value=[]) | join(sep=' ')}}' bundle exec rake fuzz:ruby"
+
 [tasks.differential]
 description = "Compare lobzique with Nokogiri::HTML5 on the fixtures corpus"
 usage = '''

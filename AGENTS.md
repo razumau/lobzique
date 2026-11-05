@@ -22,6 +22,7 @@ mise run test:gc-stress   # dev build with rb-sys gc-stress + GC.stress per test
 mise run miri             # nightly
 mise run asan             # nightly, core crate only
 mise run fuzz <target> [-max_total_time=60 ...]   # nightly + cargo-fuzz; targets in fuzz/fuzz_targets/
+mise run fuzz:ruby [-max_total_time=60 ...]       # the Ruby API under ASan with Ruzzy (fuzz/ruby/); Linux, see README
 mise run progress         # how much of inventory/contract.yml is defined (progress:missing lists gaps)
 mise run fixtures:verify  # checksum test/fixtures, as CI does
 mise run differential [--corpus crawl] [--only REGEXP]   # compare with Nokogiri::HTML5 (plan.md decision 6)
@@ -30,7 +31,7 @@ mise run measure:html4 [suite ...]   # HTML4 users' suites with the HTML4 names 
 mise run measure:apps [app ...]      # app suites with Lobzique::Sanitizer as both sanitizer vendors (plan.md phase 3)
 ```
 
-`test:gc-stress` leaves a slow debug build in `lib/`, and `measure:apps` a build for Ruby 4.0; run `mise run compile` afterwards. The README has the full table of safety checks (Miri, ASan for Rust and Ruby, GC.stress, fuzzing) and their local setup.
+`test:gc-stress` and `fuzz:ruby` leave a special build in `lib/`, and `measure:apps` a build for Ruby 4.0; run `mise run compile` afterwards. The README has the full table of safety checks (Miri, ASan for Rust and Ruby, GC.stress, fuzzing) and their local setup.
 
 ## Architecture
 
@@ -39,7 +40,7 @@ Details and the list of deliberate departures from Nokogiri are in `ARCHITECTURE
 - `lib/lobzique/`: Nokogiri's Ruby layer, ported file for file (same paths, classes, methods). Ported files name their Nokogiri source in the header; every change to ported code carries a `# lobzique:` comment. Don't design new Ruby APIs and alias Nokogiri names onto them.
 - `ext/lobzique`: magnus bindings only, built by rb_sys (`extconf.rb`) into `lib/lobzique/lobzique.{bundle,so}`. Defines the native methods Nokogiri's C extension defines, with the same names, arity and visibility; files mirror `lib/lobzique/` (`xml/node.rb` ↔ `src/xml/node.rs`). The `gc-stress` Cargo feature is what `rake test:gc_stress` turns on.
 - `crates/lobzique-core`: all library logic, `#![forbid(unsafe_code)]`, an index-based arena DOM. Must not depend on Ruby (magnus/rb-sys), so Miri, ASan and fuzzers run it without a Ruby VM.
-- `fuzz/`: its own Cargo workspace (nightly-only; the main workspace builds on stable). Every entry point that takes untrusted input needs a target in `fuzz/fuzz_targets/` plus a `[[bin]]` in `fuzz/Cargo.toml`; CI fuzzes each for 60s.
+- `fuzz/`: its own Cargo workspace (nightly-only; the main workspace builds on stable). Every entry point that takes untrusted input needs a target in `fuzz/fuzz_targets/` plus a `[[bin]]` in `fuzz/Cargo.toml`; CI fuzzes each for 60s. `fuzz/ruby/api.rb` fuzzes the Ruby API with Nokogiri as the oracle; a new deliberate departure from Nokogiri that it trips on goes in its `departure?`.
 - Behavior tests for Nokogiri-compatible API go in a module included by a `…Nokogiri` and a `…Lobzique` test case (see `test/xml/test_object_model.rb`), so each assertion is checked against Nokogiri too.
 
 ## Test fixtures and inventory

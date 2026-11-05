@@ -47,6 +47,45 @@ namespace :test do
   end
 end
 
+# cargo-fuzz's instrumentation, so libFuzzer sees the extension's coverage
+RUBY_FUZZ_RUSTFLAGS = %w[
+  -Zsanitizer=address -Cpasses=sancov-module -Cllvm-args=-sanitizer-coverage-level=4
+  -Cllvm-args=-sanitizer-coverage-inline-8bit-counters -Cllvm-args=-sanitizer-coverage-pc-table
+  -Cllvm-args=-sanitizer-coverage-trace-compares -Cdebug-assertions -Coverflow-checks
+  -Cdebuginfo=line-tables-only
+].freeze
+
+namespace :fuzz do
+  desc "Fuzz the Ruby API with Ruzzy under ASan (fuzz/ruby/api.rb; Linux, nightly Rust, " \
+    "the fuzz Gemfile group). FUZZOPTS go to libFuzzer"
+  task :ruby do
+    begin
+      require "ruzzy"
+    rescue LoadError
+      abort "fuzz:ruby needs Ruzzy: `bundle config set --local with fuzz`, then bundle install with clang (README)"
+    end
+    ENV["RUSTUP_TOOLCHAIN"] = "nightly"
+    # An explicit target keeps the instrumentation out of build scripts and proc macros
+    ENV["CARGO_BUILD_TARGET"] = `rustc -vV`[/^host: (.+)$/, 1]
+    ENV["RB_SYS_EXTRA_CARGO_ARGS"] = "-Zbuild-std"
+    ENV["RUSTFLAGS"] = RUBY_FUZZ_RUSTFLAGS.join(" ")
+    Rake::Task["compile"].invoke
+
+    corpus, artifacts = "fuzz/corpus/ruby_api", "fuzz/artifacts/ruby_api/"
+    mkdir_p [corpus, artifacts]
+    # The extension's ASan needs a runtime in the process, and Ruby's
+    # stack overflow handling its own signal stack
+    env = {
+      "LD_PRELOAD" => Ruzzy::ASAN_PATH,
+      "ASAN_OPTIONS" => "allocator_may_return_null=1:detect_leaks=0:use_sigaltstack=0"
+    }
+    # Read-only seeds after the corpus, as the Rust targets have them (fuzz.yml)
+    seeds = %w[test/fixtures/wpt-parsing/tree-construction test/fixtures/html5lib-tests/tokenizer]
+    sh env, "fuzz/ruby/trace.rb", corpus, *seeds, "-dict=fuzz/dom.dict", "-max_len=4096", "-timeout=10",
+      "-artifact_prefix=#{artifacts}", *ENV.fetch("FUZZOPTS", "").split
+  end
+end
+
 desc "Compare lobzique with Nokogiri::HTML5 (DIFFOPTS='--corpus crawl' etc., see script/differential)"
 task differential: :compile do
   ruby "-Ilib", "script/differential", *ENV.fetch("DIFFOPTS", "").split
