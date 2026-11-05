@@ -226,13 +226,21 @@ html5lib tokenizer inputs.
      links: on the fixtures (every push) and the crawl (weekly) they differ
      only in the known `<select>` cases and, on one crawled page, the
      CR-after-`&` case.
+   - **assert_dom.** Built: `require "lobzique/rails_dom_testing"` gives
+     lobzique's HTML5 classes wherever rails-dom-testing picks Nokogiri's,
+     and ports the two methods that build Nokogiri node sets (decision 1,
+     README). `test/rails_dom_testing` runs rails-dom-testing's suites from
+     `test/fixtures` as they are (`:html4`, so on Nokogiri) and with
+     `:html5` on Nokogiri::HTML5 and on lobzique. With `:html5`, two tests
+     fail on both roots: they expect libxml2's tree, which keeps the
+     newline after `<pre>` and `<textarea>`. On lobzique, the invalid-selector
+     tests get `Lobzique::CSS::SyntaxError`.
    - **Rails' suite.** `mise run measure:rails` (`script/rails`) runs
      actiontext's suite at the Rails tag of our Gemfile.lock, as checked
      out and with its dummy app on lobzique, both with our loofah and
      rails-html-sanitizer. On v8.1.4: 118 runs, the same in both modes; the
      one error (`JavascriptPackageTest`, which needs yarn) is in both.
-   - Next: the rails-dom-testing seam, then actionview's and actionpack's
-     suites in `script/rails`.
+   - Next: actionview's and actionpack's suites in `script/rails`.
 
 ## Decisions from the inventory
 

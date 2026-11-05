@@ -39,9 +39,9 @@ namespace :test do
     rm_f built_binary
     Rake::Task["compile"].invoke
     # Every stressed allocation runs a full GC, so the Rails libraries the
-    # sanitizer and Action Text tests load would slow every other test
-    # several times over
-    rails, rest = test_task.test_globs.partition { _1.start_with?("test/sanitizer/", "test/action_text/") }
+    # sanitizer, Action Text and rails-dom-testing tests load would slow
+    # every other test several times over
+    rails, rest = test_task.test_globs.partition { _1.start_with?("test/sanitizer/", "test/action_text/", "test/rails_dom_testing/") }
     [rest, rails].each { ruby test_task.make_test_cmd(path: _1), verbose: test_task.verbose }
   ensure
     rm_f built_binary

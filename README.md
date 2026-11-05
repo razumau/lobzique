@@ -56,6 +56,29 @@ require "lobzique/action_text"
 for scrubbers above. Stored content reads the same as on
 `Nokogiri::HTML5`, apart from the `<select>` difference above.
 
+## Tests: assert_dom and parsed_body
+
+rails-dom-testing parses HTML for `assert_dom` (`assert_select`),
+`assert_dom_equal`, `css_select`, `response.parsed_body`, and
+`rendered.html` in view tests. To parse it with lobzique:
+
+```ruby
+# test/test_helper.rb, after require "rails/test_help"
+require "lobzique/rails_dom_testing"
+```
+
+Wherever rails-dom-testing would use `Nokogiri::HTML5`, it then uses
+lobzique: on `load_defaults` 7.1 and later, or with
+`config.dom_testing_default_html_version = :html5`. `:html4` stays on
+Nokogiri, and so do XML responses. It raises at `require` on a
+rails-dom-testing outside 2.3.x, because it replaces one of that gem's
+private methods. Limits:
+
+- Selected elements, `parsed_body` and `rendered.html` are lobzique
+  objects, so a test asserting `Nokogiri::…` classes fails.
+- An invalid selector raises `Lobzique::CSS::SyntaxError`, not
+  `Nokogiri::CSS::SyntaxError`.
+
 ## Development
 
 `bundle exec rake` compiles the extension, runs the tests and lints.

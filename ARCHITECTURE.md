@@ -87,6 +87,22 @@ lobzique fragment as it is; Action Text's own checks for
 `Nokogiri::XML::DocumentFragment` and would parse the fragment's HTML
 again. The rest of Action Text runs unchanged on lobzique nodes.
 
+### rails-dom-testing seam (`lib/lobzique/rails_dom_testing.rb`)
+
+`require "lobzique/rails_dom_testing"`, not loaded by `require "lobzique"`
+(plan.md phase 4). Three prepended methods:
+- `Rails::Dom::Testing.html_document` and `html_document_fragment` give
+  lobzique's HTML5 classes where rails-dom-testing's own choice is
+  Nokogiri's, so its version checks and errors are its own and `:html4`
+  stays on Nokogiri (decision 3);
+- `SelectorAssertions#nodeset` wraps a lobzique node in lobzique's
+  `NodeSet`;
+- `HTMLSelector#filter`, ported from rails-dom-testing 2.3.0, builds
+  lobzique's `NodeSet` for lobzique matches. It is private and changed in
+  2.3.0, so the seam accepts only 2.3.x.
+
+Nokogiri objects take rails-dom-testing's code in all three.
+
 ## Native boundary (`ext/lobzique`)
 
 The extension defines the classes and methods that Nokogiri's C extension
