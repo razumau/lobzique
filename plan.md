@@ -235,12 +235,27 @@ html5lib tokenizer inputs.
      fail on both roots: they expect libxml2's tree, which keeps the
      newline after `<pre>` and `<textarea>`. On lobzique, the invalid-selector
      tests get `Lobzique::CSS::SyntaxError`.
-   - **Rails' suite.** `mise run measure:rails` (`script/rails`) runs
-     actiontext's suite at the Rails tag of our Gemfile.lock, as checked
-     out and with its dummy app on lobzique, both with our loofah and
-     rails-html-sanitizer. On v8.1.4: 118 runs, the same in both modes; the
-     one error (`JavascriptPackageTest`, which needs yarn) is in both.
-   - Next: actionview's and actionpack's suites in `script/rails`.
+   - **Rails' suites.** `mise run measure:rails` (`script/rails`) runs
+     actiontext's, actionview's and actionpack's suites at the Rails tag of
+     our Gemfile.lock, with our loofah, rails-html-sanitizer and
+     rails-dom-testing: as checked out (baseline), and on lobzique (the
+     sanitizer vendor, both seams, `:html5`). actionview and actionpack boot
+     no app, so they default to `:html4` and `Rails::HTML4::Sanitizer`;
+     they also run on Nokogiri with what `load_defaults` 7.1 sets (html5),
+     and lobzique is compared with that. On v8.1.4:
+
+     | suite | runs | baseline | html5 | lobzique |
+     |---|---|---|---|---|
+     | actiontext | 118 | 1 error | – | 1 error |
+     | actionview | 3173 | 0 | 0 | 1 failure |
+     | actionpack | 4095 | 0 | 1 failure | 5 failures |
+
+     - actiontext: `JavascriptPackageTest` needs yarn, in both modes.
+     - html5: `CollectionCacheTest` expects libxml2's tree, which wraps
+       text in `<p>` and has no `<head>`.
+     - lobzique: the other five assert Nokogiri's classes for
+       `rendered.html`, `html_document` and `parsed_body`, which the README
+       lists as a seam-mode limit.
 
 ## Decisions from the inventory
 

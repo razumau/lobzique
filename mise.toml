@@ -72,7 +72,7 @@ tools = { ruby = "4.0" }
 run = "ruby script/apps/run.rb {{usage.apps | default(value=[]) | join(sep=' ')}}"
 
 [tasks."measure:rails"]
-description = "Run Rails components' suites with their dummy app on lobzique (plan.md phase 4)"
+description = "Run Rails components' suites on Nokogiri and on lobzique (plan.md phase 4)"
 usage = '''
 arg "[suites]..." help="Suite names from script/rails/run.rb, default all" var=#true
 '''
