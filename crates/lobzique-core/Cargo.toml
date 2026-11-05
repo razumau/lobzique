@@ -8,3 +8,7 @@ publish = false
 
 [dependencies]
 html5ever = "0.40"
+
+[lints.rust]
+# cargo-fuzz builds with --cfg fuzzing, which turns on `work` counting
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }

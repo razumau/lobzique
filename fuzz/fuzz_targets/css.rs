@@ -6,7 +6,8 @@
 //! markup to search; the first byte picks the options.
 //!
 //! Nested `:has(…)` costs the document's size to the power of its depth, as
-//! in Nokogiri, so only shallow selectors on small documents are evaluated.
+//! in Nokogiri, so selectors nested deeper than SHALLOW are evaluated only
+//! on tiny documents, whose node count to that power stays within BUDGET.
 
 use libfuzzer_sys::fuzz_target;
 use lobzique_core::css::{compile, Options, Prefix};
@@ -15,6 +16,10 @@ use lobzique_core::html5::{parse_document, Options as ParseOptions};
 use lobzique_core::xpath::{evaluate, Outcome, Value};
 use std::borrow::Cow;
 use std::collections::HashMap;
+
+const SHALLOW: usize = 3;
+const TINY: usize = 64;
+const BUDGET: u64 = 1 << 20;
 
 const PREFIXES: &[&[Prefix]] = &[
     &[Prefix::Global],
@@ -47,7 +52,8 @@ fuzz_target!(|data: &[u8]| {
     let Ok(query) = compiled.query else {
         return;
     };
-    if markup.len() > 4096 || nesting(selector) > 3 {
+    let depth = nesting(selector);
+    if markup.len() > if depth > SHALLOW { TINY } else { 4096 } {
         return;
     }
     let parse_options = ParseOptions {
@@ -58,6 +64,9 @@ fuzz_target!(|data: &[u8]| {
     let Ok((document, _)) = parse_document(markup, &parse_options) else {
         return;
     };
+    if depth > SHALLOW && !within_budget(&document, depth) {
+        return;
+    }
     let namespaces = HashMap::from([
         ("svg".to_string(), "http://www.w3.org/2000/svg".to_string()),
         (
@@ -119,6 +128,14 @@ fn nesting(selector: &str) -> usize {
         }
     }
     deepest
+}
+
+fn within_budget(document: &Document, depth: usize) -> bool {
+    let nodes = document.node_ids().len() as u64;
+    u32::try_from(depth)
+        .ok()
+        .and_then(|depth| nodes.checked_pow(depth))
+        .is_some_and(|cost| cost <= BUDGET)
 }
 
 fn check_order(document: &Document, nodes: &[NodeId]) {

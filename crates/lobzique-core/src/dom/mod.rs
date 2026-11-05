@@ -284,16 +284,19 @@ impl Document {
     }
 
     fn create(&mut self, kind: NodeKind) -> NodeId {
+        crate::work::add(1);
         let id = NodeId::from_index(self.nodes.len());
         self.nodes.push(Node::new(kind));
         id
     }
 
     fn node(&self, id: NodeId) -> &Node {
+        crate::work::add(1);
         &self.nodes[id.index()]
     }
 
     fn node_mut(&mut self, id: NodeId) -> &mut Node {
+        crate::work::add(1);
         &mut self.nodes[id.index()]
     }
 }

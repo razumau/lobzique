@@ -145,6 +145,7 @@ fn write_attribute(out: &mut Vec<u8>, attribute: &Attribute) {
 }
 
 fn write_escaped(out: &mut Vec<u8>, text: &[u8], attribute: bool) {
+    crate::work::add(text.len());
     let text = c_string(text);
     let mut start = 0;
     let mut index = 0;

@@ -497,6 +497,7 @@ impl Saver<'_> {
 
     /// `xmlOutputBufferWriteEscape` with the context's escaping function.
     fn text(&mut self, text: &[u8]) {
+        crate::work::add(text.len());
         let mut index = 0;
         while index < text.len() {
             let byte = text[index];
@@ -537,6 +538,7 @@ impl Saver<'_> {
     /// `xmlBufAttrSerializeTxtContent`. With no encoding in effect, other
     /// than ASCII is written as character references, except a last byte.
     fn attribute_value(&mut self, value: &[u8]) {
+        crate::work::add(value.len());
         let mut index = 0;
         while index < value.len() {
             let byte = value[index];
@@ -567,6 +569,7 @@ impl Saver<'_> {
 
     /// A CDATA section, split after each `]]` that a `>` follows.
     fn cdata(&mut self, text: &[u8]) {
+        crate::work::add(text.len());
         if text.is_empty() {
             self.out.extend_from_slice(b"<![CDATA[]]>");
             return;

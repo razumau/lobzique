@@ -50,8 +50,10 @@ jobs:
         # The parser and DOM targets start from the html5lib and WPT inputs (dom
         # reads each as markup with no operations), read-only after the
         # target's own corpus. Seed files are long, so inputs are capped; a slow
-        # input fails rather than stalling the run. A target's dictionary is
-        # fuzz/<target>.dict.
+        # input fails rather than stalling the run, and so does a single
+        # allocation of more than 512 MB, well under the 2 GB RSS limit.
+        # html5_scaling counts work to catch slowness under the timeout. A
+        # target's dictionary is fuzz/<target>.dict, or html5's for html5_scaling.
         run: |
           for target in $(cargo fuzz list); do
             seeds=()
@@ -61,6 +63,8 @@ jobs:
             dict=()
             if [ -f "fuzz/$target.dict" ]; then
               dict=(-dict="$PWD/fuzz/$target.dict")
+            elif [ "$target" = html5_scaling ]; then
+              dict=(-dict="$PWD/fuzz/html5.dict")
             fi
             fork=()
             if [ "$FUZZ_WORKERS" -gt 1 ]; then
@@ -68,7 +72,7 @@ jobs:
             fi
             mkdir -p "fuzz/corpus/$target"
             cargo fuzz run --target "$FUZZ_TARGET_TRIPLE" "$target" "fuzz/corpus/$target" "${seeds[@]}" -- \
-              -max_total_time="$FUZZ_SECONDS" -max_len=65536 -timeout=10 "${dict[@]}" "${fork[@]}"
+              -max_total_time="$FUZZ_SECONDS" -max_len=65536 -timeout=10 -malloc_limit_mb=512 "${dict[@]}" "${fork[@]}"
           done
       - name: Minimize the corpus
         run: |
