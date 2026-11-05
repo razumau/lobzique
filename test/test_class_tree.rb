@@ -19,8 +19,9 @@ class TestClassTree < Minitest::Test
   # strings, and the error for XPath outside the subset
   OWN = ["Lobzique::CSS::Selector", "Lobzique::XML::XPath::UnsupportedError"]
   # Ours with everything under it: the sanitizer vendor mirrors Loofah and
-  # rails-html-sanitizer, not Nokogiri
-  OWN_TREES = ["Lobzique::Sanitizer"]
+  # rails-html-sanitizer, not Nokogiri, and the Action Text seam patches
+  # Action Text
+  OWN_TREES = ["Lobzique::Sanitizer", "Lobzique::ActionText"]
 
   def self.counterpart(path)
     RENAMED.reduce(path) { |p, (ours, theirs)| p.sub(/\A#{ours}\b/, theirs) }.sub(ROOT, "Nokogiri")

@@ -69,6 +69,8 @@ jobs:
         run: bundle exec ruby -Ilib script/differential
       - name: Compare sanitizing with Rails::HTML5
         run: bundle exec ruby -Ilib script/differential --mode sanitize
+      - name: Compare Action Text content with Nokogiri's
+        run: bundle exec ruby -Ilib script/differential --mode action_text
       # A separate build: the gc-stress feature is compiled in, so the release build can't be reused
       - name: Run the tests under GC.stress
         if: matrix.gc-stress

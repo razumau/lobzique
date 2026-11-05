@@ -11,6 +11,8 @@
 #   script/differential --oracle-only        run Nokogiri alone, to check the corpus loads
 #   script/differential --mode sanitize      sanitize instead of parse (Rails::HTML5 against
 #                                            Lobzique::Sanitizer, plan.md phase 3)
+#   script/differential --mode action_text   read each case as Action Text content, with
+#                                            Nokogiri's classes and lobzique's (plan.md phase 4)
 #
 # Until Lobzique can parse, it reports itself skipped and exits 0.
 
@@ -22,7 +24,7 @@ require_relative "../test/differential/harness"
 options = {corpus: "fixtures", mode: "parse", only: nil, show: 10, oracle_only: false}
 OptionParser.new do |opts|
   opts.on("--corpus NAME", Differential::Corpus.names) { options[:corpus] = _1 }
-  opts.on("--mode MODE", %w[parse sanitize]) { options[:mode] = _1 }
+  opts.on("--mode MODE", %w[parse sanitize action_text]) { options[:mode] = _1 }
   opts.on("--only REGEXP", Regexp) { options[:only] = _1 }
   opts.on("--show N", Integer, "failures to print (default 10)") { options[:show] = _1 }
   opts.on("--oracle-only", "parse with Nokogiri only") { options[:oracle_only] = true }
@@ -36,11 +38,16 @@ implementation = unless options[:oracle_only]
   Lobzique
 end
 
-if options[:mode] == "sanitize"
+case options[:mode]
+when "sanitize"
   require "lobzique/sanitizer"
   require_relative "../test/differential/sanitize"
   cases = Differential::Corpus.each_sanitize(options[:corpus])
   harness_class = Differential::SanitizeHarness
+when "action_text"
+  require_relative "../test/differential/action_text"
+  cases = Differential::Corpus.each_action_text(options[:corpus])
+  harness_class = Differential::ActionTextHarness
 else
   cases = Differential::Corpus.each(options[:corpus])
   harness_class = Differential::Harness

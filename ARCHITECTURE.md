@@ -77,6 +77,16 @@ elements (`style`, `xmp`, …) inside a `select` (`EscapeRawTextInSelect`). html
 standard's customizable select; browsers on the older rules ignore their
 tags and would parse the text as markup.
 
+### Action Text seam (`lib/lobzique/action_text.rb`)
+
+`require "lobzique/action_text"`, not loaded by `require "lobzique"`
+(plan.md phase 4). It sets the instance variables that memoize
+`ActionText.html_document_class` and `html_document_fragment_class` to
+lobzique's HTML5 classes, and prepends a `Fragment.wrap` that takes a
+lobzique fragment as it is; Action Text's own checks for
+`Nokogiri::XML::DocumentFragment` and would parse the fragment's HTML
+again. The rest of Action Text runs unchanged on lobzique nodes.
+
 ## Native boundary (`ext/lobzique`)
 
 The extension defines the classes and methods that Nokogiri's C extension

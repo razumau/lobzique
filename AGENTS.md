@@ -29,6 +29,7 @@ mise run differential [--corpus crawl] [--only REGEXP]   # compare with Nokogiri
 mise run crawl:fetch      # download the pinned Common Crawl sample into tmp/crawl/
 mise run measure:html4 [suite ...]   # HTML4 users' suites with the HTML4 names on gumbo (plan.md decision 3)
 mise run measure:apps [app ...]      # app suites with Lobzique::Sanitizer as both sanitizer vendors (plan.md phase 3)
+mise run measure:rails [suite ...]   # Rails components' suites with their dummy app on lobzique (plan.md phase 4)
 ```
 
 `test:gc-stress` and `fuzz:ruby` leave a special build in `lib/`, and `measure:apps` a build for Ruby 4.0; run `mise run compile` afterwards. The README has the full table of safety checks (Miri, ASan for Rust and Ruby, GC.stress, fuzzing) and their local setup.

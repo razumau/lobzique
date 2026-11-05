@@ -75,6 +75,32 @@ module Differential
       fixture_glob("html5lib-tests/tokenizer/*.test").each { |path| each_tokenizer(path, &block) }
     end
 
+    # Inputs for the action_text mode: the markup in Action Text's tests
+    # (attachments, Trix figures, galleries), then the sanitize mode's inputs
+    # as rich text a user saved
+    def each_action_text(name, &block)
+      return enum_for(:each_action_text, name) unless block
+
+      each_action_text_literal(&block) if name == "fixtures"
+      each_sanitize(name, &block)
+    end
+
+    # The string literals with markup in Action Text's test files. An
+    # interpolated literal gives its pieces, which are still markup; %Q() and
+    # heredoc literals are taken as written, escapes and all.
+    def each_action_text_literal
+      fixture_glob("rails/actiontext/test/unit/*.rb").each do |path|
+        opening = nil
+        Ripper.lex(File.read(path)).each_with_index do |((line, _), event, token), index|
+          opening = token if event == :on_tstring_beg || event == :on_heredoc_beg
+          next unless event == :on_tstring_content && token.include?("<")
+
+          input = ruby_unescape(token, opening) || token
+          yield Case.new(id: "#{relative(path)}:#{line}##{index}", source: "actiontext", kind: :fragment, input: input)
+        end
+      end
+    end
+
     # Loofah's html5lib-derived sanitizer cases; the expected outputs are
     # libxml2's, so only the inputs are used
     def each_loofah_sanitizer

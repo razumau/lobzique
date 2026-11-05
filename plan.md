@@ -216,6 +216,23 @@ html5lib tokenizer inputs.
      of comments before `<html>`, and the HTML4 sanitizer names.
 4. Action Text + assert_select: actiontext and actionview suites green, with
    rails-dom-testing's `default_html_version` set to `:html5` (decision 3).
+   - **Action Text.** Built: `require "lobzique/action_text"` sets Action
+     Text's memoized document classes and patches `Fragment.wrap`
+     (decision 1, README). `test/action_text` runs the cases of Action
+     Text's `content_test.rb` that need no database on Nokogiri and on
+     lobzique. `script/differential --mode action_text` reads the sanitize
+     corpus and the markup in Action Text's tests as `ActionText::Content`
+     and compares stored HTML, Trix HTML, plain text, attachments and
+     links: on the fixtures (every push) and the crawl (weekly) they differ
+     only in the known `<select>` cases and, on one crawled page, the
+     CR-after-`&` case.
+   - **Rails' suite.** `mise run measure:rails` (`script/rails`) runs
+     actiontext's suite at the Rails tag of our Gemfile.lock, as checked
+     out and with its dummy app on lobzique, both with our loofah and
+     rails-html-sanitizer. On v8.1.4: 118 runs, the same in both modes; the
+     one error (`JavascriptPackageTest`, which needs yarn) is in both.
+   - Next: the rails-dom-testing seam, then actionview's and actionpack's
+     suites in `script/rails`.
 
 ## Decisions from the inventory
 

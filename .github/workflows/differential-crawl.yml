@@ -39,3 +39,6 @@ jobs:
       - name: Compare sanitizing with Rails::HTML5
         if: ${{ !cancelled() }}
         run: bundle exec ruby -Ilib script/differential --mode sanitize --corpus crawl --show 30
+      - name: Compare Action Text content with Nokogiri's
+        if: ${{ !cancelled() }}
+        run: bundle exec ruby -Ilib script/differential --mode action_text --corpus crawl --show 30

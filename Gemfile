@@ -17,6 +17,8 @@ gem "nokogiri", "~> 1.19"
 gem "loofah", "2.25.2"
 gem "rails-html-sanitizer", "1.7.1"
 gem "actionview"
+# The Action Text seam (plan.md phase 4)
+gem "actiontext"
 
 # Fuzzes the Ruby API (fuzz/ruby/). Its extension builds with clang and
 # links libFuzzer, so only `bundle config set with fuzz` installs it.

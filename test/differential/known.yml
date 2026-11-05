@@ -41,3 +41,13 @@
     doesn't. The text of raw-text elements in a select is escaped, so
     browsers with the older rules parse the output the same way
     (Lobzique::Sanitizer::EscapeRawTextInSelect).
+- mode: action_text
+  match: \A(wpt-parsing/tree-construction/(menuitem-element\.dat#14|tests1\.dat#(30|100)|tests10\.dat#(4|5|17|18)|tests18\.dat#(14|15)|tests7\.dat#34|tests9\.dat#(5|6|18|19)|webkit02\.dat#(36|38|39|40|41|42|43|45|46|47|48))|crawl/CC-MAIN-20261005105623-20261005135623-00000\.warc\.gz@2555606|crawl/CC-MAIN-20261009160033-20261009190033-00333\.warc\.gz@(604984|22178628)|crawl/CC-MAIN-20261013211541-20261014001541-00666\.warc\.gz@(976107|25147464|39767012))\z
+  reason: >-
+    Customizable <select> parsing (above): Action Text stores the markup
+    inside a select that gumbo drops or moves. Rendering sanitizes it
+    through Lobzique::Sanitizer, as the sanitize entry above describes.
+- mode: action_text
+  match: \Acrawl/CC-MAIN-20261005105623-20261005135623-00000\.warc\.gz@21360212\z
+  reason: >-
+    gumbo keeps a CR that follows "&" in an attribute value (above).

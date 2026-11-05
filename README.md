@@ -40,6 +40,22 @@ set as `ActionText::ContentHelper.scrubber`, with these limits:
 - Loofah's `text` and `to_text` and its document-level comment removal
   aren't ported; Rails' sanitizers call neither.
 
+## Action Text
+
+With the sanitizer vendor above, Action Text still parses stored rich text
+with Nokogiri to find attachments, convert Trix markup and build plain text.
+To parse it with lobzique as well:
+
+```ruby
+# config/application.rb, after require "rails/all"
+require "lobzique/action_text"
+```
+
+`ActionText::Content#fragment.source` and the nodes passed to
+`Fragment#replace` blocks are then lobzique nodes, with the limits listed
+for scrubbers above. Stored content reads the same as on
+`Nokogiri::HTML5`, apart from the `<select>` difference above.
+
 ## Development
 
 `bundle exec rake` compiles the extension, runs the tests and lints.
@@ -90,6 +106,8 @@ CI runs it next to the Rust targets.
 | a pinned Common Crawl sample (~3,100 pages) | `script/fetch_crawl`, then `script/differential --corpus crawl` | weekly |
 
 `--mode sanitize` sends the inputs from the fixtures (DOMPurify, the WPT sanitizer and tree-construction tests, Loofah's sanitizer data, html5lib) or the crawl through `Rails::HTML5`'s sanitizers and through `Lobzique::Sanitizer`, in several configurations. It compares the output, the output sanitized again, and the output parsed and serialized again. Rails::HTML5 itself isn't idempotent on every input, so lobzique has to break these properties exactly where it does; the report counts both. CI runs it next to the parse mode.
+
+`--mode action_text` reads the sanitize mode's inputs, and the markup in Action Text's tests, as `ActionText::Content` with Action Text's document classes set to Nokogiri's and then to lobzique's, and compares `to_html`, `to_trix_html` (and what saving it back stores), `to_plain_text`, the attachments, galleries and links. CI runs it next to the other modes.
 
 Crawled pages aren't committed: `test/differential/crawl.yml` pins byte ranges of WARC files with their SHA-256, and `script/fetch_crawl` downloads them into `tmp/crawl/`. A difference found on a crawled page becomes a small case in `cases.yml`. Accepted differences go in `test/differential/known.yml` with a reason.
 
