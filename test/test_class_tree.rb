@@ -63,6 +63,9 @@ class TestClassTree < Minitest::Test
     end
   end
 
+  # Reflection only, no native code to stress
+  def gc_stress? = false
+
   private
 
   def normalize(ancestors)

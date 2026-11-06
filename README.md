@@ -96,7 +96,7 @@ The CI workflow runs these checks on every PR and daily. Locally they need night
 | Fuzzing | `cargo +nightly fuzz run <target>` | panics and failed assertions on arbitrary input |
 | Fuzzing the Ruby API | `bundle exec rake fuzz:ruby` (Linux, see below) | memory errors in the extension, GC and compaction mistakes, and errors Nokogiri doesn't raise, on fuzzed sequences of Ruby calls |
 
-`rake test:gc_stress` and `rake fuzz:ruby` leave a special build in `lib/`; `rake compile` replaces it.
+`rake test:gc_stress` and `rake fuzz:ruby` leave a special build in `lib/`; `rake compile` replaces it. `rake test:stress` runs GC.stress on whatever build is in `lib/` (the ASan job's, for one), each test file in its own process, `STRESS_JOBS` at a time.
 
 Every entry point that takes untrusted input gets a fuzz target in `fuzz/fuzz_targets/`, plus a `[[bin]]` entry in `fuzz/Cargo.toml`. CI fuzzes each target for 60 seconds on PRs; for a long run, dispatch the Fuzz workflow (`gh workflow run fuzz.yml -f seconds=7200`). A target's libFuzzer dictionary goes in `fuzz/<target>.dict`. CI also passes `-timeout=10 -malloc_limit_mb=512`, so a slow input or a single huge allocation fails. Slowness under the timeout is `html5_scaling`'s job: it repeats its input and fails if the work the core counts under `cfg(fuzzing)` (`lobzique_core::work`) grows faster than linearly in the input times the tree's depth.
 

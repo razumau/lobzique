@@ -99,11 +99,14 @@ end
 
 # With :html5 as the default, as in apps on load_defaults 7.1 and later
 [DomAssertionsTest, AssertSelectTest].each do |suite|
+  # Upstream's run on Nokogiri::HTML4; GC.stress is for lobzique's below
+  suite.define_method(:gc_stress?) { false }
   {Nokogiri => "NokogiriHTML5", Lobzique => "Lobzique"}.each do |root, prefix|
     Object.const_set(:"#{prefix}#{suite.name}", Class.new(suite) {
       include RailsDomTestingHelper::HTML5
 
       define_method(:root) { root }
+      define_method(:gc_stress?) { root.equal?(Lobzique) }
     })
   end
 end

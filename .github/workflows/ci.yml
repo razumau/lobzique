@@ -47,12 +47,6 @@ jobs:
           - '3.3'
           - '3.4'
           - '4.0'
-        # Oldest and newest Ruby in CI: GC internals differ between them
-        include:
-          - ruby: '3.3'
-            gc-stress: true
-          - ruby: '4.0'
-            gc-stress: true
     steps:
       - uses: actions/checkout@v7
         with:
@@ -71,9 +65,28 @@ jobs:
         run: bundle exec ruby -Ilib script/differential --mode sanitize
       - name: Compare Action Text content with Nokogiri's
         run: bundle exec ruby -Ilib script/differential --mode action_text
-      # A separate build: the gc-stress feature is compiled in, so the release build can't be reused
+
+  gc-stress:
+    name: GC.stress on Ruby ${{ matrix.ruby }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Oldest and newest Ruby in CI: GC internals differ between them
+        ruby:
+          - '3.3'
+          - '4.0'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up Ruby & Rust
+        uses: oxidize-rb/actions/setup-ruby-and-rust@v1
+        with:
+          ruby-version: ${{ matrix.ruby }}
+          bundler-cache: true
+          cargo-cache: true
       - name: Run the tests under GC.stress
-        if: matrix.gc-stress
         run: bundle exec rake test:gc_stress
 
   miri:
@@ -95,7 +108,11 @@ jobs:
         run: cargo miri test -p lobzique-core
 
   asan:
-    name: ASan
+    name: ASan${{ matrix.gc-stress && ' with GC.stress' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        gc-stress: [false, true]
     # asan-release (latest stable Ruby built with ASan) is only built for ubuntu-24.04 x64
     runs-on: ubuntu-24.04
     env:
@@ -116,6 +133,7 @@ jobs:
         with:
           components: rust-src
       - name: Test the core crate
+        if: ${{ !matrix.gc-stress }}
         env:
           ASAN_OPTIONS: detect_leaks=1
         run: cargo test -Zbuild-std -p lobzique-core
@@ -125,12 +143,12 @@ jobs:
           RB_SYS_EXTRA_CARGO_ARGS: -Zbuild-std
         run: bundle exec rake compile
       - name: Run the tests
+        if: ${{ !matrix.gc-stress }}
         run: bundle exec rake test
       # A Ruby object freed while Rust still uses it is reported here, not left to crash later
       - name: Run the tests under GC.stress
-        env:
-          LOBZIQUE_GC_STRESS: "1"
-        run: bundle exec rake test
+        if: matrix.gc-stress
+        run: bundle exec rake test:stress
 
   fuzz:
     uses: ./.github/workflows/fuzz.yml
@@ -154,7 +172,7 @@ jobs:
   source-gem:
     name: Build source gem
     if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
-    needs: [lint, test]
+    needs: [lint, test, gc-stress]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -171,7 +189,7 @@ jobs:
 
   cross-gem:
     name: Compile native gem for ${{ matrix.platform }}
-    needs: [ci-data, lint, test]
+    needs: [ci-data, lint, test, gc-stress]
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -30,19 +30,47 @@ task default: %i[compile test standard]
 built_binary = File.join(extension.tmp_dir, extension.platform, extension.name, RUBY_VERSION, extension.binary(extension.platform))
 
 namespace :test do
+  desc "Run the tests under GC.stress on the extension in lib/, a process per file " \
+    "(STRESS_JOBS at a time, default one per CPU)"
+  task :stress do
+    require "etc"
+    require "open3"
+    # Every stressed allocation runs a full GC, whose cost grows with the
+    # heap: a file runs alone so it doesn't mark the Rails libraries another
+    # loads, and without Bundler, whose code is half of a small heap. The
+    # slow Rails files start first.
+    rails, rest = test_task.test_globs.partition { _1.start_with?("test/sanitizer/", "test/action_text/", "test/rails_dom_testing/") }
+    env = Bundler.unbundled_env.merge(
+      "RUBYLIB" => $LOAD_PATH.join(File::PATH_SEPARATOR),
+      "LOBZIQUE_GC_STRESS" => "1",
+      "LOBZIQUE_GC_STRESS_BUILD" => ENV["LOBZIQUE_GC_STRESS_BUILD"]
+    )
+    queue = Queue.new.tap { |q| (rails + rest).each { q << _1 } }.close
+    output = Mutex.new
+    failed = []
+    Array.new(Integer(ENV.fetch("STRESS_JOBS", Etc.nprocessors))) do
+      Thread.new do
+        while (file = queue.pop)
+          started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          log, status = Open3.capture2e(env, "#{RbConfig.ruby} #{test_task.make_test_cmd(path: [file])}")
+          output.synchronize do
+            puts "== #{file} (#{(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round}s)", log
+            failed << file unless status.success?
+          end
+        end
+      end
+    end.each(&:join)
+    abort "Failed under GC.stress: #{failed.join(", ")}" if failed.any?
+  end
+
   desc "Run the tests under GC.stress, on a dev build with rb-sys's gc-stress feature"
   task :gc_stress do
     ENV["RB_SYS_CARGO_PROFILE"] = "dev"
     ENV["RB_SYS_EXTRA_CARGO_ARGS"] = "--features gc-stress"
-    ENV["LOBZIQUE_GC_STRESS"] = "1"
     ENV["LOBZIQUE_GC_STRESS_BUILD"] = "1"
     rm_f built_binary
     Rake::Task["compile"].invoke
-    # Every stressed allocation runs a full GC, so the Rails libraries the
-    # sanitizer, Action Text and rails-dom-testing tests load would slow
-    # every other test several times over
-    rails, rest = test_task.test_globs.partition { _1.start_with?("test/sanitizer/", "test/action_text/", "test/rails_dom_testing/") }
-    [rest, rails].each { ruby test_task.make_test_cmd(path: _1), verbose: test_task.verbose }
+    Rake::Task["test:stress"].invoke
   ensure
     rm_f built_binary
   end
