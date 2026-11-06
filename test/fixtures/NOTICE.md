@@ -37,7 +37,7 @@ derived file is noted. Upstream license texts are copied into each directory.
 
 ## nokogiri/
 
-- Source: [sparklemotion/nokogiri](https://github.com/sparklemotion/nokogiri/tree/2d0f04bd124e18648fdb967fea0c4d94ff82b5d0) at `2d0f04bd124e18648fdb967fea0c4d94ff82b5d0`
+- Source: [sparklemotion/nokogiri](https://github.com/sparklemotion/nokogiri/tree/2e0d329599569095e69d155e3902dce1038682b4) at `2e0d329599569095e69d155e3902dce1038682b4`
 - License: MIT (`LICENSE.md`)
 - Purpose: HTML5 (gumbo) parse/serialize and CSS selector behavior to match, plus the DOM contract: Node, NodeSet, fragments, reparenting, attributes, XPath, subclassing and decorators. Most DOM tests parse staff.xml; port them to HTML. The HTML4 tests show the API shape; their libxml2 output doesn't apply (plan.md decision 3). helper.rb is there to read the tests, not to run.
 
@@ -49,13 +49,13 @@ derived file is noted. Upstream license texts are copied into each directory.
 
 ## loofah/
 
-- Source: [flavorjones/loofah](https://github.com/flavorjones/loofah/tree/541c07b8b0562f16299b8dac70cc3a553e9a0cec) at `541c07b8b0562f16299b8dac70cc3a553e9a0cec`
+- Source: [flavorjones/loofah](https://github.com/flavorjones/loofah/tree/a3b25f61c1299f068526f9f52e04004390e20e9e) at `a3b25f61c1299f068526f9f52e04004390e20e9e`
 - License: MIT (`MIT-LICENSE.txt`)
 - Purpose: Scrubber API contract and sanitizer vectors. assets/testdata_sanitizer_tests1.dat is JSON keyed by libxml2 version, showing where output already varies.
 
 ## rails-html-sanitizer/
 
-- Source: [rails/rails-html-sanitizer](https://github.com/rails/rails-html-sanitizer/tree/9206a0bfd82df900e0ee4cbed496e8268403ed81) at `9206a0bfd82df900e0ee4cbed496e8268403ed81`
+- Source: [rails/rails-html-sanitizer](https://github.com/rails/rails-html-sanitizer/tree/bac36ce7efc155383c6eb34326c0e79d6858a799) at `bac36ce7efc155383c6eb34326c0e79d6858a799`
 - License: MIT (`MIT-LICENSE`)
 - Purpose: Full/Link/SafeList sanitizer behavior; the primary acceptance suite.
 

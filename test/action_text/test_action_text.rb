@@ -66,7 +66,7 @@ module ActionTextContract
 
   def test_sanitizes_attachment_markup_for_trix
     html = '<action-text-attachment content="<img src=\&quot;.\&quot; onerror=alert>"></action-text-attachment>'
-    assert_equal '<figure data-trix-attachment="{&quot;content&quot;:&quot;<img src=\\&quot;\\\\%22.\\\\%22\\&quot;>&quot;}"></figure>',
+    assert_equal '<figure data-trix-attachment="{&quot;content&quot;:&quot;&lt;img src=\\&quot;\\\\%22.\\\\%22\\&quot;&gt;&quot;}"></figure>',
       ActionText::Content.new(html).to_trix_html.strip
   end
 

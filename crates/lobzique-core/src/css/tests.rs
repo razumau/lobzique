@@ -176,8 +176,17 @@ fn syntax_errors() {
     assert_eq!(error("p:"), "unexpected '$' after ':'");
     assert_eq!(error("p::x"), "unexpected ':' after ':'");
     assert_eq!(error("p:nth-child(2x)"), "parse error on IDENT 'x'");
-    assert_eq!(error("p:nth-child(0n-1)"), "divided by 0");
     assert_eq!(error("p:-x"), "Invalid XPath function name '-x'");
+    // a decoded `*` would be the universal selector
+    assert_eq!(error(r"\2a"), r"Invalid element name '\2a'");
+    assert_eq!(error(r"x|\*"), r"Invalid element name '\*'");
+    assert_eq!(error(r"[x|a\!b]"), "Invalid attribute name 'x|a!b'");
+    let xml = Options {
+        html: false,
+        ..options(&[Prefix::Global])
+    };
+    let message = compile(r"a\!b", &xml).unwrap_err().0;
+    assert_eq!(message, "Invalid element name 'a!b'");
     assert!(error("div,").starts_with("unexpected '$'"));
 }
 
@@ -185,13 +194,16 @@ fn syntax_errors() {
 fn invalid_xpath_waits_for_evaluation() {
     assert!(invalid("a + text()"));
     assert!(invalid("// p"));
-    assert!(invalid("#a\\'b"));
     assert!(invalid("p:not(.a:first-of-type)"));
     assert!(invalid("eq(1)"));
-    // an unescaped value of one quote opens a literal
-    assert!(invalid(r#"p[x=\"]"#));
-    assert!(invalid(r"p[x=\']"));
-    assert!(!invalid(r#"p[x="\""]"#));
+    // pasted as written, quotes and all
+    assert!(invalid(r"p:eq('a\'b')"));
+    // a literal holds only XML characters: \b is U+000B
+    assert!(invalid(r"p[x=a\b]"));
+    assert!(invalid(r"#\1 x"));
+    assert!(invalid(r"p:contains('\1 ')"));
+    assert!(!invalid(r#"p[x=\"]"#));
+    assert!(!invalid(r#"#a\'b\"c"#));
     assert!(!invalid("has(a)"));
     assert!(!invalid("p:checked"));
 }
@@ -309,15 +321,45 @@ fn prefixes_must_be_bound() {
 
 #[test]
 fn unescaping() {
-    assert_eq!(parser::unescape_identifier(r"a\31 b\.c").unwrap(), "a1b.c");
-    assert_eq!(parser::unescape_string("'a\\\nb'").unwrap(), "'ab'");
-    // Nokogiri goes on with invalid UTF-8 or a NUL, and fails later
-    for selector in [r".\110000", r"#\D800", r"p[x=\0]", r"p[x='\dfff']"] {
-        assert!(
-            compile(selector, &options(&[Prefix::Global])).is_err(),
-            "{selector}"
-        );
+    assert_eq!(parser::unescape_identifier(r"a\31 b\.c"), "a1b.c");
+    assert_eq!(parser::unescape_string("a\\\nb\\\r\nc\\\x0cd"), "abcd");
+    // one whitespace after a hex escape is part of it, CRLF counting as one
+    assert_eq!(parser::unescape_identifier("\\31\r\nx"), "1x");
+    assert_eq!(parser::unescape_identifier("\\31\x0bx"), "1\x0bx");
+    // NUL, surrogates and code points past U+10FFFF
+    for escape in [r"\0", r"\D800", r"\110000"] {
+        assert_eq!(parser::unescape_identifier(escape), "\u{FFFD}");
     }
+}
+
+#[test]
+fn escaped_values_match_what_they_decode_to() {
+    let document = parse(
+        r#"<p id="it's" class="a'b" title='say "it&apos;s"'></p><p id=n data-x=1 @click=c :class=k></p><a-b id=h></a-b>"#,
+    );
+    assert_eq!(select(&document, r"#it\'s"), ["it's"]);
+    assert_eq!(select(&document, r"p.a\'b"), ["it's"]);
+    assert_eq!(select(&document, r#"[title='say "it\'s"']"#), ["it's"]);
+    assert_eq!(select(&document, r#"p:contains('')"#), ["it's", "n"]);
+    assert_eq!(select(&document, r"[data\-x=1]"), ["n"]);
+    assert_eq!(select(&document, r"[\@click=c]"), ["n"]);
+    assert_eq!(select(&document, r"[\:class]"), ["n"]);
+    assert_eq!(select(&document, r"p > @\:class"), ["k"]);
+    assert_eq!(select(&document, r"a\-b"), ["h"]);
+    // a name XPath can't write still matches in HTML, by its local name
+    assert!(select(&document, r"a\!b").is_empty());
+}
+
+#[test]
+fn nth_with_a_zero_or_negative_step() {
+    let document = parse(LIST);
+    assert_eq!(select(&document, "p:nth-child(0n+3)"), Vec::<String>::new());
+    assert_eq!(select(&document, "p:nth-child(0n+1)"), ["a"]);
+    assert_eq!(select(&document, "p:nth-of-type(0n+3)"), ["c"]);
+    assert!(select(&document, "p:nth-child(0n-1)").is_empty());
+    assert!(select(&document, "p:nth-child(-n+0)").is_empty());
+    assert!(select(&document, "p:nth-child(-2n)").is_empty());
+    assert_eq!(select(&document, "p:nth-child(-n+2)"), ["a", "b"]);
 }
 
 #[test]

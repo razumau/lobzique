@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Adapted from Nokogiri 1.19.4, lib/nokogiri/html5/document.rb (MIT, see LICENSE-NOKOGIRI.md).
+# Adapted from Nokogiri 1.19.7, lib/nokogiri/html5/document.rb (MIT, see LICENSE-NOKOGIRI.md).
 
 require_relative "../html4/document"
 
@@ -15,6 +15,11 @@ module Lobzique
     class Document < HTML4::Document
       attr_reader :url
       attr_reader :quirks_mode
+
+      # Whether the parser treated the content of +noscript+ elements as text, or +nil+ before the
+      # first parse. Fragments parsed into this document must match it, because the serializer emits
+      # +noscript+ text literally only when this is true.
+      attr_accessor :parse_noscript_content_as_text # :nodoc:
 
       class << self
         # Parses with the HTML standard's algorithm. The block, if given,
@@ -64,8 +69,11 @@ module Lobzique
           options[:max_errors] ||= options.delete(:max_parse_errors) || Html5ever::DEFAULT_MAX_ERRORS
           options[:max_tree_depth] ||= Html5ever::DEFAULT_MAX_TREE_DEPTH
 
+          noscript_content_as_text = options[:parse_noscript_content_as_text] ? true : false
+
           doc = Html5ever.parse(string, url, self, **options)
           doc.encoding = "UTF-8"
+          doc.parse_noscript_content_as_text = noscript_content_as_text
           doc
         end
       end
@@ -74,6 +82,7 @@ module Lobzique
         super
         @url = nil
         @quirks_mode = nil
+        @parse_noscript_content_as_text = nil
       end
 
       # Parses markup in the context of `<body>`.

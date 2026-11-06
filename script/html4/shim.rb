@@ -149,7 +149,8 @@ module HTML4Shim
       if config.options & (Nokogiri::XML::Node::SaveOptions::AS_XML | Nokogiri::XML::Node::SaveOptions::AS_XHTML) != 0
         native_write_to(io, encoding, indent_string, config.options)
       else
-        html = html_standard_serialize(options[:preserve_newline] || false)
+        scripting_enabled = document.is_a?(Nokogiri::HTML5::Document) && document.parse_noscript_content_as_text
+        html = html_standard_serialize(options[:preserve_newline] || false, scripting_enabled)
         encoding ||= document.encoding || Encoding::UTF_8
         io << html.encode(encoding, fallback: lambda { |c| "&#x#{c.ord.to_s(16)};" })
       end

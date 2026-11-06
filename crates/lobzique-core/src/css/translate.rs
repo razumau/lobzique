@@ -6,11 +6,11 @@
 //! raises when Nokogiri evaluates them.
 
 use super::parser::{
-    Argument, AttributeOperator, AttributeSubject, Combinator, Condition, ElementName, Function,
-    Negation, Nth, Pseudo, Selector, Simple,
+    unescape_string, Argument, AttributeName, AttributeOperator, AttributeSubject, Combinator,
+    Condition, ElementName, Function, Negation, Nth, Pseudo, Selector, Simple,
 };
 use super::{Options, Prefix, SyntaxError};
-use crate::xpath::chars::{is_name_char, is_name_start};
+use crate::xpath::chars::{is_name_char, is_name_start, is_xml_char};
 use crate::xpath::{
     Arithmetic, Axis, Comparison, Expr, Function as F, NodeTest, Path, QName, Step,
 };
@@ -147,11 +147,7 @@ impl<'a> Translator<'a> {
                 };
                 (steps, axis_free, predicates)
             }
-            Simple::Attribute(name) => (
-                vec![Step::new(Axis::Attribute, NodeTest::Name(qname(name)?))],
-                false,
-                Vec::new(),
-            ),
+            Simple::Attribute(name) => (vec![attribute_step(name)?], false, Vec::new()),
         };
         let mut steps = steps;
         if let Join::Axis(axis) = join {
@@ -171,10 +167,25 @@ impl<'a> Translator<'a> {
 
     /// `visit_element_name`
     fn element_test(&self, name: &ElementName) -> Result<NodeTest> {
+        if let (None, local) = (&name.prefix, name.local.as_str()) {
+            // HTML5 has namespaces that CSS queries ignore. The visitor
+            // writes `*:name`, or a `local-name()` test for what isn't an
+            // XPath name
+            if self.options.html && local != "*" {
+                if self.options.builtins && xpath_name(local) {
+                    ncname(local)?;
+                } else {
+                    check_literal(local)?;
+                }
+                return Ok(NodeTest::LocalName(local.into()));
+            }
+        }
+        let mut names = name.prefix.iter().flatten().chain([&name.local]);
+        if let Some(invalid) = names.find(|n| *n != "*" && !xpath_name(n)) {
+            return Err(SyntaxError(format!("Invalid element name '{invalid}'")).into());
+        }
         let test = match (&name.prefix, name.local.as_str()) {
             (None, "*") => NodeTest::Any,
-            // HTML5 has namespaces that CSS queries ignore
-            (None, local) if self.options.html => NodeTest::LocalName(ncname(local)?.into()),
             (Some(prefix), local) => NodeTest::Name(QName {
                 prefix: prefix.as_deref().map(ncname).transpose()?.map(Into::into),
                 local: ncname(local)?.into(),
@@ -233,10 +244,9 @@ impl<'a> Translator<'a> {
 
     fn condition(&mut self, condition: &Condition) -> Result<Term> {
         Ok(Term::One(match condition {
-            // `visit_id`: /^#(.*)$/ stops at a newline
             Condition::Id(id) => {
-                let id = id[1..].split('\n').next().unwrap_or_default();
-                Expr::compare(Comparison::Equal, attribute("id"), literal(id, '\'')?)
+                let id = id.strip_prefix('#').unwrap_or(id);
+                Expr::compare(Comparison::Equal, attribute("id"), literal(id)?)
             }
             Condition::Class(name) => self.css_class(attribute("class"), name)?,
             Condition::Attribute { subject, test } => {
@@ -272,17 +282,14 @@ impl<'a> Translator<'a> {
         test: &Option<(AttributeOperator, String)>,
     ) -> Result<Term> {
         let subject = match subject {
-            AttributeSubject::Name(name) => Expr::Path(Path::relative(vec![Step::new(
-                Axis::Attribute,
-                NodeTest::Name(qname(name)?),
-            )])),
+            AttributeSubject::Name(name) => attribute_path(name)?,
             AttributeSubject::Function(function) => self.function(function)?.into_expr(),
         };
         let Some((operator, value)) = test else {
             return Ok(Term::One(subject));
         };
-        let value = AttributeValue::new(value)?;
-        let literal = || Expr::Literal(value.text.as_bytes().to_vec());
+        let value_literal = literal(value)?;
+        let literal = || value_literal.clone();
         let call = |function, argument: Expr| Expr::Call(function, vec![subject.clone(), argument]);
         Ok(Term::One(match operator {
             AttributeOperator::Equal => Expr::compare(Comparison::Equal, subject, literal()),
@@ -297,10 +304,7 @@ impl<'a> Translator<'a> {
                     call(F::StartsWith, dashed),
                 ));
             }
-            // The visitor strips the quotes off the literal it built and
-            // quotes the rest with `'`
-            AttributeOperator::Includes if value.concatenated => return Err(Failure::Invalid),
-            AttributeOperator::Includes => self.css_class(subject, &value.text)?,
+            AttributeOperator::Includes => self.css_class(subject, value)?,
         }))
     }
 
@@ -387,7 +391,10 @@ impl<'a> Translator<'a> {
             "last(" | "last-of-type(" => position_is(call(F::Last)),
             "contains(" => Expr::Call(
                 F::Contains,
-                vec![Expr::Path(Path::context_node()), token(argument)?],
+                vec![
+                    Expr::Path(Path::context_node()),
+                    function_argument(argument)?,
+                ],
             ),
             "gt(" => Expr::compare(Comparison::Greater, call(F::Position), token(argument)?),
             "only-child(" => Expr::compare(Comparison::Equal, call(F::Last), Expr::Number(1.0)),
@@ -443,14 +450,7 @@ impl<'a> Translator<'a> {
         }
         let mut expressions = vec![Expr::Path(Path::context_node())];
         for argument in arguments {
-            expressions.push(match argument {
-                // The visitor has no `visit_nth`
-                Argument::Nth(_) => {
-                    return Err(SyntaxError("undefined method 'visit_nth'".into()).into())
-                }
-                Argument::Attribute(name) => attribute_path(name)?,
-                argument => token(Some(argument))?,
-            });
+            expressions.push(function_argument(Some(argument))?);
         }
         ncname(name)?;
         let site = self.functions.len();
@@ -464,15 +464,11 @@ impl<'a> Translator<'a> {
     /// `css_class`: the builtin, or the plain XPath 1.0 the visitor writes
     /// without builtins.
     fn css_class(&self, haystack: Expr, needle: &str) -> Result<Expr> {
-        let needle = literal(needle, '\'')?;
         if self.options.builtins {
-            return Ok(Expr::Call(F::CssClass, vec![haystack, needle]));
+            return Ok(Expr::Call(F::CssClass, vec![haystack, literal(needle)?]));
         }
-        let Expr::Literal(needle) = needle else {
-            unreachable!("a literal")
-        };
         let space = || Expr::Literal(b" ".to_vec());
-        let padded = [&b" "[..], &needle, b" "].concat();
+        let padded = literal(&format!(" {needle} "))?;
         Ok(Expr::Call(
             F::Contains,
             vec![
@@ -484,7 +480,7 @@ impl<'a> Translator<'a> {
                         space(),
                     ],
                 ),
-                Expr::Literal(padded),
+                padded,
             ],
         ))
     }
@@ -563,7 +559,14 @@ fn nth(nth: &Nth, child: bool, last: bool) -> Result<Expr> {
             Expr::Number(0.0),
         )
     };
-    if b == 0 {
+    if a == 0 {
+        return Ok(Expr::compare(
+            Comparison::Equal,
+            position(),
+            Expr::Number(b as f64),
+        ));
+    }
+    if b == 0 && a > 0 {
         return Ok(modulo_is_zero(position(), a));
     }
     let comparison = if a < 0 {
@@ -583,7 +586,7 @@ fn read_a_and_positive_b(nth: &Nth) -> Result<(i128, i128)> {
     let a = ruby_to_i(&nth.a);
     match nth.operator.trim() {
         "+" => Ok((a, ruby_to_i(&nth.b))),
-        "-" if a == 0 => Err(SyntaxError("divided by 0".into()).into()),
+        "-" if a == 0 => Ok((a, ruby_to_i(&nth.b).saturating_neg())),
         "-" => Ok((a, a - ruby_modulo(ruby_to_i(&nth.b), a))),
         operator => Err(SyntaxError(format!(
             "expected an+b node to have either + or - as the operator, but is {operator:?}"
@@ -641,6 +644,17 @@ fn to_i(argument: Option<&Argument>) -> Result<i128> {
     }
 }
 
+/// `xpath_function_argument`, for `contains(…)` and custom pseudo-classes:
+/// a string's unescaped text as a literal, the rest as `token` pastes it.
+fn function_argument(argument: Option<&Argument>) -> Result<Expr> {
+    match argument {
+        Some(Argument::String(string)) => literal(&unescape_string(&string[1..string.len() - 1])),
+        // The visitor has no `visit_nth`
+        Some(Argument::Nth(_)) => Err(SyntaxError("undefined method 'visit_nth'".into()).into()),
+        argument => token(argument),
+    }
+}
+
 /// A function argument pasted into XPath as written.
 fn token(argument: Option<&Argument>) -> Result<Expr> {
     match argument {
@@ -650,7 +664,11 @@ fn token(argument: Option<&Argument>) -> Result<Expr> {
             .map_err(|_| Failure::Invalid),
         Some(Argument::String(string)) => {
             let quote = string.chars().next().expect("a quoted string");
-            literal(&string[1..string.len() - 1], quote)
+            let text = &string[1..string.len() - 1];
+            if text.contains(quote) {
+                return Err(Failure::Invalid);
+            }
+            literal(text)
         }
         // A name is a child path; a leading `-` negates it
         Some(Argument::Ident(ident)) => match ident.strip_prefix('-') {
@@ -674,11 +692,42 @@ fn child_path(name: &str) -> Result<Expr> {
     )])))
 }
 
-fn attribute_path(name: &str) -> Result<Expr> {
-    Ok(Expr::Path(Path::relative(vec![Step::new(
-        Axis::Attribute,
-        NodeTest::Name(qname(name)?),
-    )])))
+fn attribute_path(name: &AttributeName) -> Result<Expr> {
+    Ok(Expr::Path(Path::relative(vec![attribute_step(name)?])))
+}
+
+/// `visit_attrib_name`: `@name`, `@prefix:name`, or for a name XPath can't
+/// write, `@*[namespace-uri()='' and name()='…']`.
+fn attribute_step(name: &AttributeName) -> Result<Step> {
+    let local = name.local.as_str();
+    if let Some(prefix) = &name.prefix {
+        if !xpath_name(prefix) || !xpath_name(local) {
+            let message = format!("Invalid attribute name '{prefix}|{local}'");
+            return Err(SyntaxError(message).into());
+        }
+        let name = QName {
+            prefix: Some(ncname(prefix)?.into()),
+            local: ncname(local)?.into(),
+        };
+        return Ok(Step::new(Axis::Attribute, NodeTest::Name(name)));
+    }
+    if xpath_name(local) {
+        let name = QName {
+            prefix: None,
+            local: ncname(local)?.into(),
+        };
+        return Ok(Step::new(Axis::Attribute, NodeTest::Name(name)));
+    }
+    let mut step = Step::new(Axis::Attribute, NodeTest::Any);
+    step.predicates.push(Expr::And(vec![
+        Expr::compare(
+            Comparison::Equal,
+            call(F::NamespaceUri),
+            Expr::Literal(Vec::new()),
+        ),
+        Expr::compare(Comparison::Equal, call(F::Name), literal(local)?),
+    ]));
+    Ok(step)
 }
 
 /// `@name`, for names known to be valid.
@@ -719,41 +768,30 @@ fn children() -> Expr {
     Expr::Path(Path::relative(vec![Step::new(Axis::Child, NodeTest::Node)]))
 }
 
-/// `quote` + text + `quote` as an XPath literal, which can't hold its quote.
-fn literal(text: &str, quote: char) -> Result<Expr> {
-    if text.contains(quote) {
-        return Err(Failure::Invalid);
-    }
+/// `xpath_string_literal`: the text as an XPath string, through `concat()`
+/// when it holds both quotes. libxml2 rejects one with a character XML
+/// doesn't allow.
+fn literal(text: &str) -> Result<Expr> {
+    check_literal(text)?;
     Ok(Expr::Literal(text.as_bytes().to_vec()))
 }
 
-/// An attribute value as `visit_attribute_condition` quotes it.
-struct AttributeValue {
-    text: String,
-    /// Quoted with `concat(…)`, because the text holds its own quote.
-    concatenated: bool,
+fn check_literal(text: &str) -> Result<()> {
+    if text.chars().all(is_xml_char) {
+        Ok(())
+    } else {
+        Err(Failure::Invalid)
+    }
 }
 
-impl AttributeValue {
-    fn new(value: &str) -> Result<AttributeValue> {
-        // Unquoted values get `'…'`; a value whose first and last
-        // characters are the same quote is taken as quoted. A lone quote
-        // (`[x=\"]`) passes that test, and opens a literal it never closes.
-        let first = value.chars().next();
-        let (text, quote) = match first {
-            Some(quote @ ('\'' | '"')) => {
-                if value.len() < 2 || !value.ends_with(quote) {
-                    return Err(Failure::Invalid);
-                }
-                (&value[1..value.len() - 1], quote)
-            }
-            _ => (value, '\''),
-        };
-        Ok(AttributeValue {
-            text: text.into(),
-            concatenated: text.contains(quote),
-        })
-    }
+/// The visitor's `XPATH_NAME`: an NCName as far as ASCII goes, leaving
+/// other characters to the XPath parser.
+fn xpath_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c == '_' || c.is_ascii_alphabetic() || !c.is_ascii())
+        && chars.all(|c| matches!(c, '_' | '.' | '-') || c.is_ascii_alphanumeric() || !c.is_ascii())
 }
 
 /// `prefix:local` or `local`, each part an NCName.

@@ -55,7 +55,7 @@ fuzz_target!(|data: &[u8]| {
             assert_eq!(document.parent(node), None);
             assert_eq!(document.previous_sibling(node), None);
             assert_eq!(document.next_sibling(node), None);
-            serialize(&document, node, false);
+            serialize(&document, node, false, false);
         }
         if let Err(violation) = document.check_invariants() {
             panic!("{violation}");

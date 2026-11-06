@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Adapted from Nokogiri 1.19.4, lib/nokogiri/html5/document_fragment.rb (MIT, see LICENSE-NOKOGIRI.md).
+# Adapted from Nokogiri 1.19.7, lib/nokogiri/html5/document_fragment.rb (MIT, see LICENSE-NOKOGIRI.md).
 
 require_relative "../html4/document_fragment"
 
@@ -57,8 +57,25 @@ module Lobzique
         options[:max_attributes] ||= Html5ever::DEFAULT_MAX_ATTRIBUTES
         options[:max_errors] ||= options.delete(:max_parse_errors) || Html5ever::DEFAULT_MAX_ERRORS
         options[:max_tree_depth] ||= Html5ever::DEFAULT_MAX_TREE_DEPTH
+        noscript_content_as_text = options[:parse_noscript_content_as_text] = noscript_parsing_mode(doc, options)
 
         Html5ever.fragment(self, input, context, **options)
+        if doc.is_a?(HTML5::Document) && doc.parse_noscript_content_as_text.nil? # lobzique: as below
+          doc.parse_noscript_content_as_text = noscript_content_as_text
+        end
+      end
+
+      private def noscript_parsing_mode(doc, options)
+        # lobzique: HTML4 documents reach here too, and serialize noscript
+        # content as markup
+        doc_mode = doc.is_a?(HTML5::Document) ? doc.parse_noscript_content_as_text : false
+        mode = options.fetch(:parse_noscript_content_as_text, doc_mode) ? true : false
+
+        if !doc_mode.nil? && mode != doc_mode
+          raise ArgumentError, "parse_noscript_content_as_text: #{mode} does not match the document's value #{doc_mode}"
+        end
+
+        mode
       end
 
       def serialize(options = {}, &block) # :nodoc:

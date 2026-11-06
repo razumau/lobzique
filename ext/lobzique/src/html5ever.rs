@@ -88,9 +88,14 @@ pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error
     let parsed = !document_object
         .ivar_get::<_, Value>("@quirks_mode")?
         .is_nil();
+    // Parsed as the serializer will write it, as for fragments
+    let noscript_as_text = document_object
+        .ivar_get::<_, Value>("@parse_noscript_content_as_text")?
+        .to_bool();
     let options = Options {
         // libxml2 keeps at most 100 errors a parse
         max_errors: Some(100),
+        parse_noscript_content_as_text: noscript_as_text,
         ..default_options(ruby)?
     };
 

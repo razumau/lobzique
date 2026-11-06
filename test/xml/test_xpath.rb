@@ -316,6 +316,12 @@ module XPathContract
     assert_raises(TypeError) { context.evaluate(1) }
     assert_raises(ArgumentError) { context.evaluate("//p\0") }
   end
+
+  def test_contexts_take_only_nodes
+    assert_raises(TypeError) { root::XML::XPathContext.new("p") }
+    context = root::XML::XPathContext.new(page)
+    assert_raises(TypeError) { context.node = nil }
+  end
 end
 
 class TestXPathNokogiri < Minitest::Test

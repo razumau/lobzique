@@ -14,13 +14,19 @@ const RAW_TEXT_ELEMENTS: &[&str] = &[
     "noembed",
     "noframes",
     "plaintext",
-    "noscript",
 ];
 
 /// The node's HTML. With `preserve_newline`, a newline that starts a `pre`,
 /// `textarea` or `listing` is written twice, so that parsing the output
-/// keeps it. Walks the tree without recursion, so depth costs no stack.
-pub fn serialize(document: &Document, id: NodeId, preserve_newline: bool) -> Vec<u8> {
+/// keeps it. `scripting_enabled` writes `noscript` text as is, as for a
+/// document parsed with `parse_noscript_content_as_text`. Walks the tree
+/// without recursion, so depth costs no stack.
+pub fn serialize(
+    document: &Document,
+    id: NodeId,
+    preserve_newline: bool,
+    scripting_enabled: bool,
+) -> Vec<u8> {
     enum Step {
         Open(NodeId),
         Close(NodeId),
@@ -68,7 +74,8 @@ pub fn serialize(document: &Document, id: NodeId, preserve_newline: bool) -> Vec
             NodeKind::Text(text) => {
                 let raw = document.parent(id).is_some_and(|parent| {
                     matches!(document.node_kind(parent), NodeKind::Element(e)
-                        if is_html(&e.name) && RAW_TEXT_ELEMENTS.contains(&&*e.name.local))
+                        if is_html(&e.name) && (RAW_TEXT_ELEMENTS.contains(&&*e.name.local)
+                            || scripting_enabled && &*e.name.local == "noscript"))
                 });
                 if raw {
                     out.extend_from_slice(c_string(text));
@@ -154,8 +161,8 @@ fn write_escaped(out: &mut Vec<u8>, text: &[u8], attribute: bool) {
             b'&' => (b"&amp;", 1),
             0xC2 if text.get(index + 1) == Some(&0xA0) => (b"&nbsp;", 2),
             b'"' if attribute => (b"&quot;", 1),
-            b'<' if !attribute => (b"&lt;", 1),
-            b'>' if !attribute => (b"&gt;", 1),
+            b'<' => (b"&lt;", 1),
+            b'>' => (b"&gt;", 1),
             _ => {
                 index += 1;
                 continue;

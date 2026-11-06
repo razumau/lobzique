@@ -54,8 +54,7 @@ module LoofahSuite
   LEFT_OUT = {
     # Upstream and copy: these fail on Loofah too.
     upstream: {
-      /scrubbing shortcuts/ => "Loofah's shortcuts, tested with Minitest 5's MiniTest::Mock",
-      /double_breakpoint#test_0002_/ => "the fixture is ahead of Loofah 2.25.2, which has the bug it tests"
+      /scrubbing shortcuts/ => "Loofah's shortcuts, tested with Minitest 5's MiniTest::Mock"
     },
     # The copy only: Loofah's document API rather than scrubbing (plan.md phase 3).
     lobzique: {

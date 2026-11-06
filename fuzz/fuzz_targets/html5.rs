@@ -59,7 +59,7 @@ fuzz_target!(|data: &[u8]| {
     if let Err(violation) = document.check_invariants() {
         panic!("{violation}");
     }
-    serialize(&document, root, selector & 0x10 != 0);
+    serialize(&document, root, selector & 0x10 != 0, selector & 2 != 0);
     _ = xml::write(&document, root, None, b"  ", AS_XHTML | FORMAT);
     query(&document, root);
 });

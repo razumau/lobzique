@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Adapted from Nokogiri 1.19.4, lib/nokogiri/xml/parse_options.rb (MIT, see LICENSE-NOKOGIRI.md).
+# Adapted from Nokogiri 1.19.7, lib/nokogiri/xml/parse_options.rb (MIT, see LICENSE-NOKOGIRI.md).
 # libxml2's parser flags. The HTML5 parser ignores them, but `Node#parse`
 # and the fragment initializers take and pass them on, as in Nokogiri.
 

@@ -80,7 +80,7 @@ fn run(input: &[u8], flags: u8) -> Option<Run> {
         parse_fragment(&mut document, fragment, input, &context, &options).ok()?;
         (document, fragment)
     };
-    serialize(&document, root, flags & 8 != 0);
+    serialize(&document, root, flags & 8 != 0, flags & 2 != 0);
     _ = xml::write(&document, root, None, b"  ", AS_XHTML | FORMAT);
     let work = work::take();
     Some(Run {

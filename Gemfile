@@ -14,10 +14,9 @@ gem "standard"
 gem "nokogiri", "~> 1.19"
 
 # The sanitizer vendor (plan.md phase 3) runs on these; apps bring their own.
-# loofah 2.25.3 and rails-html-sanitizer 1.7.2 need Nokogiri >= 1.19.5, so
-# they move with the oracle above.
-gem "loofah", "2.25.2"
-gem "rails-html-sanitizer", "1.7.1"
+# They move with the oracle above.
+gem "loofah", "2.25.3"
+gem "rails-html-sanitizer", "1.7.2"
 gem "actionview"
 # The Action Text and rails-dom-testing seams (plan.md phase 4)
 gem "actiontext"

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Adapted from Nokogiri 1.19.4, lib/nokogiri/xml.rb (MIT, see LICENSE-NOKOGIRI.md).
+# Adapted from Nokogiri 1.19.7, lib/nokogiri/xml.rb (MIT, see LICENSE-NOKOGIRI.md).
 # XML parsing waits for plan.md decision 4; the XML classes are here because
 # the HTML ones inherit from them.
 

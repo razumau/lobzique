@@ -9,15 +9,12 @@
 //! adoption agency algorithm gives up after 8 misnested levels, so a
 //! formatting element reopened under deep misnesting moves down 8 levels
 //! a round, as gumbo's does: ROUNDS grows with the depth limit.
-//! <plaintext> and <noscript> never settle, by the standard's design:
-//! <plaintext>'s end tag is text, so each round adds one, and <noscript>
-//! content parsed with scripting off is markup but serialized as raw text,
-//! so each round decodes another level of character references. Nor does
-//! an SVG or MathML <pre>, <textarea> or <listing> that starts with a
-//! newline, by Nokogiri's: `preserve_newline` doubles that newline as for
-//! HTML ones, but the parser drops one only in HTML. Inputs that parse into
-//! any of these are skipped; a later round that creates one made markup out
-//! of text.
+//! <plaintext> never settles, by the standard's design: its end tag is
+//! text, so each round adds one. Nor does an SVG or MathML <pre>,
+//! <textarea> or <listing> that starts with a newline, by Nokogiri's:
+//! `preserve_newline` doubles that newline as for HTML ones, but the parser
+//! drops one only in HTML. Inputs that parse into any of these are skipped;
+//! a later round that creates one made markup out of text.
 
 use libfuzzer_sys::fuzz_target;
 use lobzique_core::dom::{Document, DocumentKind, NodeKind};
@@ -76,7 +73,7 @@ fn round_trip(input: &[u8]) -> Result<Vec<u8>, Skip> {
         .descendants(fragment)
         .any(|id| match document.node_kind(id) {
             NodeKind::Element(element) if &*element.name.ns == HTML => {
-                matches!(&*element.name.local, "plaintext" | "noscript")
+                &*element.name.local == "plaintext"
             }
             NodeKind::Element(_) => prepend_newline(&document, id),
             _ => false,
@@ -84,5 +81,5 @@ fn round_trip(input: &[u8]) -> Result<Vec<u8>, Skip> {
     if never_settles {
         return Err(Skip::NeverSettles);
     }
-    Ok(serialize(&document, fragment, true))
+    Ok(serialize(&document, fragment, true, false))
 }

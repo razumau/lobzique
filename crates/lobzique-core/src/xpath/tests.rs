@@ -418,6 +418,24 @@ fn following_an_attribute_starts_after_its_element() {
 }
 
 #[test]
+fn names_are_xml_fourth_edition_names() {
+    // Fifth-edition names allow U+FFFD and U+2070; libxml2's XPath doesn't
+    for (xpath, error) in [
+        ("//a\u{FFFD}", Error::InvalidExpression),
+        ("//p[@a\u{FFFD}]", Error::InvalidPredicate),
+        ("//\u{2070}", Error::InvalidExpression),
+    ] {
+        let result = parse_xpath(xpath.as_bytes()).map(|_| ());
+        assert_eq!(result, Err(ParseError::Syntax(error)), "{xpath:?}");
+    }
+    // a Thai letter, an extender, an ideograph with an Arabic-Indic digit,
+    // a combining character
+    for xpath in ["//\u{E01}", "//a\u{B7}", "//\u{4E00}\u{660}", "//a\u{300}"] {
+        assert!(parse_xpath(xpath.as_bytes()).is_ok(), "{xpath:?}");
+    }
+}
+
+#[test]
 fn syntax_errors_carry_libxml2_codes() {
     // each as Nokogiri 1.19.4 reports it
     for (xpath, error) in [

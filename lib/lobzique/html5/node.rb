@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Adapted from Nokogiri 1.19.4, lib/nokogiri/html5/node.rb (MIT, see LICENSE-NOKOGIRI.md).
+# Adapted from Nokogiri 1.19.7, lib/nokogiri/html5/node.rb (MIT, see LICENSE-NOKOGIRI.md).
 
 require_relative "../xml/node"
 
@@ -36,7 +36,10 @@ module Lobzique
         if config_options & (XML::Node::SaveOptions::AS_XML | XML::Node::SaveOptions::AS_XHTML) != 0
           native_write_to(io, encoding, indent_string, config_options)
         else
-          html = html_standard_serialize(options[:preserve_newline] || false)
+          # lobzique: HTML4 documents have no parse_noscript_content_as_text
+          # and parse noscript content as markup
+          scripting_enabled = document.is_a?(HTML5::Document) && document.parse_noscript_content_as_text
+          html = html_standard_serialize(options[:preserve_newline] || false, scripting_enabled)
           encoding ||= document.encoding || Encoding::UTF_8
           io << html.encode(encoding, fallback: lambda { |c| "&#x#{c.ord.to_s(16)};" })
         end

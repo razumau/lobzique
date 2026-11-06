@@ -55,12 +55,26 @@ end
 
 require "minitest/mock"
 
+# Nokogiri 1.19.5 reads CSS escapes in string arguments, and rails-dom-testing
+# 2.3.0 substitutes a Regexp's source unescaped, so `\d+` becomes `\r+`
+# (rails/rails-dom-testing#136). lobzique reads them as Nokogiri does.
+module RegexpSubstitution
+  BROKEN = %w[test_substitution_values test_multiple_substitution_values test_nested_css_select].freeze
+
+  def before_setup
+    super
+    skip "rails/rails-dom-testing#136" if BROKEN.include?(name)
+  end
+end
+
 # Upstream's helper defines DomTestingHelpers; its suites' own
 # `require "test_helper"` finds ours, which is already loaded.
 require File.join(RailsDomTestingHelper::FIXTURES, "test_helper")
 %w[dom_assertions_test selector_assertions_test parser_selection_test].each do
   require File.join(RailsDomTestingHelper::FIXTURES, _1)
 end
+
+AssertSelectTest.prepend(RegexpSubstitution)
 
 # It asserts Nokogiri::HTML5's classes for :html5
 Minitest::Runnable.runnables.delete(DomTestingParserSelectionTest)

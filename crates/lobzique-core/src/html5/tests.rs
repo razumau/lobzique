@@ -8,7 +8,7 @@ fn parse(input: &str) -> Document {
 }
 
 fn html(document: &Document, id: NodeId) -> String {
-    String::from_utf8(serialize(document, id, false)).unwrap()
+    String::from_utf8(serialize(document, id, false, false)).unwrap()
 }
 
 fn fragment(input: &str, context: &Context) -> (Document, NodeId) {
@@ -100,7 +100,7 @@ fn escaping_follows_nokogiri() {
     let body = find(&document, "body");
     assert_eq!(
         html(&document, body),
-        "<body><p title=\"&quot;&amp;<>&nbsp;\">&lt;&gt;&amp;\"&nbsp;</p><script>a<b</script></body>"
+        "<body><p title=\"&quot;&amp;&lt;&gt;&nbsp;\">&lt;&gt;&amp;\"&nbsp;</p><script>a<b</script></body>"
     );
 }
 
@@ -110,7 +110,7 @@ fn preserve_newline_doubles_a_leading_newline() {
     let pre = find(&document, "pre");
     assert!(prepend_newline(&document, pre));
     assert_eq!(html(&document, pre), "<pre>\nx</pre>");
-    assert_eq!(serialize(&document, pre, true), b"<pre>\n\nx</pre>");
+    assert_eq!(serialize(&document, pre, true, false), b"<pre>\n\nx</pre>");
 }
 
 #[test]
@@ -120,6 +120,25 @@ fn noscript_is_markup_unless_asked() {
         document.node_kind(document.first_child(find(&document, "noscript")).unwrap()),
         NodeKind::Element(_)
     ));
+}
+
+#[test]
+fn noscript_text_is_escaped_unless_scripting_is_enabled() {
+    let options = Options {
+        parse_noscript_content_as_text: true,
+        ..Options::default()
+    };
+    let input = b"<body><noscript><p>&lt;</p></noscript>";
+    let (document, _) = parse_document(input, &options).unwrap();
+    let noscript = find(&document, "noscript");
+    assert_eq!(
+        serialize(&document, noscript, false, true),
+        b"<noscript><p>&lt;</p></noscript>"
+    );
+    assert_eq!(
+        serialize(&document, noscript, false, false),
+        b"<noscript>&lt;p&gt;&amp;lt;&lt;/p&gt;</noscript>"
+    );
 }
 
 #[test]
@@ -347,7 +366,7 @@ fn deep_trees_cost_no_stack() {
     let parse_and_serialize = move || {
         let input = "<div>".repeat(depth);
         let (document, _) = parse_document(input.as_bytes(), &Options::default()).unwrap();
-        serialize(&document, NodeId::DOCUMENT, false).len()
+        serialize(&document, NodeId::DOCUMENT, false, false).len()
     };
     let small_stack = std::thread::Builder::new().stack_size(256 * 1024);
     let length = small_stack

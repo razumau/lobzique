@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Adapted from Nokogiri 1.19.4, lib/nokogiri/xml/node_set.rb and the native
+# Adapted from Nokogiri 1.19.7, lib/nokogiri/xml/node_set.rb and the native
 # methods of ext/nokogiri/xml_node_set.c (MIT, see LICENSE-NOKOGIRI.md).
 
 module Lobzique

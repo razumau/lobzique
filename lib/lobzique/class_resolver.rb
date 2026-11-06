@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# Adapted from Nokogiri 1.19.4, lib/nokogiri/class_resolver.rb (MIT, see LICENSE-NOKOGIRI.md).
+# Adapted from Nokogiri 1.19.7, lib/nokogiri/class_resolver.rb (MIT, see LICENSE-NOKOGIRI.md).
 
 module Lobzique
   # Finds the class with a given name in the namespace of the receiver's

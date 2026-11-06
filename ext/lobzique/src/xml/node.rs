@@ -335,10 +335,12 @@ impl Node {
         ruby: &Ruby,
         rb_self: &Self,
         preserve_newline: Value,
+        scripting_enabled: Value,
     ) -> Result<RString, Error> {
         let preserve_newline = preserve_newline.to_bool();
+        let scripting_enabled = scripting_enabled.to_bool();
         let html = rb_self.with_arena(ruby, |arena, id| {
-            html5::serialize(arena, id, preserve_newline)
+            html5::serialize(arena, id, preserve_newline, scripting_enabled)
         })?;
         Ok(utf8_string(ruby, html))
     }
@@ -881,7 +883,7 @@ pub fn init(ruby: &Ruby) -> Result<(), Error> {
     class.define_private_method("prepend_newline?", method!(Node::prepend_newline_p, 0))?;
     class.define_private_method(
         "html_standard_serialize",
-        method!(Node::html_standard_serialize, 1),
+        method!(Node::html_standard_serialize, 2),
     )?;
     Ok(())
 }

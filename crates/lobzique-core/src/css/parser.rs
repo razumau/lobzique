@@ -45,15 +45,22 @@ pub enum Simple {
         condition: Option<Condition>,
     },
     /// `@href`
-    Attribute(String),
+    Attribute(AttributeName),
 }
 
 #[derive(Debug)]
 pub struct ElementName {
     /// `None` for `name`, `Some(None)` for `|name`, `Some(Some(ns))` for
-    /// `ns|name`.
+    /// `ns|name`. Unescaped.
     pub prefix: Option<Option<String>>,
-    /// `*` for the universal selector.
+    /// `*` for the universal selector. Unescaped, so never `*` otherwise.
+    pub local: String,
+}
+
+/// `[name]`, `[ns|name]`, `[@name]`, unescaped. `[|name]` has no prefix.
+#[derive(Debug)]
+pub struct AttributeName {
+    pub prefix: Option<String>,
     pub local: String,
 }
 
@@ -61,6 +68,7 @@ pub struct ElementName {
 pub enum Condition {
     /// The `#id` token, unescaped, `#` included.
     Id(String),
+    /// Unescaped.
     Class(String),
     Attribute {
         subject: AttributeSubject,
@@ -72,8 +80,7 @@ pub enum Condition {
 
 #[derive(Debug)]
 pub enum AttributeSubject {
-    /// `[name]`, `[ns|name]` (as `ns:name`) and `[@name]`
-    Name(String),
+    Name(AttributeName),
     /// `[text()]` and the like
     Function(Function),
 }
@@ -113,13 +120,13 @@ pub struct Function {
 #[derive(Debug)]
 pub enum Argument {
     /// A token as written, escapes and quotes included: the visitor pastes
-    /// these into XPath.
+    /// these into XPath, or quotes a string's unescaped text.
     Number(String),
     String(String),
     Ident(String),
     Nth(Nth),
     /// `@name`
-    Attribute(String),
+    Attribute(AttributeName),
     /// The selectors of `has(…)`.
     Selector(Selector),
 }
@@ -143,7 +150,7 @@ enum Value<'a> {
     Chain(Simple, Vec<(Combinator, Simple)>),
     Simple(Simple),
     ElementName(ElementName),
-    AttributeName(String),
+    AttributeName(AttributeName),
     Function(Function),
     /// `hcap_1toN`, in reverse.
     Conditions(Vec<Condition>),
@@ -397,7 +404,10 @@ fn reduce(rule: usize, values: Vec<Value<'_>>) -> Result<Value<'_>, SyntaxError>
             next()
         }
         // xpath_attribute: xpath_attribute_name
-        10 => V::AttributeName(token(next()).into()),
+        10 => V::AttributeName(AttributeName {
+            prefix: None,
+            local: unescape_identifier(token(next())),
+        }),
         // simple_selector: element_name hcap_0toN
         11 => {
             let (V::ElementName(name), conditions) = (next(), next()) else {
@@ -469,7 +479,7 @@ fn reduce(rule: usize, values: Vec<Value<'_>>) -> Result<Value<'_>, SyntaxError>
         // class: '.' IDENT
         21 => {
             next();
-            V::Condition(Condition::Class(unescape_identifier(token(next()))?))
+            V::Condition(Condition::Class(unescape_identifier(token(next()))))
         }
         // element_name: namespaced_ident | '*'
         22 => next(),
@@ -480,15 +490,18 @@ fn reduce(rule: usize, values: Vec<Value<'_>>) -> Result<Value<'_>, SyntaxError>
         // namespaced_ident: namespace '|' IDENT
         24 => {
             let (namespace, _, local) = (next(), next(), next());
+            let prefix = optional_token(namespace)
+                .map(|prefix| unescape_element_name(&prefix))
+                .transpose()?;
             V::ElementName(ElementName {
-                prefix: Some(optional_token(namespace)),
-                local: token(local).into(),
+                prefix: Some(prefix),
+                local: unescape_element_name(token(local))?,
             })
         }
         // | IDENT
         25 => V::ElementName(ElementName {
             prefix: None,
-            local: token(next()).into(),
+            local: unescape_element_name(token(next()))?,
         }),
         // namespace: IDENT | (empty)
         26 => next(),
@@ -518,14 +531,16 @@ fn reduce(rule: usize, values: Vec<Value<'_>>) -> Result<Value<'_>, SyntaxError>
         // attrib_name: namespace '|' IDENT
         31 => {
             let (namespace, _, local) = (next(), next(), next());
-            let name = match optional_token(namespace) {
-                Some(namespace) => format!("{namespace}:{}", token(local)),
-                None => token(local).into(),
-            };
-            V::AttributeName(name)
+            V::AttributeName(AttributeName {
+                prefix: optional_token(namespace).map(|prefix| unescape_identifier(&prefix)),
+                local: unescape_identifier(token(local)),
+            })
         }
         // | IDENT
-        32 => V::AttributeName(token(next()).into()),
+        32 => V::AttributeName(AttributeName {
+            prefix: None,
+            local: unescape_identifier(token(next())),
+        }),
         // | xpath_attribute
         33 => next(),
         // function: FUNCTION RPAREN
@@ -637,15 +652,15 @@ fn reduce(rule: usize, values: Vec<Value<'_>>) -> Result<Value<'_>, SyntaxError>
             _ => unreachable!(),
         },
         // attribute_id: HASH
-        64 => V::Condition(Condition::Id(unescape_identifier(token(next()))?)),
+        64 => V::Condition(Condition::Id(unescape_identifier(token(next())))),
         // attrib_val_0or1: eql_incl_dash (IDENT | STRING | NUMBER) | (empty)
         65..=67 => {
             let (V::Operator(operator), value) = (next(), token(next())) else {
                 unreachable!()
             };
             let value = match rule {
-                65 => unescape_identifier(value)?,
-                66 => unescape_string(value)?,
+                65 => unescape_identifier(value),
+                66 => unescape_string(&value[1..value.len() - 1]),
                 _ => value.into(),
             };
             V::AttributeTest(operator, value)
@@ -738,20 +753,31 @@ fn ruby_strip(text: &str) -> &str {
 }
 
 /// Nokogiri's `unescape_css_identifier`.
-pub fn unescape_identifier(text: &str) -> Result<String, SyntaxError> {
+pub fn unescape_identifier(text: &str) -> String {
     unescape(text, false)
 }
 
-/// Nokogiri's `unescape_css_string`, which also drops escaped newlines.
-/// The quotes stay.
-pub fn unescape_string(text: &str) -> Result<String, SyntaxError> {
+/// Nokogiri's `unescape_css_string`, of a string without its quotes: an
+/// escaped newline is dropped.
+pub fn unescape_string(text: &str) -> String {
     unescape(text, true)
 }
 
-/// `gsub(/\\(?:([^0-9a-fA-F])|([0-9a-fA-F]{1,6})\s?)/)`: a code point from
-/// up to six hex digits and one optional whitespace character, or the
-/// escaped character itself.
-fn unescape(text: &str, in_string: bool) -> Result<String, SyntaxError> {
+/// `unescape_css_element_name`: a name that decodes to `*` would be the
+/// universal selector.
+fn unescape_element_name(text: &str) -> Result<String, SyntaxError> {
+    let name = unescape_identifier(text);
+    if name == "*" {
+        return Err(SyntaxError(format!("Invalid element name '{text}'")));
+    }
+    Ok(name)
+}
+
+/// `gsub(/\\(?:([^0-9a-fA-F])|([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?)/)`: a
+/// code point from up to six hex digits and one optional whitespace, or
+/// the escaped character itself. In strings an escaped `\r\n`, `\n`, `\r`
+/// or `\f` is dropped.
+fn unescape(text: &str, in_string: bool) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(backslash) = rest.find('\\') {
@@ -769,29 +795,29 @@ fn unescape(text: &str, in_string: bool) -> Result<String, SyntaxError> {
                 .take_while(u8::is_ascii_hexdigit)
                 .count();
             let code = u32::from_str_radix(&after[..digits], 16).expect("hex digits");
-            // Ruby's pack('U') makes invalid UTF-8 for surrogates and past
-            // U+10FFFF, which Nokogiri fails on later, as it fails on NUL
-            let Some(c) = char::from_u32(code).filter(|&c| c != '\0') else {
-                return Err(SyntaxError(format!(
-                    "escape '\\{}' isn't a character",
-                    &after[..digits]
-                )));
-            };
+            // https://www.w3.org/TR/css-syntax-3/#consume-escaped-code-point
+            let c = char::from_u32(code)
+                .filter(|&c| c != '\0')
+                .unwrap_or('\u{FFFD}');
             out.push(c);
             let tail = &after[digits..];
-            let space = tail
-                .chars()
-                .next()
-                .filter(|&c| matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r'))
-                .map_or(0, char::len_utf8);
+            let space = if tail.starts_with("\r\n") {
+                2
+            } else if tail.starts_with([' ', '\t', '\n', '\r', '\x0c']) {
+                1
+            } else {
+                0
+            };
             rest = &tail[space..];
+        } else if in_string && after.starts_with("\r\n") {
+            rest = &after[2..];
         } else {
-            if !(in_string && c == '\n') {
+            if !(in_string && matches!(c, '\n' | '\r' | '\x0c')) {
                 out.push(c);
             }
             rest = &after[c.len_utf8()..];
         }
     }
     out.push_str(rest);
-    Ok(out)
+    out
 }

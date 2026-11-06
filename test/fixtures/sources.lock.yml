@@ -16,11 +16,11 @@ sources:
   loofah:
     repo: flavorjones/loofah
     ref: HEAD
-    commit: 541c07b8b0562f16299b8dac70cc3a553e9a0cec
+    commit: a3b25f61c1299f068526f9f52e04004390e20e9e
   nokogiri:
     repo: sparklemotion/nokogiri
     ref: HEAD
-    commit: 2d0f04bd124e18648fdb967fea0c4d94ff82b5d0
+    commit: 2e0d329599569095e69d155e3902dce1038682b4
   rails:
     repo: rails/rails
     ref: HEAD
@@ -32,7 +32,7 @@ sources:
   rails-html-sanitizer:
     repo: rails/rails-html-sanitizer
     ref: HEAD
-    commit: 9206a0bfd82df900e0ee4cbed496e8268403ed81
+    commit: bac36ce7efc155383c6eb34326c0e79d6858a799
   wpt-parsing:
     repo: web-platform-tests/wpt
     ref: HEAD

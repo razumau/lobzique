@@ -203,10 +203,6 @@ html5lib tokenizer inputs.
      because Campfire's SSRF guard resolves hosts before WebMock stubs the
      request.
 
-   Open:
-   - loofah 2.25.3 and rails-html-sanitizer 1.7.2 wait until the oracle
-     moves to Nokogiri 1.19.5 (`Gemfile`).
-
    Later:
    - a Rust scrubber for calls without an app scrubber (`PermitScrubber`
      with the default or given lists, `TextOnlyScrubber`,
@@ -234,7 +230,11 @@ html5lib tokenizer inputs.
      `:html5` on Nokogiri::HTML5 and on lobzique. With `:html5`, two tests
      fail on both roots: they expect libxml2's tree, which keeps the
      newline after `<pre>` and `<textarea>`. On lobzique, the invalid-selector
-     tests get `Lobzique::CSS::SyntaxError`.
+     tests get `Lobzique::CSS::SyntaxError`. Three tests that substitute a
+     Regexp into `:match` fail on every root, `:html4` included: Nokogiri
+     1.19.5 reads CSS escapes in strings, and rails-dom-testing 2.3.0 passes
+     the Regexp's source unescaped, so `\d` becomes U+000D
+     (rails/rails-dom-testing#136).
    - **Rails' suites.** `mise run measure:rails` (`script/rails`) runs
      actiontext's, actionview's and actionpack's suites at the Rails tag of
      our Gemfile.lock, with our loofah, rails-html-sanitizer and
@@ -242,13 +242,13 @@ html5lib tokenizer inputs.
      sanitizer vendor, both seams, `:html5`). actionview and actionpack boot
      no app, so they default to `:html4` and `Rails::HTML4::Sanitizer`;
      they also run on Nokogiri with what `load_defaults` 7.1 sets (html5),
-     and lobzique is compared with that. On v8.1.4:
+     and lobzique is compared with that. On v8.1.4.1:
 
      | suite | runs | baseline | html5 | lobzique |
      |---|---|---|---|---|
      | actiontext | 118 | 1 error | – | 1 error |
-     | actionview | 3173 | 0 | 0 | 1 failure |
-     | actionpack | 4095 | 0 | 1 failure | 5 failures |
+     | actionview | 3205 | 0 | 0 | 1 failure |
+     | actionpack | 4138 | 0 | 1 failure | 5 failures |
 
      - actiontext: `JavascriptPackageTest` needs yarn, in both modes.
      - html5: `CollectionCacheTest` expects libxml2's tree, which wraps

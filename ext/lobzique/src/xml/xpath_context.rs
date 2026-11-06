@@ -3,11 +3,11 @@
 //! into, and XPath strings (plan.md decision 2).
 
 use super::document;
-use super::node::{utf8_string, Node};
+use super::node::{utf8_string, Node, NODE};
 use super::node_set::{self, NODE_SET};
 use super::syntax_error::{self, XmlError};
 use crate::css::selector::Selector;
-use crate::support::{apply, c_string, optional_arg, warn_deprecated};
+use crate::support::{apply, c_string, obj_class, optional_arg, warn_deprecated};
 use crate::XML;
 use lobzique_core::dom::NodeId;
 use lobzique_core::xpath::{self, Answer, Call, Outcome, ParseError, Query};
@@ -46,8 +46,8 @@ impl DataTypeFunctions for XPathContext {
 }
 
 /// `XPathContext.new(node)`
-fn new(node: Value) -> Result<XPathContext, Error> {
-    <&Node>::try_convert(node)?;
+fn new(ruby: &Ruby, node: Value) -> Result<XPathContext, Error> {
+    expect_node(ruby, node)?;
     Ok(XPathContext {
         node: Cell::new(node.into()),
         namespaces: RefCell::new(HashMap::new()),
@@ -55,9 +55,22 @@ fn new(node: Value) -> Result<XPathContext, Error> {
     })
 }
 
+fn expect_node(ruby: &Ruby, node: Value) -> Result<(), Error> {
+    let node_class = ruby.get_inner(&NODE);
+    if node.is_kind_of(node_class) {
+        return Ok(());
+    }
+    let message = format!(
+        "expected a {}, received {}",
+        node_class.inspect(),
+        obj_class(node).inspect()
+    );
+    Err(Error::new(ruby.exception_type_error(), message))
+}
+
 impl XPathContext {
-    fn set_node(rb_self: &Self, node: Value) -> Result<Value, Error> {
-        <&Node>::try_convert(node)?;
+    fn set_node(ruby: &Ruby, rb_self: &Self, node: Value) -> Result<Value, Error> {
+        expect_node(ruby, node)?;
         rb_self.node.set(node.into());
         Ok(node)
     }

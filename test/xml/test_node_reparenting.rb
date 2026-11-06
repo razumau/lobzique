@@ -385,7 +385,7 @@ module NodeReparentingContract
     div.set_attribute("a:b", "v")
     div["xml:lang"] = "de"
     div["ID"] = "upper"
-    assert_equal %(<div id="<&amp;&quot;>" data-x="5" a:b="v" xml:lang="de" ID="upper">), div.to_html[/\A<div.*?ID="upper">/]
+    assert_equal %(<div id="&lt;&amp;&quot;&gt;" data-x="5" a:b="v" xml:lang="de" ID="upper">), div.to_html[/\A<div.*?ID="upper">/]
     assert_same id, div.attribute("id"), "an existing attribute keeps its node"
     assert_equal "<&\">", id.value
     assert_equal "de", div.lang

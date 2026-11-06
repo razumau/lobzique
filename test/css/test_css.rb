@@ -221,7 +221,10 @@ module CSSContract
       <div id="wups" class="source hidden"></div><div class="source"></div>
       <input placeholder='placeholder with "quotes"' type="checkbox" value="1">
     HTML
-    assert_equal ["1"], doc.css("div:match('id', \"\\d+\")", handler).map { |d| d["id"] }
+    # Nokogiri 1.19.5 reads CSS escapes in strings, so rails-dom-testing
+    # 2.3.0's unescaped Regexp source becomes \r+ (rails/rails-dom-testing#136)
+    assert_empty doc.css("div:match('id', \"\\d+\")", handler)
+    assert_equal ["1"], doc.css("div:match('id', \"\\\\d+\")", handler).map { |d| d["id"] }
     assert_equal ["wups"], doc.css(":match('id', \"wups\")", handler).map { |d| d["id"] }
     assert_equal ["edit-icon"], doc.css("code a:first").map { |a| a["class"] }
     assert_equal ["source"], doc.css("div.source:not(.hidden)").map { |d| d["class"] }

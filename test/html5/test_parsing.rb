@@ -88,6 +88,37 @@ module ParsingContract
     assert_predicate noscript.children[0], :text?
   end
 
+  # Nokogiri 1.19.5 escapes noscript text unless the document parses
+  # noscript content as text, and fragments parse it as their document does
+  def test_noscript_text_is_escaped_unless_parsed_as_text
+    escaped = "<noscript>&lt;/noscript&gt;&lt;img src=x&gt;</noscript>"
+    literal = "<noscript><p>&lt;/noscript&gt;</p></noscript>"
+    assert_equal escaped, root::HTML5.fragment(escaped).to_html
+    assert_equal escaped, body(root::HTML5("<body>#{escaped}")).children[0].to_html
+    assert_equal literal, root::HTML5.fragment(literal, parse_noscript_content_as_text: true).to_html
+    as_text = root::HTML5("<body>#{literal}", parse_noscript_content_as_text: true)
+    assert_equal literal, body(as_text).children[0].to_html
+    created = root::HTML5::DocumentFragment.new(root::HTML5::Document.new, literal, parse_noscript_content_as_text: true)
+    assert_equal literal, created.to_html
+
+    doc = root::HTML5("<body>", parse_noscript_content_as_text: true)
+    assert_equal escaped, doc.fragment(escaped).to_html
+    assert_raises(ArgumentError) do
+      root::HTML5::DocumentFragment.new(doc, escaped, parse_noscript_content_as_text: false)
+    end
+
+    fresh = root::HTML5::Document.new
+    assert_raises(ArgumentError) do
+      root::HTML5::DocumentFragment.new(fresh, escaped, parse_noscript_content_as_text: true, max_tree_depth: 0)
+    end
+    assert_equal escaped, root::HTML5::DocumentFragment.new(fresh, escaped, parse_noscript_content_as_text: false).to_html
+  end
+
+  def test_angle_brackets_in_attribute_values_are_escaped
+    assert_equal %(<a href="javascript:&quot;&lt;&gt;&quot;"></a>),
+      root::HTML5.fragment(%(<a href='javascript:"<>"'></a>)).to_html
+  end
+
   def test_limits
     assert_equal "Document tree depth limit exceeded",
       assert_raises(ArgumentError) { root::HTML5("<div>" * 399) }.message
@@ -120,6 +151,18 @@ module ParsingContract
     assert_equal ["path", "svg"], [path.name, path.namespace.prefix]
     assert_equal "Invalid context namespace 'foo:bar'",
       assert_raises(ArgumentError) { root::HTML5.fragment("x", context: "foo:bar") }.message
+  end
+
+  def test_fragment_context_ancestor_with_non_string_name_raises_type_error
+    ancestor = Struct.new(:name, :parent) { def element? = true }.new(12345, nil)
+    context = Struct.new(:parent) {
+      def element? = false
+      def name = "div"
+      def namespace = nil
+    }.new(ancestor)
+    assert_raises(TypeError) do
+      root::HTML5::DocumentFragment.new(root::HTML5::Document.new, "<p>hi</p>", context: context)
+    end
   end
 
   def test_fragment_from_node_drops_nested_forms
@@ -225,6 +268,26 @@ class TestParsingLobzique < Minitest::Test
   include ParsingContract
 
   def root = Lobzique
+
+  # A departure: Node#parse parses noscript content as its document did,
+  # where Nokogiri uses libxml2's parser (ARCHITECTURE.md)
+  def test_node_parse_follows_the_documents_noscript_mode
+    escaped = "<noscript>&lt;/noscript&gt;&lt;img src=x&gt;</noscript>"
+    doc = Lobzique::HTML5("<body>", parse_noscript_content_as_text: true)
+    assert_equal escaped, body(doc).parse(escaped).to_html
+    assert_equal escaped, body(Lobzique::HTML5("<body>")).parse(escaped).to_html
+  end
+
+  # HTML4 documents parse and serialize noscript content as markup
+  # (ARCHITECTURE.md, "HTML4 names")
+  def test_html4_documents_keep_noscript_content_as_markup
+    escaped = "<noscript>&lt;/noscript&gt;&lt;img src=x&gt;</noscript>"
+    doc = Lobzique::HTML4::Document.new
+    assert_equal escaped, Lobzique::HTML5::DocumentFragment.new(doc, escaped).to_html
+    assert_raises(ArgumentError) do
+      Lobzique::HTML5::DocumentFragment.new(doc, escaped, parse_noscript_content_as_text: true)
+    end
+  end
 
   # A departure: html5ever's messages, not gumbo's (ARCHITECTURE.md)
   def test_error_messages_are_html5evers
