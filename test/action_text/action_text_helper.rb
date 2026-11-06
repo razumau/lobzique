@@ -12,7 +12,8 @@ require "global_id"
 require "action_view"
 require "rails-html-sanitizer"
 require "action_text"
-require File.join(Gem.loaded_specs.fetch("actiontext").full_gem_path, "app/helpers/action_text/content_helper")
+# By load path: rake test:stress runs without Bundler, so no gem spec is loaded
+require File.expand_path("../../app/helpers/action_text/content_helper", $LOAD_PATH.resolve_feature_path("action_text").last)
 require "lobzique/sanitizer"
 require "lobzique/action_text"
 
