@@ -1,12 +1,17 @@
 #![no_main]
 
-//! Parsing and serializing must cost about the same per copy of the input
-//! however many copies there are. `-timeout` catches only catastrophic
-//! slowness: a quadratic path that takes 2s on 64 KB passes it. So the
-//! input is repeated K, 2K and 4K times and the core counts the work each
-//! run does (`lobzique_core::work`); going from 2K to 4K copies may cost at
-//! most RATIO times what going from K to 2K did, where linear work costs 2
-//! and quadratic 4.
+//! Parsing and serializing must cost about the same per byte of input and
+//! output however many copies of the input there are. `-timeout` catches
+//! only catastrophic slowness: a quadratic path that takes 2s on 64 KB
+//! passes it. So the input is repeated K, 2K and 4K times and the core
+//! counts the work each run does (`lobzique_core::work`); per byte added
+//! from 2K to 4K copies, the work may be at most RATIO times what it was
+//! from K to 2K, where linear work keeps it at 1 and quadratic doubles it.
+//!
+//! The output need not grow with the copies at a steady rate: each copy
+//! can reopen more of the formatting elements earlier copies left active,
+//! with their attributes, until the Noah's Ark clause caps the list, so a
+//! copy's output grows over the first copies. Hence bytes, not copies.
 //!
 //! Elements a copy leaves open nest the next copy inside them, and each
 //! insertion walks up the tree to check the depth limit, as html5ever walks
@@ -24,13 +29,16 @@ use lobzique_core::xml::{self, save_options::*};
 
 const K: usize = 4;
 const MAX_UNIT: usize = 512;
-const RATIO: u64 = 3;
+/// 3/2, as a numerator and denominator.
+const RATIO: (u128, u128) = (3, 2);
 /// For the parser's state settling over the first copies.
 const SLACK: u64 = 256;
 
 struct Run {
     work: u64,
     depth: u64,
+    /// Bytes of input and of serialized HTML.
+    size: u64,
 }
 
 fuzz_target!(|data: &[u8]| {
@@ -44,13 +52,21 @@ fuzz_target!(|data: &[u8]| {
     let [Some(a), Some(b), Some(c)] = runs else {
         return;
     };
-    let first = b.work.saturating_sub(a.work);
-    let second = c.work.saturating_sub(b.work);
-    // second / first <= RATIO * (c.depth + 1) / (b.depth + 1), without division
-    let allowed = (RATIO * first + SLACK) * (c.depth.max(b.depth) + 1);
+    let delta = |from: &Run, to: &Run, field: fn(&Run) -> u64| {
+        u128::from(field(to).saturating_sub(field(from)))
+    };
+    let size = |from: &Run, to: &Run| delta(from, to, |r| r.size).max(1);
+    let (first, first_size) = (delta(&a, &b, |r| r.work), size(&a, &b));
+    let (second, second_size) = (delta(&b, &c, |r| r.work), size(&b, &c));
+    let (numerator, denominator) = RATIO;
+    // second / second_size <= RATIO * first / first_size * (c.depth + 1) / (b.depth + 1),
+    // without division
+    let allowed = (numerator * first + denominator * u128::from(SLACK))
+        * second_size
+        * u128::from(c.depth.max(b.depth) + 1);
     assert!(
-        second * (b.depth + 1) <= allowed,
-        "work for {K}, {} and {} copies: {}, {}, {} (depths {}, {}, {})",
+        denominator * second * first_size * u128::from(b.depth + 1) <= allowed,
+        "work for {K}, {} and {} copies: {}, {}, {} (depths {}, {}, {}; sizes {}, {}, {})",
         2 * K,
         4 * K,
         a.work,
@@ -59,6 +75,9 @@ fuzz_target!(|data: &[u8]| {
         a.depth,
         b.depth,
         c.depth,
+        a.size,
+        b.size,
+        c.size,
     );
 });
 
@@ -80,12 +99,13 @@ fn run(input: &[u8], flags: u8) -> Option<Run> {
         parse_fragment(&mut document, fragment, input, &context, &options).ok()?;
         (document, fragment)
     };
-    serialize(&document, root, flags & 8 != 0, flags & 2 != 0);
+    let html = serialize(&document, root, flags & 8 != 0, flags & 2 != 0);
     _ = xml::write(&document, root, None, b"  ", AS_XHTML | FORMAT);
     let work = work::take();
     Some(Run {
         work,
         depth: depth(&document, root),
+        size: (input.len() + html.len()) as u64,
     })
 }
 
