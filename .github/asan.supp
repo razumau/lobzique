@@ -1,0 +1,4 @@
+# Nokogiri 1.19.5–1.19.7's gumbo stores attribute names in its hashmap by value
+# instead of by pointer, so an element with 16+ attributes reads 8 bytes from
+# each name. Fixed on Nokogiri's main (a17dec46), not in a 1.19.x release yet
+interceptor_via_fun:hashmap_*
