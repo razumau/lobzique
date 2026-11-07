@@ -13,11 +13,14 @@
 //! text, so each round adds one. Nor does an SVG or MathML <pre>,
 //! <textarea> or <listing> that starts with a newline, by Nokogiri's:
 //! `preserve_newline` doubles that newline as for HTML ones, but the parser
-//! drops one only in HTML. Inputs that parse into any of these are skipped;
-//! a later round that creates one made markup out of text.
+//! drops one only in HTML. Nor does a <script> whose text leaves the
+//! tokenizer double-escaped (`<!--<script`), by the standard's: the
+//! serialized `</script>` is text, so each round adds one. Inputs that parse
+//! into any of these are skipped; a later round that creates one made markup
+//! out of text.
 
 use libfuzzer_sys::fuzz_target;
-use lobzique_core::dom::{Document, DocumentKind, NodeKind};
+use lobzique_core::dom::{Document, DocumentKind, NodeId, NodeKind};
 use lobzique_core::html5::{
     parse_fragment, prepend_newline, serialize, Context, ContextNamespace, Options,
 };
@@ -58,6 +61,25 @@ fuzz_target!(|input: &[u8]| {
 /// The fragment's serialization, with the newline after <pre>, <textarea>
 /// and <listing> that the parser drops written back (`preserve_newline`).
 fn round_trip(input: &[u8]) -> Result<Vec<u8>, Skip> {
+    let (document, fragment) = parse(input).ok_or(Skip::ParseLimit)?;
+    let never_settles = document
+        .descendants(fragment)
+        .any(|id| match document.node_kind(id) {
+            NodeKind::Element(element) if &*element.name.ns == HTML => match &*element.name.local {
+                "plaintext" => true,
+                "script" => !closes(&document.content(id).unwrap_or_default()),
+                _ => false,
+            },
+            NodeKind::Element(_) => prepend_newline(&document, id),
+            _ => false,
+        });
+    if never_settles {
+        return Err(Skip::NeverSettles);
+    }
+    Ok(serialize(&document, fragment, true, false))
+}
+
+fn parse(input: &[u8]) -> Option<(Document, NodeId)> {
     let options = Options {
         max_attributes: Some(400),
         max_errors: Some(0),
@@ -67,19 +89,19 @@ fn round_trip(input: &[u8]) -> Result<Vec<u8>, Skip> {
     let context = Context::new(ContextNamespace::Html, "body");
     let mut document = Document::new(DocumentKind::Html);
     let fragment = document.create_fragment();
-    parse_fragment(&mut document, fragment, input, &context, &options)
-        .map_err(|_| Skip::ParseLimit)?;
-    let never_settles = document
-        .descendants(fragment)
-        .any(|id| match document.node_kind(id) {
-            NodeKind::Element(element) if &*element.name.ns == HTML => {
-                &*element.name.local == "plaintext"
-            }
-            NodeKind::Element(_) => prepend_newline(&document, id),
-            _ => false,
-        });
-    if never_settles {
-        return Err(Skip::NeverSettles);
-    }
-    Ok(serialize(&document, fragment, true, false))
+    parse_fragment(&mut document, fragment, input, &context, &options).ok()?;
+    Some((document, fragment))
+}
+
+/// Whether the `</script>` the serializer writes after this script text
+/// ends the script.
+fn closes(script_text: &[u8]) -> bool {
+    let html = [&b"<script>"[..], script_text, b"</script>"].concat();
+    parse(&html).is_some_and(|(document, fragment)| {
+        document
+            .children(fragment)
+            .next()
+            .and_then(|script| document.content(script))
+            .is_some_and(|text| text == script_text)
+    })
 }
