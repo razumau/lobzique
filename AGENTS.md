@@ -17,6 +17,7 @@ mise run test             # compile + Minitest
 N=test_name mise run test # tests matching a name, in every file (Minitest 6 ignores TEST=)
 bundle exec ruby -Ilib:test test/html5/test_parsing.rb -n test_name   # one file, after mise run compile
 mise run test:rust        # core crate tests; one test: cargo test -p lobzique-core <name>
+mise run deny             # cargo-deny: advisories, licenses, sources (deny.toml)
 mise run lint             # standard and clippy (lint:fix autofixes standard)
 mise run test:gc-stress   # dev build with rb-sys gc-stress + GC.stress per test
 mise run miri             # nightly

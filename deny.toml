@@ -1,0 +1,26 @@
+# cargo-deny for the main workspace (`mise run deny`). The fuzz workspace
+# isn't shipped, so it isn't checked.
+
+[graph]
+all-features = true
+
+[advisories]
+# Vulnerable, unmaintained and unsound crates fail by default; an exception
+# goes in `ignore` with the reason.
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Compatible with the gem's MIT license
+allow = ["MIT", "Apache-2.0", "BSD-3-Clause", "ISC", "Unicode-3.0"]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "deny"
+wildcards = "deny"
+# The workspace's own path dependencies
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

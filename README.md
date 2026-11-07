@@ -85,7 +85,7 @@ private methods. Limits:
 
 Library code goes in `crates/lobzique-core`, which must not depend on Ruby, so the checks below can run it without a Ruby VM. `ext/lobzique` holds only the Ruby bindings.
 
-The CI workflow runs these checks on every PR and daily. Locally they need nightly Rust (`rustup toolchain install nightly --component miri,rust-src`) and `cargo install cargo-fuzz`.
+The CI workflow runs these checks on every PR and daily. Locally they need nightly Rust (`rustup toolchain install nightly --component miri,rust-src`) `cargo install cargo-fuzz` and `cargo install cargo-deny`.
 
 | Check | Locally | Catches |
 | --- | --- | --- |
@@ -94,6 +94,7 @@ The CI workflow runs these checks on every PR and daily. Locally they need night
 | ASan (Ruby) | CI only: ASan builds of Ruby exist for Linux x64 only | memory errors in the extension and at the Ruby boundary |
 | GC.stress | `bundle exec rake test:gc_stress` | Ruby objects that Rust holds without the GC knowing |
 | Fuzzing | `cargo +nightly fuzz run <target>` | panics and failed assertions on arbitrary input |
+| cargo-deny | `cargo deny check` | dependencies with RustSec advisories (vulnerable, unmaintained, unsound or yanked), disallowed licenses, duplicate versions, crates from outside crates.io |
 | Fuzzing the Ruby API | `bundle exec rake fuzz:ruby` (Linux, see below) | memory errors in the extension, GC and compaction mistakes, and errors Nokogiri doesn't raise, on fuzzed sequences of Ruby calls |
 
 `rake test:gc_stress` and `rake fuzz:ruby` leave a special build in `lib/`; `rake compile` replaces it. `rake test:stress` runs GC.stress on whatever build is in `lib/` (the ASan job's, for one), each test file in its own process, `STRESS_JOBS` at a time.

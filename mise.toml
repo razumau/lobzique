@@ -82,6 +82,10 @@ run = "ruby script/rails/run.rb {{usage.suites | default(value=[]) | join(sep=' 
 description = "Download the pinned Common Crawl sample into tmp/crawl/"
 run = "script/fetch_crawl"
 
+[tasks.deny]
+description = "Check dependencies for RustSec advisories, licenses and sources (deny.toml; needs cargo-deny)"
+run = "cargo deny check"
+
 [tasks.lint]
 description = "Lint the Ruby code with standard and the Rust code with clippy"
 run = ["bundle exec rake standard", "cargo clippy --workspace --all-targets -- -D warnings"]

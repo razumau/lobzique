@@ -71,7 +71,8 @@ fuzzing (see README). To add once there is real code, roughly by value:
    values from the document into theirs.
 3. **`cargo-deny`**: RustSec advisories, licenses, allowed sources.
    html5ever pulls in `tendril`, which is heavy on `unsafe` and has had
-   advisories.
+   advisories. Done: `deny.toml`, run by the cargo-deny workflow on every
+   push and daily, since an advisory can appear without one.
 4. **`#![forbid(unsafe_code)]` in `lobzique-core`**, keeping `unsafe` in the
    bindings. An index-based arena DOM doesn't need it; Miri then mostly
    checks dependencies. Done.
