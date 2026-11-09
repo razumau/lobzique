@@ -46,9 +46,7 @@ module Lobzique
       end
 
       def fragment(tags)
-        # lobzique: Nokogiri checks for HTML5::Document; HTML4 documents use
-        # the HTML5 parser too (plan.md decision 3)
-        return super unless document.is_a?(HTML4::Document)
+        return super unless document.is_a?(HTML5::Document)
 
         DocumentFragment.new(document, tags, self)
       end

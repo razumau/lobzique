@@ -17,6 +17,10 @@ module Lobzique
       attr_accessor :errors
       attr_accessor :namespace_inheritance
 
+      # lobzique: native in Nokogiri (libxml2's URL). The HTML parsers keep
+      # it in @url, as Nokogiri's HTML5 parser does.
+      attr_reader :url
+
       # Every way of making a document runs this, parsing included, so
       # subclasses (Loofah's) can extend it with `super`.
       def initialize(*args) # rubocop:disable Lint/MissingSuper

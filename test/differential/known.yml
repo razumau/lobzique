@@ -4,7 +4,7 @@
 #
 #   - match: regexp against the case id (e.g. \Awpt-parsing/tree-construction/tests1\.dat#12\z)
 #     reason: why lobzique differs and why that is acceptable
-#     mode: sanitize, for script/differential --mode sanitize (default: parse)
+#     mode: the script/differential --mode it is for: sanitize, action_text or html4 (default: parse)
 - match: \Awpt-parsing/tree-construction/(menuitem-element\.dat#14|tests1\.dat#(30|100)|tests10\.dat#(4|5|17|18)|tests18\.dat#(14|15)|tests7\.dat#34|tests9\.dat#(5|6|18|19)|tests_innerHTML_1\.dat#(77|78)|webkit02\.dat#(19|36|38|39|40|41|42|43))\z
   reason: >-
     html5ever implements the 2025 customizable <select> parsing, which keeps
@@ -51,3 +51,41 @@
   match: \Acrawl/CC-MAIN-20261005105623-20261005135623-00000\.warc\.gz@21360212\z
   reason: >-
     gumbo keeps a CR that follows "&" in an attribute value (above).
+- mode: html4
+  match: \Ahtml5lib-tests/tokenizer/(test3\.test#(400|453|475|497|543|592|614|636|671|676|805|854|876|898|942|989|1011|1033|1068|1073|1113|1304|1412|1508|1513|1551|1571)|test4\.test#(60|61|62))\z
+  reason: >-
+    The only non-ASCII bytes are inside a doctype, a tag or a "<!", which
+    libxml2 reads a byte at a time without its encoding guess, and the input
+    ends there, so libxml2 never guesses ISO-8859-1. In real documents the
+    guess comes at the first non-ASCII text.
+- mode: html4
+  match: \A(wpt-parsing/tree-construction/processing-instructions\.dat#(75|80|81|82|97)|html5lib-tests/tokenizer/test3\.test#(1152|1207))\z
+  reason: >-
+    Markup the parsers read differently, not the decoding: libxml2 keeps a
+    malformed "<?" or "</" as text, where the HTML5 parser makes a comment.
+- mode: html4
+  match: \Acrawl/CC-MAIN-(20261005105623-20261005135623-00000\.warc\.gz@(2958049|15285101|15487349|41087564)|20261009160033-20261009190033-00333\.warc\.gz@(6665270|8577335|22608327|22915978|23967003|27148054|29550467)|20261013211541-20261014001541-00666\.warc\.gz@(11335497|11341311|15519250|16317507|16999152|17151253|18570536))\z
+  reason: >-
+    Bytes invalid in the declared encoding. libxml2 stops parsing at the
+    first one in an iconv encoding and keeps them raw in UTF-8; lobzique
+    reads them as U+FFFD and goes on. Open: docs/html4-invalid-bytes.md.
+- mode: html4
+  match: \Acrawl/CC-MAIN-(20261005105623-20261005135623-00000\.warc\.gz@30691169|20261009160033-20261009190033-00333\.warc\.gz@(347151|4813421|6468467|9443749|22896815|29555718|39363293)|20261013211541-20261014001541-00666\.warc\.gz@(16961|22529|41761|15513020|20476349|24733340|30202113|35750466|36145018|38986006))\z
+  reason: >-
+    libiconv's tables and Ruby's transcoders map a few characters of the
+    East Asian encodings differently (GB2312 A1AA is U+2015 in libiconv and
+    U+2014 in Ruby, Big5 A1E3 U+223C and U+FF5E, Shift_JIS 0x5C U+00A5 and
+    a backslash). lobzique has no transcoders of its own.
+- mode: html4
+  match: \Acrawl/CC-MAIN-20261013211541-20261014001541-00666\.warc\.gz@15575392\z
+  reason: >-
+    ks_c_5601-1987 is the bare KS X 1001 set in libiconv, so libxml2 stops
+    at the page's first EUC-KR byte. lobzique reads it as CP949, as
+    browsers do.
+- mode: html4
+  match: \Acrawl/CC-MAIN-20261009160033-20261009190033-00333\.warc\.gz@36734418\z
+  reason: >-
+    The page's <meta charset> follows a second doctype after </html>, where
+    the SAX pass of EncodingReader stops in Nokogiri, so libxml2 takes the
+    name during the parse as written ("utf-8"). lobzique's pass sees it and
+    the given name is canonicalized ("UTF-8").

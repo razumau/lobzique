@@ -1,0 +1,15 @@
+# frozen_string_literal: true
+
+# The facade's bundle (plan.md phase 5): nokogiri is lobzique here, and real
+# Nokogiri can't load next to it. The other gems are at the versions of the
+# main Gemfile.lock, so they move with the oracle.
+
+source "https://rubygems.org"
+
+gem "nokogiri", path: "../.."
+
+locked = Bundler::LockfileParser.new(Bundler.read_file(File.expand_path("../../Gemfile.lock", __dir__)))
+  .specs.to_h { [_1.name, _1.version.to_s] }
+%w[rake minitest minitest-mock loofah rails-html-sanitizer actionview actiontext rails-dom-testing].each do |name|
+  gem name, locked.fetch(name)
+end

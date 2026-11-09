@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
-require_relative "lib/lobzique/version"
-
 Gem::Specification.new do |spec|
   spec.name = "lobzique"
-  spec.version = Lobzique::VERSION
+  # Read, not required: Bundler evaluates this before an app requires the
+  # nokogiri facade, which has to name the root module first (plan.md decision 1)
+  spec.version = File.read(File.join(__dir__, "lib/lobzique/version.rb"))[/VERSION = "(.+?)"/, 1]
   spec.authors = ["Jury Razumau"]
   spec.email = ["mail@razumau.net"]
 

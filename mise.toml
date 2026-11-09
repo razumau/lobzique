@@ -13,6 +13,10 @@ run = "bundle exec rake compile"
 description = "Compile and run the Ruby tests (N=name narrows it to matching tests)"
 run = "bundle exec rake compile test"
 
+[tasks."test:facade"]
+description = "Run the nokogiri facade's tests in its own bundle"
+run = "bundle exec rake test:facade"
+
 [tasks."test:rust"]
 description = "Run the core crate's tests"
 run = "cargo test -p lobzique-core"

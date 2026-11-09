@@ -59,12 +59,16 @@ jobs:
           cargo-cache: true
       - name: Run the tests
         run: bundle exec rake compile test
+      - name: Run the nokogiri facade's tests
+        run: bundle exec rake test:facade
       - name: Compare with Nokogiri::HTML5
         run: bundle exec ruby -Ilib script/differential
       - name: Compare sanitizing with Rails::HTML5
         run: bundle exec ruby -Ilib script/differential --mode sanitize
       - name: Compare Action Text content with Nokogiri's
         run: bundle exec ruby -Ilib script/differential --mode action_text
+      - name: Compare HTML4 decoding with libxml2's
+        run: bundle exec ruby -Ilib script/differential --mode html4
 
   gc-stress:
     name: GC.stress on Ruby ${{ matrix.ruby }}
