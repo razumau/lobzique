@@ -44,17 +44,10 @@ module Lobzique
       def self.meta_charset(chunk)
         return unless chunk.b.match?(/<meta/i)
 
-        metas(chunk).reduce(nil) do |found, meta|
-          encoding = found
-          (charset = meta["charset"]) &&
-            (encoding = charset)
-          (http_equiv = meta["http-equiv"]) &&
-            http_equiv.match(/\AContent-Type\z/i) &&
-            (content = meta["content"]) &&
-            (m = content.match(/;\s*charset\s*=\s*([\w-]+)/)) &&
-            (encoding = m[1])
-          encoding
-        end
+        metas(chunk).filter_map do |meta|
+          content = meta["content"] if meta["http-equiv"]&.match?(/\AContent-Type\z/i)
+          content&.[](/;\s*charset\s*=\s*([\w-]+)/, 1) || meta["charset"]
+        end.last
       end
 
       # The <meta> elements of bytes in any encoding, read as ISO-8859-1.
@@ -158,7 +151,10 @@ module Lobzique
         "\x00\x3C\x00\x3F".b => [Encoding::UTF_16BE, 0]
       }.freeze
 
-      private_constant :INVALID_BYTES, :BUILT_IN, :CANONICAL, :ICONV, :BOMS
+      # Names Encoding.find resolves to whatever the process is set up with.
+      RUBY_ONLY = %w[locale external internal filesystem].freeze
+
+      private_constant :INVALID_BYTES, :BUILT_IN, :CANONICAL, :ICONV, :BOMS, :RUBY_ONLY
 
       class << self
         # Input bytes as libxml2's HTML parser decodes them with +encoding+
@@ -219,15 +215,17 @@ module Lobzique
           prefix = first ? bytes.byteslice(0, first) : bytes
           return unless prefix.match?(/<meta/ni)
 
+          declared = declarations(prefix)
           switch = nil
-          declarations(prefix).each do |name|
+          declared.each do |name|
             break if (switch = open_decoder(name))
 
             errors << syntax_error("Unsupported encoding: #{name}", domain: 1, code: 32, level: 3, str1: name)
           end
           return unless switch
 
-          decode_with(bytes, switch.first, declarations(bytes).last, errors)
+          declared = declarations(bytes) if first
+          decode_with(bytes, switch.first, declared.last, errors)
         end
 
         # What htmlCheckMeta declares, meta by meta: a charset attribute's
@@ -248,7 +246,8 @@ module Lobzique
               end
             end
             charset = http_equiv && content && charset_in_content(content)
-            (charset ? charsets << charset : charsets).map { _1.encode(Encoding::ISO_8859_1).b }
+            # back to the input's bytes; a character reference's are lost
+            (charset ? charsets << charset : charsets).map { _1.encode(Encoding::ISO_8859_1, undef: :replace).b }
           end
         end
 
@@ -276,26 +275,25 @@ module Lobzique
         def decode_with(bytes, ruby_encoding, name, errors)
           string = transcode(bytes.dup.force_encoding(ruby_encoding), bytes, errors)
           # xmlDetectEncoding skips a UTF-8 BOM even when the encoding is set
-          string = string.byteslice(3..) if string.start_with?("﻿")
+          string = string.byteslice(3..) if string.start_with?("\uFEFF")
           [string, name, errors]
         end
 
         def transcode(string, bytes, errors)
-          if string.encoding == Encoding::UTF_8
-            return string if string.valid_encoding?
-
-            invalid_bytes(bytes, string, errors)
-            (INVALID_BYTES == :latin1) ? string.scrub { |b| b.unpack("C*").pack("U*") } : string.scrub
-          elsif string.valid_encoding?
-            string.encode(Encoding::UTF_8, undef: :replace)
-          else
-            invalid_bytes(bytes, string, errors)
+          invalid_bytes(bytes, string, errors) unless string.valid_encoding?
+          if string.encoding != Encoding::UTF_8
+            # invalid: always, as a stateful encoding's string (ISO-2022-JP)
+            # is valid_encoding? whatever its bytes
             string.encode(Encoding::UTF_8, invalid: :replace, undef: :replace)
+          elsif INVALID_BYTES == :latin1
+            string.scrub { |b| b.unpack("C*").pack("U*") }
+          else
+            string.scrub
           end
         end
 
         def invalid_bytes(bytes, string, errors)
-          offset = string.each_char.reduce(0) { |at, char| char.valid_encoding? ? at + char.bytesize : (break at) }
+          offset = string.each_char.take_while(&:valid_encoding?).sum(&:bytesize)
           line, column = position(bytes, offset)
           errors << syntax_error("Invalid bytes in character encoding", domain: 8, code: 81, level: 3, line:, column:)
         end
@@ -310,8 +308,8 @@ module Lobzique
         def open_decoder(name)
           return [Encoding::UTF_8, "UTF-8"] if name.casecmp?("UTF-8") || name.casecmp?("UTF8")
 
-          if (built_in = BUILT_IN.keys.find { _1.casecmp?(name) })
-            return [BUILT_IN[built_in], built_in]
+          if (ruby_encoding = BUILT_IN[built_in = name.upcase])
+            return [ruby_encoding, built_in]
           end
           if (ruby_encoding = iconv(name))
             return [ruby_encoding, name]
@@ -323,15 +321,19 @@ module Lobzique
           open_decoder(canonical)
         end
 
-        # A decoder iconv would open, if Ruby can transcode from it.
+        # A decoder iconv would open, if Ruby can transcode from it. Ruby's
+        # names for UTF-8 aren't iconv's, and UTF-8 itself is built in.
         def iconv(name)
-          candidates = [name]
-          ICONV.each { |pattern, rename| (m = pattern.match(name)) && candidates << rename.call(m) }
+          return if RUBY_ONLY.any? { _1.casecmp?(name) }
+
+          candidates = ICONV.filter_map { |pattern, rename| (m = pattern.match(name)) && rename.call(m) } << name
           candidates.each do |candidate|
             encoding = Encoding.find(candidate)
-            # Ruby can't transcode from its dummy encodings, ISO-2022's aside
-            return encoding if !encoding.dummy? || encoding.name.start_with?("ISO-2022")
-          rescue ArgumentError
+            next if encoding == Encoding::BINARY
+
+            Encoding::Converter.new(encoding, Encoding::UTF_8)
+            return encoding
+          rescue ArgumentError, Encoding::ConverterNotFoundError
             next
           end
           nil

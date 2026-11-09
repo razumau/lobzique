@@ -41,7 +41,15 @@ module HTML4ParsingContract
     ["<p>caf\xE9</p>".b, "latin1"] => ["latin1", "café"],
     ["<p>caf\xE9</p>".b, "bogus"] => ["ISO-8859-1", "café"],
     [%(<meta charset=x-bogus><p>caf\xE9</p>).b, nil] => ["ISO-8859-1", "café"],
-    ["<p>café 日</p>", "iso-8859-1"] => ["ISO-8859-1", "cafÃ© æ\u0097¥"]
+    ["<p>café 日</p>", "iso-8859-1"] => ["ISO-8859-1", "cafÃ© æ\u0097¥"],
+    # names only Ruby has, and ones no input's bytes can spell
+    ["<p>caf\xE9</p>".b, "internal"] => ["ISO-8859-1", "café"],
+    ["<p>caf\xE9</p>".b, "locale"] => ["ISO-8859-1", "café"],
+    ["<p>caf\xE9</p>".b, "binary"] => ["ISO-8859-1", "café"],
+    ["<p>café</p>".b, "CP65001"] => ["ISO-8859-1", "cafÃ©"],
+    [%(<meta charset=internal><p>caf\xE9</p>).b, nil] => ["ISO-8859-1", "café"],
+    [%(<meta charset="&#x65e5;"><p>caf\xE9</p>).b, nil] => ["ISO-8859-1", "café"],
+    [%(<meta charset="&#x65e5;"><p>x</p>).b, nil] => [nil, "x"]
   }.freeze
 
   def test_encodings
@@ -144,6 +152,14 @@ class TestHTML4ParsingLobzique < Minitest::Test
     assert_equal ["UTF-8", "caf� x"], [doc.encoding, doc.at_css("p").text]
     doc = Lobzique::HTML4("<p>\x93\xFA \x81</p><p>after</p>".b, nil, "Shift_JIS")
     assert_equal ["日 �", "after"], doc.css("p").map(&:text)
+  end
+
+  # libiconv decodes EUC-TW, and stops at a byte invalid in ISO-2022-JP
+  def test_encodings_ruby_cannot_decode
+    doc = Lobzique::HTML4("<p>caf\xE9</p>".b, nil, "EUC-TW")
+    assert_equal ["ISO-8859-1", "café", "WARNING: Unsupported encoding: EUC-TW"], [doc.encoding, doc.at_css("p").text, doc.errors.first.message]
+    doc = Lobzique::HTML4("<p>\e$BF|\xFF\xFF\e(B x</p>".b, nil, "ISO-2022-JP")
+    assert_equal ["ISO-2022-JP", "日\uFFFD\uFFFD x"], [doc.encoding, doc.at_css("p").text]
   end
 
   # html5ever's tree: libxml2 has no <head> here and keeps the fragment's

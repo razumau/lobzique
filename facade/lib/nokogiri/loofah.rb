@@ -30,8 +30,10 @@ module Nokogiri
       end
 
       # Each hook waits for the next constant on the way to
-      # Loofah::ScrubBehavior::Node.
+      # Loofah::ScrubBehavior::Node, unless something has defined it already.
       def self.on_const_added(name, mod, &block)
+        return block.call(mod.const_get(name, false)) if mod.const_defined?(name, false)
+
         hook = Module.new do
           define_method(:const_added) do |added|
             super(added)
