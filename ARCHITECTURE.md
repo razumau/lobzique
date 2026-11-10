@@ -139,6 +139,17 @@ lobzique's doesn't, the libxml2 constants that `version/info.rb` reads, is in
 `facade/lib/nokogiri/extension.rb`. Ported files follow the rest of `lib/`:
 Nokogiri's path, a header naming it, `# lobzique:` on changes.
 
+On the facade nothing at boot says that Nokogiri isn't there, so what
+lobzique leaves out fails loudly at the first call:
+`facade/lib/nokogiri/unsupported.rb` defines Nokogiri's entry points to XML
+parsing, the Builder, SAX, XSLT, CSS-to-XPath and Slop (`Nokogiri::XML()`,
+`XML::Document.parse`, `CSS.xpath_for`, …) to raise `NotImplementedError`,
+and makes their constants (`XML::Builder`, `XML::SAX`, …) raise `NameError`
+from `const_missing`, both naming the facade and pointing to seam mode.
+`const_missing` keeps `defined?` false for them. `Nokogiri.parse`, `make`
+and `Nokogiri()` are ported in `facade/lib/nokogiri.rb`, so HTML input
+works and XML input reaches the stub.
+
 One patch to Loofah, which otherwise runs unchanged:
 `facade/lib/nokogiri/loofah.rb` prepends to `Loofah::ScrubBehavior::Node` the
 `EscapeRawTextInSelect` step that `Lobzique::Sanitizer`'s `scrub!` ends with,

@@ -50,6 +50,62 @@ class TestFacade < Minitest::Test
     assert_equal %(<a href="x%20y">x</a>y), Rails::HTML5::SafeListSanitizer.new.sanitize(%(<a href="x y" onclick="1">x</a><script>y</script>))
   end
 
+  def test_parse_guesses_html
+    html = "<!DOCTYPE html><html><body><p>x</p></body></html>"
+    assert_kind_of Nokogiri::HTML4::Document, Nokogiri.parse(html)
+    assert_equal "x", Nokogiri(html).at_css("p").text
+    assert_equal "p", Nokogiri.make("<p>x</p>").name
+    Nokogiri.parse(html) { |doc| assert_kind_of Nokogiri::HTML4::Document, doc }
+  end
+
+  # What lobzique leaves out raises with a reason, not NoMethodError.
+  def test_unsupported_methods
+    [
+      ["Nokogiri.XML", -> { Nokogiri::XML("<a/>") }],
+      ["Nokogiri.XML", -> { Nokogiri.parse("<a/>") }],
+      ["Nokogiri::XML.parse", -> { Nokogiri::XML.parse("<a/>") }],
+      ["Nokogiri::XML.Reader", -> { Nokogiri::XML::Reader("<a/>") }],
+      ["Nokogiri::XML::Document.parse", -> { Nokogiri::XML::Document.parse("<a/>", nil, nil, 0) }],
+      ["Nokogiri::XML::DocumentFragment.parse", -> { Nokogiri::XML::DocumentFragment.parse("<a/>") }],
+      ["Nokogiri.XSLT", -> { Nokogiri::XSLT("<a/>") }],
+      ["Nokogiri::CSS.xpath_for", -> { Nokogiri::CSS.xpath_for("p") }],
+      ["Nokogiri.Slop", -> { Nokogiri::Slop("<a/>") }],
+      ["Nokogiri() with a block", -> { Nokogiri { p_ } }]
+    ].each do |name, call|
+      error = assert_raises(NotImplementedError, name, &call)
+      assert_match(/\A#{Regexp.escape(name)} isn't supported: the nokogiri facade is lobzique/, error.message)
+      assert_match(/lobzique's seams/, error.message)
+    end
+  end
+
+  def test_unsupported_methods_name_subclasses
+    subclass = Class.new(Nokogiri::XML::Document)
+    error = assert_raises(NotImplementedError) { subclass.parse("<a/>") }
+    assert_match(/\A#{Regexp.escape(subclass.inspect)}\.parse isn't supported/, error.message)
+  end
+
+  def test_html_parsing_is_not_stubbed
+    assert_kind_of Nokogiri::HTML4::Document, Nokogiri::HTML4::Document.parse("<p>")
+    assert_kind_of Nokogiri::HTML5::Document, Nokogiri::HTML5::Document.read_memory("<p>")
+    assert_kind_of Nokogiri::HTML4::DocumentFragment, Nokogiri::HTML4::DocumentFragment.parse("<p>")
+    assert_kind_of Nokogiri::HTML5::DocumentFragment, Nokogiri::HTML5::DocumentFragment.parse("<p>")
+  end
+
+  def test_unsupported_constants
+    %w[
+      Nokogiri::XML::Builder Nokogiri::HTML::Builder Nokogiri::HTML5::Builder
+      Nokogiri::XML::SAX Nokogiri::HTML4::SAX Nokogiri::XML::Reader Nokogiri::XSLT
+      Nokogiri::CSS::Parser Nokogiri::HTML::NamedCharacters
+    ].each do |name|
+      error = assert_raises(NameError, name) { Object.const_get(name) }
+      assert_match(/\A#{Regexp.escape(name.sub("::HTML::", "::HTML4::"))} isn't supported: the nokogiri facade is lobzique/, error.message)
+    end
+    assert_nil defined?(Nokogiri::XML::Builder)
+    assert_raises(NameError) { Class.new(Nokogiri::XML::SAX::Document) }
+    error = assert_raises(NameError) { Nokogiri::XML::NoSuchThing }
+    assert_match(/uninitialized constant Nokogiri::XML::NoSuchThing/, error.message)
+  end
+
   def test_lobzique_first_is_refused
     lib = File.expand_path("../../lib", __dir__)
     facade = File.expand_path("../../facade/lib", __dir__)
