@@ -264,10 +264,7 @@ module XPathContract
     assert_silent { found = doc.xpath("nokogiri:anint()", handler.new) }
     assert_equal 1230456, found
     assert_output("", /Invoking custom handler functions without a namespace is deprecated/) do
-      Warning[:deprecated], deprecated = true, Warning[:deprecated]
-      found = doc.xpath("anint()", handler.new)
-    ensure
-      Warning[:deprecated] = deprecated
+      with_deprecation_warnings { found = doc.xpath("anint()", handler.new) }
     end
     assert_equal 1230456, found
     assert_equal ["/html/body/ul/li[2]"], paths(doc.xpath("//ul/li[nokogiri:filter(., 'b')]", handler.new))

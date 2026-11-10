@@ -188,7 +188,7 @@ fn call_handler(
     }
     // libxml2 looks a function up once per call site
     if function.prefix.is_none() && handler.warned.insert(call.site) {
-        warn_deprecated(ruby, &format!(
+        warn_deprecated(&format!(
             "A custom XPath or CSS handler function named '{name}' is being invoked without a namespace. \
              Please update your query to reference this function as 'nokogiri:{name}'. \
              Invoking custom handler functions without a namespace is deprecated and will become an error in Nokogiri v1.17.0."

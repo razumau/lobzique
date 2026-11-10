@@ -7,10 +7,10 @@ use lobzique_core::html5::{DocumentParser, FragmentParser};
 use magnus::{
     prelude::*,
     rb_sys::{protect, AsRawId, AsRawValue, FromRawValue},
-    Error, KwArgs, RArray, RClass, RString, Ruby, Value,
+    Error, RArray, RClass, RString, Ruby, Value,
 };
 use std::any::Any;
-use std::ffi::c_void;
+use std::ffi::{c_void, CString};
 use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -168,13 +168,22 @@ pub fn yield_to_block(ruby: &Ruby, object: Value) -> Result<(), Error> {
     Ok(())
 }
 
-/// `rb_category_warning(RB_WARN_CATEGORY_DEPRECATED, ...)`: printed only
-/// when `Warning[:deprecated]` is on.
-pub fn warn_deprecated(ruby: &Ruby, message: &str) -> Result<(), Error> {
-    let options = ruby.hash_new();
-    options.aset(ruby.to_symbol("category"), ruby.to_symbol("deprecated"))?;
-    ruby.module_kernel()
-        .funcall::<_, _, Value>("warn", (message, KwArgs(options)))?;
+/// Nokogiri's `NOKO_WARN_DEPRECATION`: printed only when `$VERBOSE` is true
+/// and `Warning[:deprecated]` is on, prefixed with the caller's location.
+pub fn warn_deprecated(message: &str) -> Result<(), Error> {
+    // %s stops at a zero byte, as it does for Nokogiri's C strings
+    let message = message.split('\0').next().unwrap_or_default();
+    let message = CString::new(message).expect("no zero bytes left");
+    // SAFETY: the format takes one C string, and `protect` turns what a
+    // `Warning.warn` override raises into an `Err`.
+    protect(|| unsafe {
+        rb_sys::rb_category_warning(
+            rb_sys::rb_warning_category_t::RB_WARN_CATEGORY_DEPRECATED,
+            c"%s".as_ptr(),
+            message.as_ptr(),
+        );
+        rb_sys::Qnil as rb_sys::VALUE
+    })?;
     Ok(())
 }
 

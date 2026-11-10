@@ -5,6 +5,19 @@ require "lobzique"
 
 require "minitest/autorun"
 
+module DeprecationWarnings
+  # Nokogiri's deprecation warnings need both, and only `rake test` passes -w
+  def with_deprecation_warnings
+    verbose, deprecated = $VERBOSE, Warning[:deprecated]
+    $VERBOSE, Warning[:deprecated] = true, true
+    yield
+  ensure
+    $VERBOSE, Warning[:deprecated] = verbose, deprecated
+  end
+end
+
+Minitest::Test.include(DeprecationWarnings)
+
 if ENV["LOBZIQUE_GC_STRESS"]
   # Collect garbage on every allocation while a test runs, so a Ruby object
   # that Rust holds without marking gets freed while it is still in use.

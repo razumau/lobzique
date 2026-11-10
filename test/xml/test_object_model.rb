@@ -97,12 +97,11 @@ module ObjectModelContract
   def test_passing_a_node_as_the_document_is_deprecated
     doc = root::HTML5::Document.new
     parent = root::XML::Node.new("div", doc)
-    deprecated, Warning[:deprecated] = Warning[:deprecated], true
     node = nil
-    assert_output(nil, /deprecated/) { node = root::XML::Node.new("p", parent) }
+    assert_output(nil, /deprecated/) do
+      with_deprecation_warnings { node = root::XML::Node.new("p", parent) }
+    end
     assert_same doc, node.document
-  ensure
-    Warning[:deprecated] = deprecated
   end
 
   def test_constructor_argument_errors

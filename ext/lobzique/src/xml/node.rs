@@ -763,7 +763,7 @@ pub fn document_for_new_node(
     if document.is_kind_of(ruby.get_inner(&document::DOCUMENT)) {
         return Ok(document);
     }
-    warn_deprecated(ruby, deprecation)?;
+    warn_deprecated(deprecation)?;
     <&Node>::try_convert(document)?.document(ruby)
 }
 
