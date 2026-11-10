@@ -47,9 +47,7 @@ module HTML4ParsingContract
     ["<p>caf\xE9</p>".b, "locale"] => ["ISO-8859-1", "café"],
     ["<p>caf\xE9</p>".b, "binary"] => ["ISO-8859-1", "café"],
     ["<p>café</p>".b, "CP65001"] => ["ISO-8859-1", "cafÃ©"],
-    [%(<meta charset=internal><p>caf\xE9</p>).b, nil] => ["ISO-8859-1", "café"],
-    [%(<meta charset="&#x65e5;"><p>caf\xE9</p>).b, nil] => ["ISO-8859-1", "café"],
-    [%(<meta charset="&#x65e5;"><p>x</p>).b, nil] => [nil, "x"]
+    [%(<meta charset=internal><p>caf\xE9</p>).b, nil] => ["ISO-8859-1", "café"]
   }.freeze
 
   def test_encodings
@@ -160,6 +158,16 @@ class TestHTML4ParsingLobzique < Minitest::Test
     assert_equal ["ISO-8859-1", "café", "WARNING: Unsupported encoding: EUC-TW"], [doc.encoding, doc.at_css("p").text, doc.errors.first.message]
     doc = Lobzique::HTML4("<p>\e$BF|\xFF\xFF\e(B x</p>".b, nil, "ISO-2022-JP")
     assert_equal ["ISO-2022-JP", "日\uFFFD\uFFFD x"], [doc.encoding, doc.at_css("p").text]
+  end
+
+  # A character reference in the charset is no name. libxml2 on macOS ignores
+  # it; on Linux it takes the decoded character as the encoding's name and
+  # drops the rest of the page, so Nokogiri can't be the oracle here.
+  def test_character_reference_as_charset
+    doc = Lobzique::HTML4(%(<meta charset="&#x65e5;"><p>caf\xE9</p>).b)
+    assert_equal ["ISO-8859-1", "café"], [doc.encoding, doc.at_css("p").text]
+    doc = Lobzique::HTML4(%(<meta charset="&#x65e5;"><p>x</p>).b)
+    assert_equal [nil, "x"], [doc.encoding, doc.at_css("p").text]
   end
 
   # html5ever's tree: libxml2 has no <head> here and keeps the fragment's
