@@ -173,14 +173,15 @@ Every node object, documents included, wraps the same Rust struct
 
 ```rust
 struct Node {
-    document: Cell<Option<Opaque<Value>>>,   // the Ruby document object
-    id: Cell<Option<NodeId>>,                // index in that document's arena
-    arena: OnceCell<RefCell<dom::Document>>, // set only on the document itself
+    document: Cell<Option<Opaque<Value>>>,        // the Ruby document object
+    id: Cell<Option<NodeId>>,                     // index in that document's arena
+    arena: OnceCell<Box<RefCell<dom::Document>>>, // set only on the document itself
 }
 ```
 
 A node is its document plus an id. A document is the node that owns the
-arena, which is how `Document < Node` works with a single data type.
+arena, which is how `Document < Node` works with a single data type. The
+arena is boxed so that other nodes pay one pointer for it, not its size.
 `document` and `id` are cells because a node moved into another document is
 repointed, as in Nokogiri.
 

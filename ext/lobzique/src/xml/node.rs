@@ -41,7 +41,8 @@ pub struct Node {
     /// `None` only on an object made with `allocate` and never initialized.
     document: Cell<Option<Opaque<Value>>>,
     id: Cell<Option<NodeId>>,
-    arena: OnceCell<RefCell<dom::Document>>,
+    /// Boxed so that the other nodes' objects don't carry an empty one.
+    arena: OnceCell<Box<RefCell<dom::Document>>>,
 }
 
 impl DataTypeFunctions for Node {
@@ -59,8 +60,11 @@ impl DataTypeFunctions for Node {
 
     /// A document reports its arena, which holds all of its nodes.
     fn size(&self) -> usize {
-        let arena = self.arena.get().and_then(|arena| arena.try_borrow().ok());
-        size_of::<Self>() + arena.map_or(0, |arena| arena.heap_size())
+        let Some(arena) = self.arena.get() else {
+            return size_of::<Self>();
+        };
+        let heap = arena.try_borrow().map_or(0, |arena| arena.heap_size());
+        size_of::<Self>() + size_of::<RefCell<dom::Document>>() + heap
     }
 }
 
@@ -78,7 +82,7 @@ impl Node {
         Node {
             document: Cell::new(None),
             id: Cell::new(Some(NodeId::DOCUMENT)),
-            arena: OnceCell::from(RefCell::new(arena)),
+            arena: OnceCell::from(Box::new(RefCell::new(arena))),
         }
     }
 
@@ -90,7 +94,7 @@ impl Node {
     /// Gives an allocated, empty object the arena it is the document of;
     /// `false` if it has one already.
     pub fn adopt_arena(&self, arena: dom::Document) -> bool {
-        if self.arena.set(RefCell::new(arena)).is_err() {
+        if self.arena.set(Box::new(RefCell::new(arena))).is_err() {
             return false;
         }
         self.id.set(Some(NodeId::DOCUMENT));
@@ -105,7 +109,7 @@ impl Node {
     }
 
     pub fn arena(&self) -> Option<&RefCell<dom::Document>> {
-        self.arena.get()
+        self.arena.get().map(Box::as_ref)
     }
 
     pub fn document(&self, ruby: &Ruby) -> Result<Value, Error> {
