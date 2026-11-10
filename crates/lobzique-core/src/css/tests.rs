@@ -273,8 +273,8 @@ fn custom_calls_are_noted_until_answered() {
     };
     assert_eq!(calls.len(), 3);
     assert_eq!(calls[0].arguments[1], Value::String(b"x"[..].into()));
-    for (i, call) in calls.iter().enumerate() {
-        answers.insert((call.site, call.node), Ok(Value::Boolean(i % 2 == 0)));
+    for (i, call) in calls.into_iter().enumerate() {
+        answers.insert(call, Ok(Value::Boolean(i % 2 == 0)));
     }
     let Outcome::Value(Value::NodeSet(nodes)) = evaluate(
         &document,

@@ -282,6 +282,13 @@ module XPathContract
     assert_empty doc.xpath("//nosuch[nope()]")
   end
 
+  # the second a is second among p's descendants and first among span's
+  def test_custom_function_arguments_differ_per_starting_node
+    doc = root::HTML5::Document.parse("<div><p><a>1</a><span><a>2</a></span></p></div>")
+    handler = Class.new { def first(position) = position.to_i == 1 }.new
+    assert_equal ["1", "2"], doc.xpath("//*/descendant::a[nokogiri:first(position())]", handler).map(&:text)
+  end
+
   # Nokogiri's test_huge_xpath_query: a real query, 15 brackets deep
   def test_huge_query
     query = File.read(File.expand_path("../fixtures/nokogiri/files/huge-xpath-query.txt", __dir__))

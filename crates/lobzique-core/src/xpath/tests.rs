@@ -757,8 +757,11 @@ fn custom_calls_from_xpath_strings() {
     assert_eq!(calls.len(), 4);
     assert_eq!(calls[0].arguments[1], Value::String(b"x"[..].into()));
     let answers = calls
-        .iter()
-        .map(|call| ((call.site, call.node), Ok(Value::Boolean(call.site == 0))))
+        .into_iter()
+        .map(|call| {
+            let answer = Ok(Value::Boolean(call.site == 0));
+            (call, answer)
+        })
         .collect();
     let Ok(Outcome::Value(Value::NodeSet(found))) = evaluate(
         &document,
@@ -795,14 +798,64 @@ fn errors_answer_calls_only_when_reached() {
         panic!("calls expected");
     };
     assert_eq!(calls.len(), 2);
-    answers.insert((calls[0].site, calls[0].node), Ok(Value::Boolean(true)));
-    answers.insert(
-        (calls[1].site, calls[1].node),
-        Err(Error::UnregisteredFunction),
-    );
+    answers.insert(calls[0].clone(), Ok(Value::Boolean(true)));
+    answers.insert(calls[1].clone(), Err(Error::UnregisteredFunction));
     assert_eq!(run(&answers), Ok(Outcome::Value(Value::Boolean(true))));
-    answers.insert((calls[0].site, calls[0].node), Ok(Value::Boolean(false)));
+    answers.insert(calls[0].clone(), Ok(Value::Boolean(false)));
     assert_eq!(run(&answers), Err(Error::UnregisteredFunction));
+}
+
+/// A node can reach a call site with different arguments when it is a
+/// candidate from more than one starting node.
+#[test]
+fn answers_are_per_arguments() {
+    let document = parse("<div><p><a id=a>1</a><span><a id=b>2</a></span></p></div>");
+    let query = parse_xpath(b"//*/descendant::a[nokogiri:f(position())]").unwrap();
+    let none = HashMap::new();
+    let mut answers = HashMap::new();
+    let found = loop {
+        match evaluate(
+            &document,
+            &query,
+            NodeId::DOCUMENT,
+            &none,
+            &none_variables(),
+            &answers,
+        ) {
+            Ok(Outcome::Calls(calls)) => {
+                for call in calls {
+                    let answer = Ok(Value::Boolean(call.arguments == [Value::Number(1.0)]));
+                    answers.insert(call, answer);
+                }
+            }
+            Ok(Outcome::Value(Value::NodeSet(found))) => break found,
+            other => panic!("nodes expected, not {other:?}"),
+        }
+    };
+    assert_eq!(describe(&document, found), ["a", "b"]);
+    assert_eq!(answers.len(), 3);
+}
+
+#[test]
+fn numbers_find_their_answers_by_bits() {
+    let document = parse("<p id=a>");
+    let query = parse_xpath(b"nokogiri:f(0 div 0)").unwrap();
+    let none = HashMap::new();
+    let run = |answers: &HashMap<_, _>| {
+        evaluate(
+            &document,
+            &query,
+            NodeId::DOCUMENT,
+            &none,
+            &none_variables(),
+            answers,
+        )
+    };
+    let Ok(Outcome::Calls(calls)) = run(&HashMap::new()) else {
+        panic!("calls expected");
+    };
+    let answers = HashMap::from([(calls[0].clone(), Ok(Value::Boolean(true)))]);
+    assert_eq!(run(&answers), Ok(Outcome::Value(Value::Boolean(true))));
 }
 
 fn none_variables() -> HashMap<String, Vec<u8>> {

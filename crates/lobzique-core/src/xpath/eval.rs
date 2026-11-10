@@ -20,6 +20,7 @@ use crate::dom::{Document, DocumentKind, NodeId, NodeKind};
 use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value<'a> {
@@ -44,13 +45,55 @@ impl Value<'_> {
 /// What a custom call returned, or the error it raises.
 pub type Answer = Result<Value<'static>, Error>;
 
-/// A custom function call the caller has to make.
-#[derive(Debug, PartialEq)]
+/// A custom function call the caller has to make, and the key its answer
+/// is found by: the same node can reach a site with different arguments,
+/// such as `position()` from different starting nodes.
+#[derive(Clone, Debug)]
 pub struct Call {
     pub site: usize,
-    /// The context node, which the answer is for.
     pub node: NodeId,
     pub arguments: Vec<Value<'static>>,
+}
+
+impl Call {
+    /// Numbers compare by bit pattern, so `NaN` finds its answer.
+    fn key(&self) -> (usize, NodeId, impl Iterator<Item = ArgumentKey<'_>>) {
+        let arguments = self.arguments.iter().map(|value| match value {
+            Value::NodeSet(nodes) => ArgumentKey::NodeSet(nodes),
+            Value::Boolean(b) => ArgumentKey::Boolean(*b),
+            Value::Number(n) => ArgumentKey::Number(n.to_bits()),
+            Value::String(s) => ArgumentKey::String(s),
+        });
+        (self.site, self.node, arguments)
+    }
+}
+
+#[derive(PartialEq, Eq, Hash)]
+enum ArgumentKey<'a> {
+    NodeSet(&'a [NodeId]),
+    Boolean(bool),
+    Number(u64),
+    String(&'a [u8]),
+}
+
+impl PartialEq for Call {
+    fn eq(&self, other: &Self) -> bool {
+        let (site, node, arguments) = self.key();
+        let (other_site, other_node, other_arguments) = other.key();
+        site == other_site && node == other_node && arguments.eq(other_arguments)
+    }
+}
+
+impl Eq for Call {}
+
+impl Hash for Call {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let (site, node, arguments) = self.key();
+        site.hash(state);
+        node.hash(state);
+        self.arguments.len().hash(state);
+        arguments.for_each(|argument| argument.hash(state));
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -62,14 +105,14 @@ pub enum Outcome {
 
 /// Evaluates `query` at `context`. `namespaces` binds prefixes beyond the
 /// ones Nokogiri always binds, and `variables` names, as strings;
-/// `answers` holds the custom calls made so far, by site and context node.
+/// `answers` holds the custom calls made so far.
 pub fn evaluate(
     document: &Document,
     query: &Query,
     context: NodeId,
     namespaces: &HashMap<String, String>,
     variables: &HashMap<String, Vec<u8>>,
-    answers: &HashMap<(usize, NodeId), Answer>,
+    answers: &HashMap<Call, Answer>,
 ) -> Result<Outcome, Error> {
     // libxml2 resolves a prefix when it evaluates the step; resolving them
     // all first differs only when that step is never reached
@@ -149,9 +192,9 @@ struct Evaluator<'a> {
     query: &'a Query,
     namespaces: &'a HashMap<String, String>,
     variables: &'a HashMap<String, Vec<u8>>,
-    answers: &'a HashMap<(usize, NodeId), Answer>,
+    answers: &'a HashMap<Call, Answer>,
     calls: RefCell<Vec<Call>>,
-    noted: RefCell<HashSet<(usize, NodeId)>>,
+    noted: RefCell<HashSet<Call>>,
     /// The root of the context node's tree, which `id()` searches after the
     /// document.
     root: NodeId,
@@ -300,15 +343,16 @@ impl<'a> Evaluator<'a> {
                 return self.apply(function, values, context);
             }
         }
-        if let Some(answer) = self.answers.get(&(site, context.node)) {
+        let call = Call {
+            site,
+            node: context.node,
+            arguments: values.into_iter().map(Value::into_owned).collect(),
+        };
+        if let Some(answer) = self.answers.get(&call) {
             return answer.clone();
         }
-        if self.noted.borrow_mut().insert((site, context.node)) {
-            self.calls.borrow_mut().push(Call {
-                site,
-                node: context.node,
-                arguments: values.into_iter().map(Value::into_owned).collect(),
-            });
+        if self.noted.borrow_mut().insert(call.clone()) {
+            self.calls.borrow_mut().push(call);
         }
         Ok(Value::NodeSet(Vec::new()))
     }

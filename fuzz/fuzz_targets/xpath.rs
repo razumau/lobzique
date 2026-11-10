@@ -86,7 +86,7 @@ fuzz_target!(|data: &[u8]| {
                             3 => Ok(Value::NodeSet(vec![call.node])),
                             _ => Err(Error::UnregisteredFunction),
                         };
-                        answers.insert((call.site, call.node), answer);
+                        answers.insert(call, answer);
                     }
                 }
             }

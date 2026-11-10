@@ -106,7 +106,7 @@ fuzz_target!(|data: &[u8]| {
                             2 => Value::String(Cow::Borrowed(b"x")),
                             _ => Value::NodeSet(vec![call.node]),
                         };
-                        answers.insert((call.site, call.node), Ok(answer));
+                        answers.insert(call, Ok(answer));
                     }
                 }
             }

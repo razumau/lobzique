@@ -151,13 +151,12 @@ impl XPathContext {
                 Outcome::Value(value) => return to_ruby(ruby, document, value),
                 Outcome::Calls(calls) => {
                     for call in calls {
-                        let key = (call.site, call.node);
                         let handler = Handler {
                             object: handler,
                             warned: &mut warned,
                         };
-                        let answer = call_handler(ruby, document, handler, query, call)?;
-                        answers.insert(key, answer);
+                        let answer = call_handler(ruby, document, handler, query, &call)?;
+                        answers.insert(call, answer);
                     }
                 }
             }
@@ -179,7 +178,7 @@ fn call_handler(
     document: Value,
     handler: Handler,
     query: &Query,
-    call: Call,
+    call: &Call,
 ) -> Result<Answer, Error> {
     let function = query.function(call.site);
     let name = function.local.as_str();
@@ -196,8 +195,8 @@ fn call_handler(
         ))?;
     }
     let arguments = ruby.ary_new_capa(call.arguments.len());
-    for argument in call.arguments {
-        arguments.push(to_ruby(ruby, document, argument)?)?;
+    for argument in &call.arguments {
+        arguments.push(to_ruby(ruby, document, argument.clone())?)?;
     }
     let result = apply(ruby, handler.object, name, arguments)?;
     if result.is_nil() {
