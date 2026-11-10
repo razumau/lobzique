@@ -1,23 +1,19 @@
 #![no_main]
 
-//! Parsing and serializing must cost about the same per byte of input and
-//! output however many copies of the input there are. `-timeout` catches
-//! only catastrophic slowness: a quadratic path that takes 2s on 64 KB
-//! passes it. So the input is repeated K, 2K and 4K times and the core
-//! counts the work each run does (`lobzique_core::work`); per byte added
-//! from 2K to 4K copies, the work may be at most RATIO times what it was
-//! from K to 2K, where linear work keeps it at 1 and quadratic doubles it.
+//! Catches superlinear work too small for `-timeout` to notice. The input is
+//! repeated K, 2K and 4K times and the core counts each run's work
+//! (`lobzique_core::work`). Per byte of input and output, the second step
+//! may cost at most RATIO times the first: linear work keeps the ratio at 1,
+//! quadratic doubles it.
 //!
-//! The output need not grow with the copies at a steady rate: each copy
-//! can reopen more of the formatting elements earlier copies left active,
-//! with their attributes, until the Noah's Ark clause caps the list, so a
-//! copy's output grows over the first copies. Hence bytes, not copies.
+//! - Bytes, not copies: a copy's output varies, e.g. while reopened
+//!   formatting elements accumulate up to the Noah's Ark cap.
+//! - K = 12: a token spanning copies (a quoted attribute value) makes work
+//!   arrive in steps, and the samples split them evenly only if K is a
+//!   multiple of the period, typically 2, 3, 4 or 6.
+//! - Each insertion walks up the tree, so the allowance grows with depth.
 //!
-//! Elements a copy leaves open nest the next copy inside them, and each
-//! insertion walks up the tree to check the depth limit, as html5ever walks
-//! its stack of open elements, so the work is linear in the input times the
-//! tree's depth. The allowance grows with the depth, which the depth limit
-//! bounds. The first byte picks the options, as in the html5 target.
+//! The first byte picks the options, as in the html5 target.
 
 use libfuzzer_sys::fuzz_target;
 use lobzique_core::dom::{Document, DocumentKind, NodeId};
@@ -27,7 +23,7 @@ use lobzique_core::html5::{
 use lobzique_core::work;
 use lobzique_core::xml::{self, save_options::*};
 
-const K: usize = 4;
+const K: usize = 12;
 const MAX_UNIT: usize = 512;
 /// 3/2, as a numerator and denominator.
 const RATIO: (u128, u128) = (3, 2);
