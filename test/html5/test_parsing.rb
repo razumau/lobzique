@@ -176,6 +176,18 @@ module ParsingContract
     assert_equal "form", span.fragment("<form></form>").children[0].name
   end
 
+  def test_fragment_context_of_a_non_element_is_its_own_name
+    doc = root::HTML5("<!DOCTYPE html><form><svg xlink:href=x><g class=c>t</g></svg></form>")
+    href, klass = doc.at_css("svg").attribute_nodes[0], doc.at_css("g").attribute_nodes[0]
+    text = doc.at_css("g").children[0]
+    fragment = ->(context) { root::HTML5::DocumentFragment.new(doc, "<td>x</td><form></form>", context) }
+
+    assert_equal "x", fragment.call(text).to_html
+    assert_equal "x", fragment.call(klass).to_html
+    assert_equal 'Unexpected namespace URI "http://www.w3.org/1999/xlink"',
+      assert_raises(ArgumentError) { fragment.call(href) }.message
+  end
+
   def test_fragment_in_annotation_xml
     ["MathML-Presentation", "text/html"].zip(["math", nil]).each do |encoding, prefix|
       math = body(root::HTML5("<!DOCTYPE html><math><annotation-xml encoding='#{encoding}' /></math>")).children[0]

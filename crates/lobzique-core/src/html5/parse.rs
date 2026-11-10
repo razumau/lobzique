@@ -175,6 +175,26 @@ impl Context {
         self
     }
 
+    /// `Gumbo.fragment`'s context for a node, whatever its kind: its name
+    /// and namespace, an `annotation-xml`'s `encoding`, and whether it or
+    /// an element above it is a `form`. The quirks mode is left to the
+    /// caller, since `Gumbo.fragment` takes it from the fragment's document.
+    pub fn of_node(document: &Document, node: NodeId) -> Result<Context, ContextError> {
+        let name = document.node_name(node).ok_or(ContextError::NoName)?;
+        let namespace = context_namespace(document, node).ok_or_else(|| {
+            let href = document.namespace(node).map(|namespace| namespace.href);
+            ContextError::UnknownNamespace(href.unwrap_or_default().to_owned())
+        })?;
+        let annotation_xml =
+            namespace == ContextNamespace::MathMl && name.eq_ignore_ascii_case(b"annotation-xml");
+        let encoding = annotation_xml
+            .then(|| document.attribute_value(node, b"encoding"))
+            .flatten();
+        Ok(Context::new(namespace, &String::from_utf8_lossy(name))
+            .with_encoding(encoding.map(<[u8]>::to_vec))
+            .with_form_ancestor(has_form_ancestor(document, node)))
+    }
+
     /// The context `Node#in_context` parses in: the nearest element at or
     /// above `node`, or `body` where there is none or it is in a namespace
     /// the parser has no rules for. The quirks mode is the doctype's if
@@ -183,39 +203,47 @@ impl Context {
         let element = std::iter::once(node)
             .chain(document.ancestors(node))
             .find(|&id| matches!(document.node_kind(id), NodeKind::Element(_)));
+        let body = Context::new(ContextNamespace::Html, "body");
         let context = match element {
-            Some(element) => match context_namespace(document, element) {
-                Some(namespace) => {
-                    let name = document.node_name(element).unwrap_or_default();
-                    let context = Context::new(namespace, &String::from_utf8_lossy(name));
-                    let annotation_xml = namespace == ContextNamespace::MathMl
-                        && name.eq_ignore_ascii_case(b"annotation-xml");
-                    let encoding = annotation_xml
-                        .then(|| document.attribute_value(element, b"encoding"))
-                        .flatten();
-                    context.with_encoding(encoding.map(<[u8]>::to_vec))
-                }
-                None => Context::new(ContextNamespace::Html, "body"),
-            }
-            .with_form_ancestor(has_form_ancestor(document, element)),
-            None => Context::new(ContextNamespace::Html, "body"),
+            Some(element) => Context::of_node(document, element).unwrap_or_else(|_| {
+                body.with_form_ancestor(has_form_ancestor(document, element))
+            }),
+            None => body,
         };
-        let doctype = document
-            .doctype()
-            .and_then(|id| match document.node_kind(id) {
-                NodeKind::Doctype(doctype) => Some(doctype),
-                _ => None,
-            });
-        let quirks_mode = match doctype {
-            _ if !parsed => QuirksMode::NoQuirks,
-            None => QuirksMode::Quirks,
-            Some(doctype) => quirks_mode_for_doctype(
-                Some(&doctype.name),
-                doctype.public_id.as_deref(),
-                doctype.system_id.as_deref(),
-            ),
+        let quirks_mode = if parsed {
+            doctype_quirks_mode(document)
+        } else {
+            QuirksMode::NoQuirks
         };
         context.with_quirks_mode(quirks_mode)
+    }
+}
+
+/// Why `Context::of_node` refuses a node, as `Gumbo.fragment` does.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ContextError {
+    /// A document, fragment or CDATA section, whose `name` is nil.
+    NoName,
+    /// A namespace the parser has no rules for, by its href.
+    UnknownNamespace(String),
+}
+
+/// The quirks mode of a fragment parsed in the context of a node of the
+/// parsed `document`: the one its doctype selects, or quirks without one.
+pub fn doctype_quirks_mode(document: &Document) -> QuirksMode {
+    let doctype = document
+        .doctype()
+        .and_then(|id| match document.node_kind(id) {
+            NodeKind::Doctype(doctype) => Some(doctype),
+            _ => None,
+        });
+    match doctype {
+        None => QuirksMode::Quirks,
+        Some(doctype) => quirks_mode_for_doctype(
+            Some(&doctype.name),
+            doctype.public_id.as_deref(),
+            doctype.system_id.as_deref(),
+        ),
     }
 }
 

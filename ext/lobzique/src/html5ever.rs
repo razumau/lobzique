@@ -4,8 +4,8 @@
 //! `Node#in_context`.
 
 use crate::support::{
-    c_string, c_string_with_length, call_initialize, check_interrupts, check_string, string_bytes,
-    without_gvl, Resumable,
+    c_string, call_initialize, check_interrupts, check_string, string_bytes, without_gvl,
+    Resumable,
 };
 use crate::xml::document::{self, wrap_document};
 use crate::xml::node::{utf8_string, Node};
@@ -13,8 +13,8 @@ use crate::xml::node_set;
 use crate::xml::syntax_error::{self, XmlError};
 use crate::{HTML5EVER, XML};
 use lobzique_core::html5::{
-    self, Context, ContextNamespace, DocumentParser, FragmentParser, LimitError, Options,
-    ParseError, QuirksMode,
+    self, Context, ContextError, ContextNamespace, DocumentParser, FragmentParser, LimitError,
+    Options, ParseError, QuirksMode,
 };
 use magnus::{
     function,
@@ -56,8 +56,7 @@ fn fragment(ruby: &Ruby, args: &[Value]) -> Result<(), Error> {
     let (fragment, input, context_arg) = args.required;
     let options = options(args.keywords)?;
     let document: Value = fragment.funcall("document", ())?;
-    let context =
-        context_for(ruby, context_arg)?.with_quirks_mode(quirks_mode_for(document, context_arg)?);
+    let context = context_for(ruby, context_arg, document)?;
     let input = input_bytes(ruby, input)?;
     let input_length = input.len();
     let target = Obj::<Node>::try_convert(fragment)?;
@@ -179,61 +178,33 @@ fn limit_error(ruby: &Ruby, error: LimitError) -> Error {
     Error::new(ruby.exception_arg_error(), error.to_string())
 }
 
-fn context_for(ruby: &Ruby, context: Value) -> Result<Context, Error> {
+/// gumbo.c walks a node context through Ruby calls; lobzique reads the
+/// node's arena, so the context must be a lobzique node.
+fn context_for(ruby: &Ruby, context: Value, document: Value) -> Result<Context, Error> {
     if context.is_nil() {
         return Ok(Context::new(ContextNamespace::Html, "body"));
     }
     if RString::from_value(context).is_some() {
         return named_context(ruby, &c_string(context)?);
     }
-
-    let name: Value = context.funcall("name", ())?;
-    check_string(ruby, name)?;
-    let name = String::from_utf8_lossy(&c_string(name)?).into_owned();
-    let namespace = namespace_of(ruby, context)?.ok_or_else(|| {
-        let href = context
-            .funcall::<_, _, Value>("namespace", ())
-            .and_then(|ns| ns.funcall::<_, _, Value>("href", ()))
-            .and_then(c_string_with_length)
-            .unwrap_or_default();
-        let href = String::from_utf8_lossy(&href);
-        let message = format!("Unexpected namespace URI \"{href}\"");
-        Error::new(ruby.exception_arg_error(), message)
-    })?;
-
-    let mut encoding = None;
-    if namespace == ContextNamespace::MathMl && name.eq_ignore_ascii_case("annotation-xml") {
-        let value: Value = context.funcall("[]", ("encoding",))?;
-        if value.to_bool() {
-            check_string(ruby, value)?;
-            encoding = Some(c_string(value)?);
-        }
-    }
-
-    Ok(Context::new(namespace, &name)
-        .with_encoding(encoding)
-        .with_form_ancestor(has_form_ancestor(ruby, context)?))
+    let node = Obj::<Node>::try_convert(context)?;
+    let context = node
+        .with_arena(ruby, Context::of_node)?
+        .map_err(|error| context_error(ruby, error))?;
+    Ok(context.with_quirks_mode(quirks_mode_for(ruby, document)?))
 }
 
-/// Whether `node` or an element above it is an HTML `form`.
-fn has_form_ancestor(ruby: &Ruby, node: Value) -> Result<bool, Error> {
-    let mut node = node;
-    while !node.is_nil() {
-        if node.funcall::<_, _, Value>("element?", ())?.to_bool() {
-            let name = c_string_with_length(node.funcall("name", ())?)?;
-            if name.eq_ignore_ascii_case(b"form")
-                && namespace_of(ruby, node)? == Some(ContextNamespace::Html)
-            {
-                return Ok(true);
-            }
-        }
-        node = if node.respond_to("parent", false)? {
-            node.funcall("parent", ())?
-        } else {
-            ruby.qnil().as_value()
-        };
+fn context_error(ruby: &Ruby, error: ContextError) -> Error {
+    match error {
+        ContextError::NoName => Error::new(
+            ruby.exception_type_error(),
+            "wrong argument type nil (expected String)",
+        ),
+        ContextError::UnknownNamespace(href) => Error::new(
+            ruby.exception_arg_error(),
+            format!("Unexpected namespace URI \"{href}\""),
+        ),
     }
-    Ok(false)
 }
 
 /// A context given by name: `"tr"`, `"svg:path"`, or `"svg"` and `"math"`,
@@ -263,45 +234,16 @@ fn named_context(ruby: &Ruby, tag: &[u8]) -> Result<Context, Error> {
     Ok(Context::new(namespace, name).with_form_ancestor(form))
 }
 
-/// gumbo.c's `lookup_namespace`, through `node.namespace.href`; `None` for
-/// a namespace the parser has no rules for.
-fn namespace_of(ruby: &Ruby, node: Value) -> Result<Option<ContextNamespace>, Error> {
-    let namespace: Value = node.funcall("namespace", ())?;
-    if namespace.is_nil() {
-        return Ok(Some(ContextNamespace::Html));
-    }
-    let href: Value = namespace.funcall("href", ())?;
-    check_string(ruby, href)?;
-    Ok(match &*c_string_with_length(href)? {
-        b"http://www.w3.org/1999/xhtml" => Some(ContextNamespace::Html),
-        b"http://www.w3.org/1998/Math/MathML" => Some(ContextNamespace::MathMl),
-        b"http://www.w3.org/2000/svg" => Some(ContextNamespace::Svg),
-        _ => None,
-    })
-}
-
-/// No quirks unless the context is a node of a parsed document; then the
-/// quirks mode its doctype selects, or quirks if it has none.
-fn quirks_mode_for(document: Value, context: Value) -> Result<QuirksMode, Error> {
-    let doctype: Value = document.funcall("internal_subset", ())?;
-    let document_quirks_mode =
-        Obj::<Node>::try_convert(document)?.ivar_get::<_, Value>("@quirks_mode")?;
-    if context.is_nil() || RString::from_value(context).is_some() || document_quirks_mode.is_nil() {
+/// For a node context: no quirks unless the fragment's document was
+/// parsed, then the quirks mode of its doctype.
+fn quirks_mode_for(ruby: &Ruby, document: Value) -> Result<QuirksMode, Error> {
+    let parsed = !Obj::<Node>::try_convert(document)?
+        .ivar_get::<_, Value>("@quirks_mode")?
+        .is_nil();
+    if !parsed {
         return Ok(QuirksMode::NoQuirks);
     }
-    if doctype.is_nil() {
-        return Ok(QuirksMode::Quirks);
-    }
-    let field = |name: &str| -> Result<Option<Vec<u8>>, Error> {
-        let value: Value = doctype.funcall(name, ())?;
-        (!value.is_nil()).then(|| c_string(value)).transpose()
-    };
-    let (name, public_id, system_id) = (field("name")?, field("external_id")?, field("system_id")?);
-    Ok(html5::quirks_mode_for_doctype(
-        name.as_deref(),
-        public_id.as_deref(),
-        system_id.as_deref(),
-    ))
+    document::with_arena(ruby, document, html5::doctype_quirks_mode)
 }
 
 /// gumbo.c's `add_errors`: one `XML::SyntaxError` per parse error, set
