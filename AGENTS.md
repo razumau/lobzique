@@ -16,6 +16,7 @@ mise run check            # compile, Ruby tests, standard, core crate tests, cli
 mise run test             # compile + Minitest
 N=test_name mise run test # tests matching a name, in every file (Minitest 6 ignores TEST=)
 bundle exec ruby -Ilib:test test/html5/test_parsing.rb -n test_name   # one file, after mise run compile
+mise run test:facade      # the nokogiri facade (facade/) in its own bundle, test/facade/Gemfile
 mise run test:rust        # core crate tests; one test: cargo test -p lobzique-core <name>
 mise run deny             # cargo-deny: advisories, licenses, sources (deny.toml)
 mise run lint             # standard and clippy (lint:fix autofixes standard)

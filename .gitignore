@@ -13,3 +13,5 @@
 mkmf.log
 target/
 /inventory/raw/
+# Resolved from the main Gemfile.lock
+/test/facade/Gemfile.lock

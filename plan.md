@@ -257,6 +257,52 @@ html5lib tokenizer inputs.
      - lobzique: the other five assert Nokogiri's classes for
        `rendered.html`, `html_document` and `parsed_body`, which the README
        lists as a seam-mode limit.
+5. The `nokogiri` facade (decision 1): lobzique under Nokogiri's name for
+   apps with no XML gems, with one Gemfile line,
+   `gem "nokogiri", git: "https://github.com/razumau/lobzique"` (or
+   `path:`). Bundler finds both gemspecs there. Steps:
+   1. The gem. Done: `facade/nokogiri.gemspec` and `facade/lib/nokogiri.rb`
+      name the module, load lobzique, and port `version/info.rb`
+      (decision 1). Requiring lobzique before the facade raises, since the
+      two modules would differ. `rake test:facade` runs `test/facade` in its
+      own bundle (`test/facade/Gemfile`, the main lockfile's versions), as
+      real Nokogiri can't load beside the facade. There, Loofah has its
+      HTML5 classes and `Rails::HTML5::Sanitizer` runs unpatched.
+      rails-html-sanitizer's suites pass on the HTML5 side except the two
+      `<select>` cases below; Loofah's HTML5 side passes but for
+      `Nokogiri.HTML`; everything HTML4 (`Rails::HTML4`, Loofah's HTML4
+      classes, rails-dom-testing's default `:html4`) waits for step 2.
+   2. HTML4 parsing (decision 3). Done: `HTML4::Document.parse`,
+      `read_memory`, `read_io`, `title`, `meta_encoding`,
+      `DocumentFragment.parse` and `#initialize`, `HTML4.parse`/`fragment`,
+      `Nokogiri.HTML`/`HTML4` and `XML::Document#url`, with the HTML5
+      parser in `body` for fragments and no context for
+      `Document#fragment`, as `script/html4/shim.rb` measured. The input is
+      decoded as libxml2 2.13.9's source does it (ARCHITECTURE.md, HTML4
+      names): EncodingReader's last `<meta>`, canonical names for libxml2's
+      built-in decoders, the in-parse `<meta>`, the raw `HTTP-EQUIV` search
+      within what an IO has buffered, ISO-8859-1 otherwise, and libxml2's
+      encoding errors. `test/html4/test_parsing.rb` runs 26 encoding cases
+      on both roots. `script/differential --mode html4` compares
+      `document.encoding` and the decoded text, from a String and an IO:
+      on the fixtures every case matches but 37 tokenizer inputs whose
+      markup the parsers read differently; on the crawl 3069 of 3107
+      pages match, and the rest are bytes invalid in the declared encoding
+      (18), libiconv's and Ruby's tables (18), and two single pages
+      (`known.yml`).
+      Open: invalid bytes, `docs/html4-invalid-bytes.md`; U+FFFD until
+      then.
+   3. Facade suites. In `test:facade`: Loofah's, rails-html-sanitizer's
+      and rails-dom-testing's suites from `test/fixtures` as they are,
+      2055 runs, all passing but what's left out with a reason: XML
+      (decision 4), and tests of libxml2's tree (the HTML 4.0 doctype,
+      lowercased SVG names, the newline after `<pre>`, rails-dom-testing's
+      tests of which parser runs) and rails/rails-dom-testing#136, which
+      fails on Nokogiri too. Still to do: `measure:apps` with a facade
+      mode (Lobsters, Fizzy, Campfire, DocuSeal), and the facade's README.
+   `<select>`: decided, the facade patches Loofah. Its `scrub!` ends with
+   the vendor's `EscapeRawTextInSelect` (ARCHITECTURE.md, the nokogiri
+   facade), and rails-html-sanitizer's `<select>` tests pass on it.
 
 ## Decisions from the inventory
 
@@ -289,10 +335,9 @@ are in `inventory/raw/src`.
      `gem "nokogiri", git:/path:`, with a version that satisfies `~> 1.x`.
      Rails and Loofah run unpatched and libxml2 is gone.
 
-   Phases 2–4 build the core for seam mode only. The facade is a later,
-   separate gem; nothing in the core gem defines `Nokogiri` or behaves
-   differently because a facade might load it. Facade decisions are
-   collected here so the core keeps them possible, not to build them now:
+   Phases 2–4 built the core for seam mode only; phase 5 builds the facade,
+   a separate gem in `facade/`. Nothing in the core gem defines `Nokogiri`
+   or behaves differently because a facade might load it:
 
    - **Class names.** Decided: the facade defines `module Nokogiri` and
      `Lobzique = Nokogiri` before requiring lobzique, so the same class
@@ -302,23 +347,25 @@ are in `inventory/raw/src`.
      constant (`module Lobzique`, `define_module("Lobzique")` in the
      extension, which returns an existing module), and build messages from
      `self.class`/`rb_obj_classname`, never from a literal `"Lobzique::"`
-     or `"Nokogiri::"`.
-   - **Version and `uses_gumbo?`.** Open. The only runtime reader in the
-     inventory is `Loofah.html5_support?`, which needs
-     `Nokogiri::VERSION > 1.14.0` and `Nokogiri.uses_gumbo?`. Without them
-     Loofah skips its HTML5 classes and rails-html-sanitizer doesn't define
-     `Rails::HTML5::Sanitizer`. Parsing would still be HTML5 (decision 3),
-     but through the HTML4 class names, unlike the same app on real
-     Nokogiri. If the facade wants the HTML5 paths, it sets
-     `Nokogiri::VERSION` to its own gem version before requiring lobzique,
-     and `Lobzique::VERSION` is only defined when absent. The core keeps
-     `Lobzique::VERSION` until then.
+     or `"Nokogiri::"`. Neither gemspec may define either module, since
+     Bundler evaluates every gemspec in the repository at setup.
+   - **Version and `uses_gumbo?`.** Decided: the facade is version 1.19.7,
+     the Nokogiri whose Ruby layer lobzique ports, and `Nokogiri::VERSION`
+     says so; `Lobzique::VERSION` is defined only when absent. That
+     satisfies Loofah 2.25's `>= 1.19.5` and the rest of Rails' gems. The
+     only runtime reader in the inventory is `Loofah.html5_support?`, which
+     needs `Nokogiri.uses_gumbo?`; without it Loofah skips its HTML5 classes
+     and rails-html-sanitizer doesn't define `Rails::HTML5::Sanitizer`. The
+     facade answers it, `uses_libxml?` and `VERSION_INFO` with Nokogiri's
+     own `version/info.rb`, over constants that claim libxml2 2.13.9, the
+     version whose behavior the core reproduces.
    - **`libxml2?`.** Loofah's `force_correct_attribute_escaping!`
      percent-escapes spaces and quotes in `href`, `action`, `src` and `a`'s
      `name` when `Nokogiri::VersionInfo.instance.libxml2?` is true. In seam
      mode it is true, and the vendor matches `Rails::HTML5` because of
      that, so the facade has to answer true as well.
-   - **HTML4 parsing.** Decided in decision 3, built with the facade.
+   - **HTML4 parsing.** Decided in decision 3, built with the facade
+     (phase 5).
 2. **XPath.** Decided: XPath 1.0 as libxml2 evaluates it, without the
    namespace axis.
 

@@ -4,8 +4,19 @@ require "bundler/gem_tasks"
 require "minitest/test_task"
 
 test_task = Minitest::TestTask.create do |t|
-  # test/fixtures/ holds upstream test files kept as data, not tests to run
-  t.test_globs = FileList["test/**/{test_*,*_test}.rb"].exclude("test/fixtures/**/*")
+  # test/fixtures/ holds upstream test files kept as data, not tests to run;
+  # test/facade/ runs in its own bundle (test:facade)
+  t.test_globs = FileList["test/**/{test_*,*_test}.rb"].exclude("test/fixtures/**/*", "test/facade/**/*")
+end
+
+desc "Run the nokogiri facade's tests in its own bundle (test/facade/Gemfile), where nokogiri is lobzique"
+task "test:facade" => :compile do
+  Bundler.with_unbundled_env do
+    env = {"BUNDLE_GEMFILE" => File.expand_path("test/facade/Gemfile", __dir__)}
+    sh env, "bundle", "install", "--quiet"
+    files = FileList["test/facade/test_*.rb"]
+    sh env, "bundle", "exec", "ruby", "-e", "ARGV.each { require File.expand_path(_1) }", *files
+  end
 end
 
 require "standard/rake"

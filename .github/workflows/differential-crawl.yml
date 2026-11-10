@@ -42,3 +42,6 @@ jobs:
       - name: Compare Action Text content with Nokogiri's
         if: ${{ !cancelled() }}
         run: bundle exec ruby -Ilib script/differential --mode action_text --corpus crawl --show 30
+      - name: Compare HTML4 decoding with libxml2's
+        if: ${{ !cancelled() }}
+        run: bundle exec ruby -Ilib script/differential --mode html4 --corpus crawl --show 30

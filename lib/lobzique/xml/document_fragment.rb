@@ -31,9 +31,7 @@ module Lobzique
         children = if context
           context.parse(tags, options)
         else
-          # lobzique: XML parsing is out of scope (plan.md decision 4).
-          # HTML4::DocumentFragment reaches this branch until its own
-          # #initialize is ported with the facade (plan.md decision 3).
+          # lobzique: XML parsing is out of scope (plan.md decision 4)
           raise NotImplementedError, "#{XML::Document}.parse isn't supported"
         end
         children.each { |child| child.parent = self }

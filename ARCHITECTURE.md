@@ -41,10 +41,36 @@ when the Nokogiri version in `Gemfile.lock` moves.
 - `css/parser`, `tokenizer`, `xpath_visitor` and `css/node`: ported to the
   core instead (`css`), so `Searchable` gets a compiled `CSS::Selector`
   where Nokogiri gets an XPath string.
-- `html4/encoding_reader`: not yet. HTML4 parsing comes with the facade,
-  which ports it, because the HTML4 names keep libxml2's encoding handling
-  (plan.md decision 3).
 - SAX, XSLT, Builder, Reader, Schema and RelaxNG.
+
+### HTML4 names (`lib/lobzique/html4`)
+
+The HTML4 names parse with the HTML5 parser but decode their input as
+libxml2 2.13 does (plan.md decision 3), so `document.encoding` and the
+text are what Nokogiri gives. `HTML4::Document.parse` is Nokogiri's;
+`read_memory` and `read_io`, native in Nokogiri, are Ruby here and call
+`EncodingReader.decode`, which follows libxml2's source:
+
+- a given encoding (or a Ruby string's tag, or what
+  `EncodingReader.detect_encoding` finds) decodes the input; a built-in
+  libxml2 decoder's name becomes `document.encoding` canonicalized,
+  any other as written; an unsupported one is a warning, and the guess
+  follows;
+- with none: a BOM; UTF-8 for input starting `<?xm`; the first supported
+  `<meta>` declaration before any non-ASCII byte, with the last one
+  declared as `document.encoding` (`htmlCheckMeta`); else at the first
+  non-ASCII byte a raw search for `HTTP-EQUIV`…`CHARSET=`, within what an
+  IO has buffered (`htmlFindEncoding`); else ISO-8859-1.
+
+`detect_encoding` and the `<meta>` rule read `<meta>` elements from an
+extra HTML5 parse of the input as ISO-8859-1, where Nokogiri runs libxml2's
+SAX parser. Only binary strings and IO without an encoding get there, and
+only input containing `<meta`. `script/differential --mode html4` compares
+`encoding` and the decoded text with Nokogiri on the fixtures and the crawl.
+
+Fragments parse with the HTML5 fragment parser, in `body` or in the context
+given; `HTML4::Document#fragment` passes none, where Nokogiri passes the
+root, whose HTML5 context would wrap the input in a `body`.
 
 **Facade-safe.**
 - Code inside `module Lobzique` refers to constants relatively or through
@@ -102,6 +128,28 @@ again. The rest of Action Text runs unchanged on lobzique nodes.
   2.3.0, so the seam accepts only 2.3.x.
 
 Nokogiri objects take rails-dom-testing's code in all three.
+
+### The nokogiri facade (`facade/`)
+
+A separate gem named `nokogiri` (plan.md phase 5), never pushed to
+RubyGems. `facade/lib/nokogiri.rb` defines `module Nokogiri`, sets
+`Lobzique = Nokogiri` and then requires lobzique, which reopens that module,
+so every class reports `Nokogiri::…`. What Nokogiri's extension defines and
+lobzique's doesn't, the libxml2 constants that `version/info.rb` reads, is in
+`facade/lib/nokogiri/extension.rb`. Ported files follow the rest of `lib/`:
+Nokogiri's path, a header naming it, `# lobzique:` on changes.
+
+One patch to Loofah, which otherwise runs unchanged:
+`facade/lib/nokogiri/loofah.rb` prepends to `Loofah::ScrubBehavior::Node` the
+`EscapeRawTextInSelect` step that `Lobzique::Sanitizer`'s `scrub!` ends with,
+in the outermost `scrub!` only, since escaping twice would double-escape.
+Loofah requires nokogiri before it defines that module, so the patch waits
+for it with `const_added` hooks.
+
+Its tests run in their own bundle (`test/facade/Gemfile`, `rake
+test:facade`), with no real Nokogiri to compare against: the facade's own,
+and Loofah's, rails-html-sanitizer's and rails-dom-testing's suites from
+`test/fixtures` as they are, with what's left out listed with a reason.
 
 ## Native boundary (`ext/lobzique`)
 
@@ -323,7 +371,9 @@ assemble it.
 | undefined namespace prefix | raised when libxml2 reaches the step | raised before evaluating | the same unless the step is never reached |
 | nested parentheses in CSS | unlimited | at most 32 deep, else `CSS::SyntaxError` | the tree is recursive to translate and evaluate, about 4 KB of stack a level; real selectors nest two or three deep |
 | CSS on HTML4 documents | names without a prefix match elements in no namespace, which is every element of an HTML4 parse | they match in any namespace, as in HTML5 documents | HTML4 names parse as HTML5 (decision 3), so `svg` has a namespace |
-| HTML4 names | libxml2's HTML4 parser and serializer | the HTML5 parser and serializer, with libxml2's encoding handling; `HTML5::Node`'s overrides apply to any `HTML4::Document`, which parses and serializes `noscript` content as markup | decision 3 |
+| HTML4 names | libxml2's HTML4 parser and serializer | the HTML5 parser and serializer, with libxml2's encoding handling (HTML4 names, above); `HTML5::Node`'s overrides apply to any `HTML4::Document`, which parses and serializes `noscript` content as markup; no HTML 4.0 doctype is added to parsed documents; parse options are ignored; html5ever's errors, at most 100 a parse, after libxml2's encoding warnings and errors | decision 3 |
+| bytes invalid in an HTML4 document's encoding | raw in UTF-8 text, ISO-8859-1 in attributes; in an iconv encoding the parse stops | U+FFFD, and the parse goes on | the HTML5 parser takes only valid UTF-8; open, `docs/html4-invalid-bytes.md` |
+| HTML4 input decoders | libxml2's and libiconv's | Ruby's transcoders, with libiconv's other names for them; a name Ruby can't transcode from is unsupported | the core has no transcoders; a few East Asian characters map differently (`test/differential/known.yml`) |
 | `Node#parse` / `in_context` | libxml2's HTML4 parser, even in HTML5 documents; libxml2's XML parser in XML documents | the HTML5 fragment parser with the document's quirks mode and `parse_noscript_content_as_text`, in the context of the nearest element, or in `body` where there is none or it is in a namespace the parser has no rules for; html5ever's errors, at most 100 a parse as libxml2 keeps; `NotImplementedError` in XML documents | one parser; XML parsing is out of scope (decision 4) |
 | `Node#parse` after errors with nothing parsed | parses again as a fragment without the context, in a new document | returns the empty NodeSet | the fallback emulates recovery for libxml2 < 2.13; the HTML5 parser always recovers |
 | nodes `in_context` returns | unlinked, but each keeps its `previous_sibling` | unlinked from each other too | a stale link into nodes that aren't siblings |
@@ -344,7 +394,10 @@ assemble it.
   `HTML5.read_and_encode`) → `Html5ever.parse(string, url, self, …)` → the
   core builds an arena, a chunk at a time, without the GVL from 1 MB → it
   is wrapped as `self`, which may be Loofah's subclass → `initialize` →
-  `@url`, `@quirks_mode`, `@errors`.
+  `@url`, `@quirks_mode`, `@errors`. `HTML4.parse(bytes)` →
+  `HTML4::Document.parse` → `EncodingReader.detect_encoding` →
+  `read_memory` → `EncodingReader.decode` → `Html5ever.parse` → the
+  decoded `encoding` and libxml2's encoding errors.
 - **Mutation.** `node.add_child("<b>x</b>")` → `coerce` → `fragment`, which
   parses in the context of `node` (`HTML5::Node#fragment`) →
   `add_child_node_and_reparent_attrs` → native `add_child_node` → core

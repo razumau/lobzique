@@ -5,5 +5,10 @@
 require_relative "html4"
 
 module Lobzique
+  # Alias for Nokogiri::HTML4
   HTML = HTML4
+
+  # :singleton-method: HTML
+  # Parse HTML. Convenience method for Nokogiri::HTML4::Document.parse
+  define_singleton_method(:HTML, Lobzique.method(:HTML4))
 end

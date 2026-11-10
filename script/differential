@@ -13,6 +13,8 @@
 #                                            Lobzique::Sanitizer, plan.md phase 3)
 #   script/differential --mode action_text   read each case as Action Text content, with
 #                                            Nokogiri's classes and lobzique's (plan.md phase 4)
+#   script/differential --mode html4         parse each document's bytes with the HTML4 names
+#                                            and compare the decoding (plan.md phase 5)
 #
 # Until Lobzique can parse, it reports itself skipped and exits 0.
 
@@ -24,7 +26,7 @@ require_relative "../test/differential/harness"
 options = {corpus: "fixtures", mode: "parse", only: nil, show: 10, oracle_only: false}
 OptionParser.new do |opts|
   opts.on("--corpus NAME", Differential::Corpus.names) { options[:corpus] = _1 }
-  opts.on("--mode MODE", %w[parse sanitize action_text]) { options[:mode] = _1 }
+  opts.on("--mode MODE", %w[parse sanitize action_text html4]) { options[:mode] = _1 }
   opts.on("--only REGEXP", Regexp) { options[:only] = _1 }
   opts.on("--show N", Integer, "failures to print (default 10)") { options[:show] = _1 }
   opts.on("--oracle-only", "parse with Nokogiri only") { options[:oracle_only] = true }
@@ -48,6 +50,10 @@ when "action_text"
   require_relative "../test/differential/action_text"
   cases = Differential::Corpus.each_action_text(options[:corpus])
   harness_class = Differential::ActionTextHarness
+when "html4"
+  require_relative "../test/differential/html4"
+  cases = Differential::Corpus.each(options[:corpus]).select { _1.kind == :document }
+  harness_class = Differential::HTML4Harness
 else
   cases = Differential::Corpus.each(options[:corpus])
   harness_class = Differential::Harness
