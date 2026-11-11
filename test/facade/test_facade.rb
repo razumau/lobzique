@@ -50,6 +50,38 @@ class TestFacade < Minitest::Test
     assert_equal %(<a href="x%20y">x</a>y), Rails::HTML5::SafeListSanitizer.new.sanitize(%(<a href="x y" onclick="1">x</a><script>y</script>))
   end
 
+  RAW_TEXT_IN_SELECT = "<select><style><img src=x onerror=alert(1)></style></select>"
+  ESCAPED_IN_SELECT = "<select><style>&lt;img src=x onerror=alert(1)&gt;</style></select>"
+
+  # facade/lib/nokogiri/loofah.rb
+  def test_loofah_escapes_raw_text_in_select_once
+    require "loofah"
+    keep = Loofah::Scrubber.new { Loofah::Scrubber::CONTINUE }
+    assert_equal ESCAPED_IN_SELECT, Loofah.html5_fragment(RAW_TEXT_IN_SELECT).scrub!(keep).to_s
+    assert_equal ESCAPED_IN_SELECT, Loofah.html5_fragment(RAW_TEXT_IN_SELECT).scrub!(keep).scrub!(keep).to_s
+    assert_equal ESCAPED_IN_SELECT, Loofah.html5_document(RAW_TEXT_IN_SELECT).scrub!(keep).at_css("select").to_s
+    assert_equal "<select><style>a &amp; b</style></select>",
+      Loofah.html5_fragment("<select><style>a &amp; b</style></select>").scrub!(keep).to_s
+  end
+
+  def test_loofah_escapes_in_a_document_scrubbed_inside_a_scrubber
+    require "loofah"
+    keep = Loofah::Scrubber.new { Loofah::Scrubber::CONTINUE }
+    inner = nil
+    outer = Loofah::Scrubber.new do
+      inner ||= Loofah.html5_fragment(RAW_TEXT_IN_SELECT).scrub!(keep).to_s
+      Loofah::Scrubber::CONTINUE
+    end
+    Loofah.html5_fragment("<p>x</p>").scrub!(outer)
+    assert_equal ESCAPED_IN_SELECT, inner
+  end
+
+  def test_loofah_hook_is_removed
+    require "loofah"
+    assert_equal Module, Object.singleton_class.instance_method(:const_added).owner
+    assert_equal "Loofah::ScrubBehavior::Node", Loofah::ScrubBehavior::Node.name
+  end
+
   def test_parse_guesses_html
     html = "<!DOCTYPE html><html><body><p>x</p></body></html>"
     assert_kind_of Nokogiri::HTML4::Document, Nokogiri.parse(html)

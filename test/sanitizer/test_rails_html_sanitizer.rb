@@ -111,6 +111,7 @@ class LobziqueSafeListSanitizerTest < Minitest::Test
     scrubber.tags = %w[select style img]
     fragment = Lobzique::Sanitizer::DocumentFragment.parse("<select><style><img src=x onerror=alert(1)></style></select>")
     assert_equal "<select><style>&lt;img src=x onerror=alert(1)&gt;</style></select>", fragment.scrub!(scrubber).to_s
+    assert_equal "<select><style>&lt;img src=x onerror=alert(1)&gt;</style></select>", fragment.scrub!(scrubber).to_s
   end
 
   # The cases of HTML5SafeListSanitizerTest that name Rails::HTML5 directly.

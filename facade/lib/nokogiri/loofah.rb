@@ -3,9 +3,7 @@
 # lobzique's own (plan.md phase 5): on the facade, Loofah's scrub! runs
 # unpatched, so it would leave raw text in a <select> as html5ever keeps it.
 # This adds the step Lobzique::Sanitizer's scrub! ends with
-# (lobzique/sanitizer/escape_raw_text_in_select.rb). Loofah requires nokogiri
-# before it defines ScrubBehavior::Node, so the step is prepended when that
-# module is defined.
+# (lobzique/sanitizer/escape_raw_text_in_select.rb).
 
 require "lobzique/sanitizer/escape_raw_text_in_select"
 
@@ -13,40 +11,38 @@ module Nokogiri
   module Facade
     module Loofah
       module ScrubBehaviorNode
-        # Loofah scrubs a fragment through children.scrub!, and escaping
-        # isn't idempotent, so only the outermost scrub! escapes.
         def scrub!(scrubber)
-          return super if Thread.current[:lobzique_facade_scrubbing]
-
-          begin
-            Thread.current[:lobzique_facade_scrubbing] = true
-            super
-          ensure
-            Thread.current[:lobzique_facade_scrubbing] = nil
-          end
+          super
           Sanitizer::EscapeRawTextInSelect.call(self)
           self
         end
       end
 
-      # Each hook waits for the next constant on the way to
-      # Loofah::ScrubBehavior::Node, unless something has defined it already.
-      def self.on_const_added(name, mod, &block)
-        return block.call(mod.const_get(name, false)) if mod.const_defined?(name, false)
-
-        hook = Module.new do
-          define_method(:const_added) do |added|
-            super(added)
-            block.call(const_get(added, false)) if added == name
-          end
+      # Opens Loofah's module ahead of Loofah, which reopens it to define
+      # scrub!.
+      def self.patch
+        node = %i[ScrubBehavior Node].inject(::Loofah) do |mod, name|
+          mod.const_defined?(name, false) ? mod.const_get(name, false) : mod.const_set(name, Module.new)
         end
-        mod.singleton_class.prepend(hook)
+        node.prepend(ScrubBehaviorNode)
       end
 
-      on_const_added(:Loofah, Object) do |loofah|
-        on_const_added(:ScrubBehavior, loofah) do |scrub_behavior|
-          on_const_added(:Node, scrub_behavior) { |node| node.prepend(ScrubBehaviorNode) }
+      # Loofah requires nokogiri before it defines anything, so the patch
+      # waits for the Loofah constant. The hook is gone once it has run.
+      module WhenLoofahIsDefined
+        def const_added(name)
+          super
+          return unless name == :Loofah
+
+          WhenLoofahIsDefined.send(:remove_method, :const_added)
+          Facade::Loofah.patch
         end
+      end
+
+      if Object.const_defined?(:Loofah, false)
+        patch
+      else
+        Object.singleton_class.prepend(WhenLoofahIsDefined)
       end
     end
   end

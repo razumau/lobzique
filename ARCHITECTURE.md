@@ -152,10 +152,11 @@ works and XML input reaches the stub.
 
 One patch to Loofah, which otherwise runs unchanged:
 `facade/lib/nokogiri/loofah.rb` prepends to `Loofah::ScrubBehavior::Node` the
-`EscapeRawTextInSelect` step that `Lobzique::Sanitizer`'s `scrub!` ends with,
-in the outermost `scrub!` only, since escaping twice would double-escape.
-Loofah requires nokogiri before it defines that module, so the patch waits
-for it with `const_added` hooks.
+`EscapeRawTextInSelect` step that `Lobzique::Sanitizer`'s `scrub!` ends with.
+The step is idempotent, so it needs no guard against Loofah's fragments
+scrubbing each child. Loofah requires nokogiri before it defines anything,
+so one `const_added` hook on `Object` waits for `Loofah`, opens the module
+ahead of Loofah and removes itself.
 
 Its tests run in their own bundle (`test/facade/Gemfile`, `rake
 test:facade`), with no real Nokogiri to compare against: the facade's own,
