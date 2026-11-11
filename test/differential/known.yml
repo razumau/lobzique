@@ -5,6 +5,8 @@
 #   - match: regexp against the case id (e.g. \Awpt-parsing/tree-construction/tests1\.dat#12\z)
 #     reason: why lobzique differs and why that is acceptable
 #     mode: the script/differential --mode it is for: sanitize, action_text or html4 (default: parse)
+#     platform: regexp against RUBY_PLATFORM, for a difference Nokogiri has only on some
+#       platforms (default: all). CI runs on Linux.
 - match: \Awpt-parsing/tree-construction/(menuitem-element\.dat#14|tests1\.dat#(30|100)|tests10\.dat#(4|5|17|18)|tests18\.dat#(14|15)|tests7\.dat#34|tests9\.dat#(5|6|18|19)|tests_innerHTML_1\.dat#(77|78)|webkit02\.dat#(19|36|38|39|40|41|42|43))\z
   reason: >-
     html5ever implements the 2025 customizable <select> parsing, which keeps
@@ -70,12 +72,27 @@
     first one in an iconv encoding and keeps them raw in UTF-8; lobzique
     reads them as U+FFFD and goes on. Open: docs/html4-invalid-bytes.md.
 - mode: html4
-  match: \Acrawl/CC-MAIN-(20261005105623-20261005135623-00000\.warc\.gz@30691169|20261009160033-20261009190033-00333\.warc\.gz@(347151|4813421|6468467|9443749|22896815|29555718|39363293)|20261013211541-20261014001541-00666\.warc\.gz@(16961|22529|41761|15513020|20476349|24733340|30202113|35750466|36145018|38986006))\z
+  match: \Acrawl/CC-MAIN-(20261005105623-20261005135623-00000\.warc\.gz@30691169|20261009160033-20261009190033-00333\.warc\.gz@(4813421|6468467|9443749|22896815|29555718|39363293)|20261013211541-20261014001541-00666\.warc\.gz@(16961|22529|41761|15513020|20476349|30202113|35750466|36145018|38986006))\z
   reason: >-
-    libiconv's tables and Ruby's transcoders map a few characters of the
-    East Asian encodings differently (GB2312 A1AA is U+2015 in libiconv and
-    U+2014 in Ruby, Big5 A1E3 U+223C and U+FF5E, Shift_JIS 0x5C U+00A5 and
-    a backslash). lobzique has no transcoders of its own.
+    iconv's tables (GNU libiconv's and glibc's) and Ruby's transcoders map
+    a few characters of the East Asian encodings differently (GB2312 A1AA
+    is U+2015 in iconv and U+2014 in Ruby, GB2312 A1A4 U+30FB and U+00B7,
+    Big5 A1E3 U+223C and U+FF5E in libiconv, Shift_JIS 0x5C U+00A5 and a
+    backslash). lobzique has no transcoders of its own.
+- mode: html4
+  platform: darwin
+  match: \Acrawl/CC-MAIN-(20261009160033-20261009190033-00333\.warc\.gz@347151|20261013211541-20261014001541-00666\.warc\.gz@24733340)\z
+  reason: >-
+    East Asian characters as above, which glibc's iconv, Nokogiri's on
+    Linux, maps as Ruby does.
+- mode: html4
+  platform: darwin
+  match: \Acrawl/CC-MAIN-(20261005105623-20261005135623-00000\.warc\.gz@(16969457|16982716|37718984)|20261013211541-20261014001541-00666\.warc\.gz@40427638)\z
+  reason: >-
+    Charset names with stray punctuation (utf-8", "utf-8", ))ISO-8859-1).
+    lobzique looks them up as glibc's iconv does, ignoring the punctuation,
+    so it matches Nokogiri on Linux. Nokogiri on macOS uses GNU libiconv,
+    which rejects them and falls back to ISO-8859-1.
 - mode: html4
   match: \Acrawl/CC-MAIN-20261013211541-20261014001541-00666\.warc\.gz@15575392\z
   reason: >-

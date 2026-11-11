@@ -57,6 +57,28 @@ module HTML4ParsingContract
     end
   end
 
+  # Names with stray punctuation. libxml2 hands them to iconv: glibc's drops
+  # all but letters, digits and "_-.,:/" (Nokogiri on Linux), GNU libiconv
+  # takes them as written (macOS, Windows). lobzique reads them as glibc.
+  # [input, given encoding] => [with glibc, with libiconv]
+  PUNCTUATED_NAMES = {
+    ["<p>café</p>".b, %("utf-8")] => [[%("utf-8"), "café"], ["ISO-8859-1", "cafÃ©"]],
+    ["<p>café</p>".b, "utf 8"] => [["utf 8", "café"], ["ISO-8859-1", "cafÃ©"]],
+    ["<p>caf\xE9</p>".b, "))ISO-8859-1"] => [["))ISO-8859-1", "café"], ["ISO-8859-1", "café"]],
+    ["<p>\xC1</p>".b, "koi8-r//x"] => [["koi8-r//x", "а"], ["ISO-8859-1", "Á"]],
+    [%(<meta charset=koi8-r"><p>\xC1</p>).b, nil] => [[%(koi8-r"), "а"], ["ISO-8859-1", "Á"]],
+    [%(<meta http-equiv=Content-Type content='text/html; charset="koi8-r"'><p>\xC1</p>).b, nil] => [[%("koi8-r"), "а"], ["ISO-8859-1", "Á"]],
+    # punctuation glibc keeps
+    ["<p>café</p>".b, ".utf-8"] => [["ISO-8859-1", "cafÃ©"], ["ISO-8859-1", "cafÃ©"]]
+  }.freeze
+
+  def test_punctuated_names
+    PUNCTUATED_NAMES.each do |(input, encoding), (glibc, libiconv)|
+      doc = root::HTML4(input, nil, encoding)
+      assert_equal glibc_iconv? ? glibc : libiconv, [doc.encoding, doc.at_css("p").text], "#{input.inspect} with #{encoding.inspect}"
+    end
+  end
+
   def test_io
     {
       "<meta charset=iso-8859-1><p>caf\xE9</p>".b => ["ISO-8859-1", "café"],
@@ -135,12 +157,17 @@ class TestHTML4ParsingNokogiri < Minitest::Test
   include HTML4ParsingContract
 
   def root = Nokogiri
+
+  # Nokogiri's extconf builds GNU libiconv except on Linux and other Unix
+  def glibc_iconv? = RUBY_PLATFORM.match?(/-linux(-gnu)?\z/)
 end
 
 class TestHTML4ParsingLobzique < Minitest::Test
   include HTML4ParsingContract
 
   def root = Lobzique
+
+  def glibc_iconv? = true
 
   # What libxml2 does differently, with the reason.
 
@@ -158,6 +185,12 @@ class TestHTML4ParsingLobzique < Minitest::Test
     assert_equal ["ISO-8859-1", "café", "WARNING: Unsupported encoding: EUC-TW"], [doc.encoding, doc.at_css("p").text, doc.errors.first.message]
     doc = Lobzique::HTML4("<p>\e$BF|\xFF\xFF\e(B x</p>".b, nil, "ISO-2022-JP")
     assert_equal ["ISO-2022-JP", "日\uFFFD\uFFFD x"], [doc.encoding, doc.at_css("p").text]
+  end
+
+  # glibc reads a name that is all punctuation as the locale's encoding
+  def test_name_of_punctuation_only
+    doc = Lobzique::HTML4("<p>caf\xE9</p>".b, nil, %(""))
+    assert_equal ["ISO-8859-1", "café", %(WARNING: Unsupported encoding: "")], [doc.encoding, doc.at_css("p").text, doc.errors.first.message]
   end
 
   # A character reference in the charset is no name. libxml2 on macOS ignores

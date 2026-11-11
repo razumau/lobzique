@@ -322,9 +322,11 @@ module Lobzique
         end
 
         # A decoder iconv would open, if Ruby can transcode from it. Ruby's
-        # names for UTF-8 aren't iconv's, and UTF-8 itself is built in.
+        # other names for UTF-8 aren't iconv's.
         def iconv(name)
-          return if RUBY_ONLY.any? { _1.casecmp?(name) }
+          name = glibc_name(name)
+          return Encoding::UTF_8 if name.casecmp?("UTF-8") || name.casecmp?("UTF8")
+          return if name.empty? || RUBY_ONLY.any? { _1.casecmp?(name) }
 
           candidates = ICONV.filter_map { |pattern, rename| (m = pattern.match(name)) && rename.call(m) } << name
           candidates.each do |candidate|
@@ -337,6 +339,23 @@ module Lobzique
             next
           end
           nil
+        end
+
+        # The name glibc's iconv_open looks up (gconv_parse_code and strip
+        # in gconv_charset.c): without suffixes after a second "/", trailing
+        # blanks, "," and "/", and any character but letters, digits and
+        # "_-.,:/", so `"utf-8"` is UTF-8. Nokogiri uses GNU libiconv on
+        # macOS and Windows, which takes the name as given. An empty name is
+        # the locale's encoding in glibc; it's unsupported here.
+        def glibc_name(name)
+          code = name.b
+          loop do
+            code = code.sub(%r{[\s,/]+\z}n, "")
+            break if code.count("/") < 2
+
+            code = code.byteslice(0, code.rindex(%r{[/,]}n))
+          end
+          code.delete("^A-Za-z0-9_.,:/-")
         end
 
         def syntax_error(message, domain:, code:, level:, str1: nil, line: 0, column: 0)
