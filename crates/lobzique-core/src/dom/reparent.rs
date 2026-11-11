@@ -130,7 +130,7 @@ impl Document {
             Position::After => self.insert_after(pivot, inserted).map(|()| inserted),
             Position::Replace => self.replace_merging_text(pivot, inserted),
         }
-        .map_err(|_| ReparentError::Refused)?;
+        .expect("the checks above cover the tree's");
         self.relink_namespaces(reparented, namespace_inheritance);
         Ok(reparented)
     }
