@@ -56,11 +56,14 @@ pub struct Call {
 }
 
 impl Call {
-    /// Numbers compare by bit pattern, so `NaN` finds its answer.
+    /// Numbers compare by bit pattern, so `NaN` finds its answer and 0 and
+    /// -0 stay apart. Every `NaN` is one key: arithmetic leaves a `NaN`'s
+    /// sign and payload unspecified, so `0 div 0` can differ between runs.
     fn key(&self) -> (usize, NodeId, impl Iterator<Item = ArgumentKey<'_>>) {
         let arguments = self.arguments.iter().map(|value| match value {
             Value::NodeSet(nodes) => ArgumentKey::NodeSet(nodes),
             Value::Boolean(b) => ArgumentKey::Boolean(*b),
+            Value::Number(n) if n.is_nan() => ArgumentKey::Number(f64::NAN.to_bits()),
             Value::Number(n) => ArgumentKey::Number(n.to_bits()),
             Value::String(s) => ArgumentKey::String(s),
         });
