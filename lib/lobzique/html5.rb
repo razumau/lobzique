@@ -82,7 +82,8 @@ module Lobzique
           end
         end
 
-        body.encode(Encoding::UTF_8)
+        # lobzique: Nokogiri raises on a byte the encoding doesn't have
+        body.encode(Encoding::UTF_8, invalid: :replace, undef: :replace)
       end
     end
   end

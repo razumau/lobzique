@@ -213,7 +213,6 @@ module NodeReparentingContract
     b, i = at(doc, "b"), at(doc, "i")
     error = assert_raises(RuntimeError) { b.add_next_sibling(b) }
     assert_equal "Could not reparent node", error.message
-    assert_nil b.parent, "Nokogiri unlinks the node before libxml2 refuses"
 
     error = assert_raises(RuntimeError) { i.add_child(i) }
     assert_equal "Could not reparent node", error.message
@@ -612,6 +611,17 @@ class TestNodeReparentingLobzique < Minitest::Test
     assert_equal "b", i.parent.name
   end
 
+  # A departure: Nokogiri unlinks the node before libxml2 refuses
+  def test_refused_nodes_stay_where_they_were
+    doc = document
+    b = at(doc, "b")
+    html = doc.to_html
+    assert_raises(RuntimeError) { b.add_next_sibling(b) }
+    assert_raises(RuntimeError) { b.replace(b) }
+    assert_raises(RuntimeError) { doc.create_element("q").add_previous_sibling(b) }
+    assert_equal html, doc.to_html
+  end
+
   # Nokogiri repoints a live node; repointing would leave its object in the
   # old node's cache slot
   def test_copying_into_a_live_node_is_refused
@@ -628,5 +638,16 @@ class TestNodeReparentingLobzique < Minitest::Test
     attribute = at(doc, "div").attribute("id")
     error = assert_raises(ArgumentError) { attribute.send(:add_child_node, doc.create_text_node("x")) }
     assert_equal "cannot reparent Lobzique::XML::Text there", error.message
+  end
+
+  def test_attributes_have_no_siblings
+    doc = document
+    attribute = at(doc, "div").attribute("id")
+    html = doc.to_html
+    [:add_next_sibling_node, :add_previous_sibling_node, :replace_node].each do |method|
+      error = assert_raises(RuntimeError) { attribute.send(method, at(doc, "b")) }
+      assert_equal "Could not reparent node", error.message
+    end
+    assert_equal html, doc.to_html
   end
 end

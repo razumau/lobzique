@@ -25,7 +25,8 @@ pub enum ReparentError {
     /// Nokogiri's DOM check refuses this kind of node under this parent.
     NotAllowed,
     /// libxml2 refuses to put a node into or next to itself, or next to a
-    /// node with no parent. The node has been unlinked, as in Nokogiri.
+    /// node with no parent or an attribute. Nokogiri raises after unlinking the node; here
+    /// nothing has changed.
     Refused,
     /// The node would become its own ancestor. Nokogiri raises after
     /// libxml2 has linked the cycle; here nothing has changed.
@@ -92,6 +93,13 @@ impl Document {
         }
 
         let is_text = node_type == NodeType::Text;
+        let beside_itself =
+            is_self && is_text && matches!(position, Position::Before | Position::After);
+        // An attribute has an element but no siblings
+        let no_siblings = parent.is_none() || self.node_type(pivot) == NodeType::Attribute;
+        if (is_self || (position != Position::LastChild && no_siblings)) && !beside_itself {
+            return Err(ReparentError::Refused);
+        }
         let inserted = if source.is_some() || is_text {
             let copy = match source.as_deref() {
                 Some(source) => self.import(source, node, CopyDepth::Deep),
@@ -99,10 +107,6 @@ impl Document {
             };
             copy.ok_or(ReparentError::Refused)?
         } else {
-            if pivot == node {
-                self.detach(node);
-                return Err(ReparentError::Refused);
-            }
             if parent
                 .is_some_and(|parent| parent == node || self.ancestors(parent).any(|a| a == node))
             {
@@ -114,14 +118,11 @@ impl Document {
             Some(source) => source.detach(node),
             None => self.detach(node),
         }
-        if is_self && matches!(position, Position::Before | Position::After) {
+        if beside_itself {
             // Text next to itself: Nokogiri links the copy beside the
             // unlinked original, outside any tree, and siblings here need a
             // parent, so the copy stays detached
             return Ok(inserted);
-        }
-        if position != Position::LastChild && self.parent(pivot).is_none() {
-            return Err(ReparentError::Refused);
         }
 
         let reparented = match position {

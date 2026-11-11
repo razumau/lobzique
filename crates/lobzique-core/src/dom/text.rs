@@ -76,17 +76,6 @@ impl Document {
             _ => None,
         }
     }
-
-    /// Turns a text node into a CDATA node or back; other nodes stay as
-    /// they are.
-    pub fn set_cdata(&mut self, id: NodeId, cdata: bool) {
-        let kind = &mut self.node_mut(id).kind;
-        *kind = match std::mem::replace(kind, NodeKind::Document) {
-            NodeKind::Text(text) | NodeKind::CData(text) if cdata => NodeKind::CData(text),
-            NodeKind::Text(text) | NodeKind::CData(text) => NodeKind::Text(text),
-            other => other,
-        };
-    }
 }
 
 /// What libxml2's `xmlNodeSetContent` decodes: the predefined entities and

@@ -468,7 +468,6 @@ impl Run {
                 builder,
                 max_attributes: options.max_attributes,
                 exceeded: Cell::new(false),
-                cdata: Cell::new(Cdata::Outside),
             },
             TokenizerOpts {
                 initial_state,
@@ -515,49 +514,16 @@ impl Run {
     }
 }
 
-/// Passes tokens to the tree builder, counting attributes and following
-/// CDATA sections on the way. Gumbo's tokenizer refuses a tag with more
-/// distinct attributes than the limit, and html5ever's has already dropped
-/// the duplicates.
+/// Passes tokens to the tree builder, counting attributes on the way.
+/// Gumbo's tokenizer refuses a tag with more distinct attributes than the
+/// limit, and html5ever's has already dropped the duplicates.
 struct Tokens {
     builder: TreeBuilder<NodeId, Sink>,
     max_attributes: Option<usize>,
     exceeded: Cell<bool>,
-    cdata: Cell<Cdata>,
-}
-
-/// Where the tokenizer is relative to a CDATA section. html5ever emits a
-/// section's text as character tokens, broken only around NUL characters:
-/// `Characters (Null Characters)*`. A NUL outside a section comes after a
-/// parse error, so the token sequence alone tells the two apart.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Cdata {
-    Outside,
-    /// `<![` in foreign content, which is either a section or a bogus
-    /// comment.
-    Opening,
-    /// Characters of a section, which goes on if a NUL follows.
-    Characters,
-    /// A NUL in a section, always followed by more of its characters.
-    Null,
 }
 
 impl Tokens {
-    /// Notes which part of a CDATA section, if any, `token` is.
-    fn follow_cdata(&self, token: &Token) -> TextSource {
-        use Cdata::*;
-        let (state, source) = match (self.cdata.get(), token) {
-            (Opening | Null, Token::CharacterTokens(_)) => (Characters, TextSource::Cdata),
-            (Characters, Token::NullCharacterToken) => (Null, TextSource::Null),
-            (state @ (Opening | Null), Token::NullCharacterToken) => (state, TextSource::Null),
-            (Null, Token::ParseError(_)) => (Null, TextSource::Data),
-            (_, Token::NullCharacterToken) => (Outside, TextSource::Null),
-            _ => (Outside, TextSource::Data),
-        };
-        self.cdata.set(state);
-        source
-    }
-
     fn limit_error(&self) -> Option<LimitError> {
         if self.exceeded.get() {
             Some(LimitError::TooManyAttributes)
@@ -579,8 +545,6 @@ impl TokenSink for Tokens {
                 self.exceeded.set(true);
             }
         }
-        let source = self.follow_cdata(&token);
-        self.builder.sink.text_source.set(source);
         self.builder.process_token(token, line_number)
     }
 
@@ -591,22 +555,9 @@ impl TokenSink for Tokens {
     /// The tokenizer asks this at `<![`, and opens a CDATA section if the
     /// answer is yes and `CDATA[` follows.
     fn adjusted_current_node_present_but_not_in_html_namespace(&self) -> bool {
-        let foreign = self
-            .builder
-            .adjusted_current_node_present_but_not_in_html_namespace();
-        if foreign {
-            self.cdata.set(Cdata::Opening);
-        }
-        foreign
+        self.builder
+            .adjusted_current_node_present_but_not_in_html_namespace()
     }
-}
-
-/// What the token being processed is, for the text it inserts.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum TextSource {
-    Data,
-    Cdata,
-    Null,
 }
 
 /// Builds the tree in the arena. A template's contents are its children,
@@ -621,7 +572,6 @@ struct Sink {
     too_deep: Cell<bool>,
     /// MathML `annotation-xml` elements whose content parses as HTML.
     integration_points: RefCell<HashSet<NodeId>>,
-    text_source: Cell<TextSource>,
 }
 
 impl Sink {
@@ -635,7 +585,6 @@ impl Sink {
             max_tree_depth,
             too_deep: Cell::new(false),
             integration_points: RefCell::default(),
-            text_source: Cell::new(TextSource::Data),
         }
     }
 
@@ -690,10 +639,11 @@ impl Sink {
         };
     }
 
-    /// Gumbo collects adjacent character tokens into one node, and types it
-    /// after the last one that isn't whitespace or NUL: CDATA if it came
-    /// from a CDATA section, text otherwise. Returns a new node to insert,
-    /// or `None` if the text went into the node next to it.
+    /// Adjacent character tokens make one text node. A CDATA section's
+    /// characters are text too, as in the HTML standard: gumbo makes a
+    /// CDATA node of them and of the text around them, which is serialized
+    /// raw. Returns a new node to insert, or `None` if the text went into
+    /// the node next to it.
     fn insert_text(
         &self,
         document: &mut Document,
@@ -705,34 +655,20 @@ impl Sink {
         if text.is_empty() {
             return None;
         }
-        let cdata = match self.text_source.get() {
-            TextSource::Cdata => Some(true),
-            TextSource::Data if text.iter().any(|b| !b"\t\n\x0c\r ".contains(b)) => Some(false),
-            TextSource::Data | TextSource::Null => None,
-        };
         let neighbour = match before {
             Some(sibling) => document.previous_sibling(sibling),
             None => document.last_child(parent),
         };
-        let neighbour = neighbour.filter(|&id| {
-            matches!(
-                document.node_kind(id),
-                NodeKind::Text(_) | NodeKind::CData(_)
-            )
-        });
-        let Some(node) = neighbour else {
-            return Some(match cdata {
-                Some(true) => document.create_cdata(text.to_vec()),
-                _ => document.create_text(text.to_vec()),
-            });
-        };
-        if let Some(data) = document.character_data_mut(node) {
-            data.extend_from_slice(text);
+        match neighbour.and_then(|id| match document.node_kind(id) {
+            NodeKind::Text(_) => document.character_data_mut(id),
+            _ => None,
+        }) {
+            Some(data) => {
+                data.extend_from_slice(text);
+                None
+            }
+            None => Some(document.create_text(text.to_vec())),
         }
-        if let Some(cdata) = cdata {
-            document.set_cdata(node, cdata);
-        }
-        None
     }
 }
 

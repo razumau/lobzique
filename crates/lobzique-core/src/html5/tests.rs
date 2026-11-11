@@ -299,34 +299,24 @@ fn fragments_report_their_contexts_quirks_mode() {
 }
 
 #[test]
-fn cdata_sections_type_their_text_as_gumbo_does() {
+fn cdata_sections_are_text() {
     let svg = |input: &str| {
         let document = parse(input);
         html(&document, find(&document, "svg"))
     };
+    assert_eq!(svg("<svg><![CDATA[a<b]]></svg>"), "<svg>a&lt;b</svg>");
+    assert_eq!(svg("<svg>a<![CDATA[b]]> </svg>"), "<svg>ab </svg>");
     assert_eq!(
-        svg("<svg><![CDATA[a<b]]></svg>"),
-        "<svg><![CDATA[a<b]]></svg>"
+        svg("<svg><![CDATA[a\0b]]>\0</svg>"),
+        "<svg>a\u{fffd}b\u{fffd}</svg>"
     );
-    // A run of text takes the type of its last non-whitespace part
+    // Escaped text beside a section stays escaped
     assert_eq!(
-        svg("<svg>a<![CDATA[b]]> </svg>"),
-        "<svg><![CDATA[ab ]]></svg>"
+        svg("<svg>]]&gt;&lt;img onerror=alert(1)&gt;<![CDATA[x]]></svg>"),
+        "<svg>]]&gt;&lt;img onerror=alert(1)&gt;x</svg>"
     );
-    assert_eq!(svg("<svg><![CDATA[a]]>b</svg>"), "<svg>ab</svg>");
-    // A NUL in a section stays in it; one after it follows a parse error
-    assert_eq!(
-        svg("<svg><![CDATA[a\0b]]>c</svg>"),
-        "<svg>a\u{fffd}bc</svg>"
-    );
-    assert_eq!(
-        svg("<svg><![CDATA[a\0b]]></svg>"),
-        "<svg><![CDATA[a\u{fffd}b]]></svg>"
-    );
-    assert_eq!(
-        svg("<svg><![CDATA[a]]>\0</svg>"),
-        "<svg><![CDATA[a\u{fffd}]]></svg>"
-    );
+    let document = parse("<svg>a<![CDATA[b]]>c</svg>");
+    assert_eq!(document.children(find(&document, "svg")).count(), 1);
     // Not a section: a bogus comment
     assert_eq!(
         svg("<svg><![CDATB[a]]></svg>"),

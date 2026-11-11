@@ -134,17 +134,13 @@ module XPathContract
     assert_equal "a", fragment.at_xpath(".//text()").content
   end
 
-  # libxml2's `node()` doesn't pass a fragment, and it rewrites
-  # `descendant-or-self::node()/child::x` as `descendant::x` only when `x`
-  # has no predicates. So `.//p[@id]` doesn't look at the fragment's
-  # children.
+  # libxml2's `node()` doesn't pass a fragment
   def test_fragments_are_not_nodes
     fragment = root::HTML5::DocumentFragment.parse("<p id=a><b id=b></b></p>")
     assert_equal [fragment], fragment.xpath(".").to_a
     assert_empty fragment.xpath("self::node()")
     assert_equal ["p", "b"], fragment.xpath(".//*").map(&:name)
-    assert_equal ["b"], fragment.xpath(".//*[@id]").map(&:name)
-    assert_equal ["b"], fragment.xpath("descendant-or-self::node()/*[1]").map(&:name)
+    assert_equal ["p", "b"], fragment.xpath("descendant-or-self::node()").map(&:name)
     assert_empty fragment.at_css("p").xpath("..")
     assert_equal ["p"], fragment.at_css("b").xpath("ancestor::node()").map(&:name)
   end
@@ -338,6 +334,18 @@ class TestXPathLobzique < Minitest::Test
   include XPathContract
 
   def root = Lobzique
+
+  # A departure: libxml2 rewrites `descendant-or-self::node()/child::x` as
+  # `descendant::x` only when `x` has no predicates, so in Nokogiri
+  # `.//p[@id]` skips a fragment's children and `.//p` doesn't
+  def test_predicates_find_a_fragments_children
+    fragment = root::HTML5::DocumentFragment.parse("<p id=a>x</p><div><p id=b>y</p></div>")
+    assert_equal ["a", "b"], fragment.xpath(".//p").map { |p| p["id"] }
+    assert_equal ["a", "b"], fragment.xpath(".//p[@id]").map { |p| p["id"] }
+    assert_equal ["a", "b"], fragment.xpath(".//p[@id] | .//p[@id='b']").map { |p| p["id"] }
+    assert_equal ["p", "p"], fragment.xpath("descendant-or-self::node()/*[1]").map(&:name)
+    assert_equal ["a", "b"], fragment.xpath("(.)//p[1]").map { |p| p["id"] }
+  end
 
   # What Nokogiri evaluates and lobzique leaves out
   def test_the_namespace_axis_is_unsupported

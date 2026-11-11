@@ -28,11 +28,14 @@ module Differential
 
     # Run on every case but the selector and XPath tests: the XPath runtime
     # callers in the inventory evaluate (inventory/summary.md), an axis each,
-    # and XPath 1.0's functions on what the page holds
+    # and XPath 1.0's functions on what the page holds. `.//*[@id][1]` is in
+    # a union with `./*[@id][1]`, as libxml2 skips a fragment's children
+    # after `//` when the step has predicates (ARCHITECTURE.md, Departures).
     XPATHS = [
       "/html/body", "./body", "./form", "//p[br[following-sibling::br]]", ".//text()", "//comment()", "li",
       "preceding::text()[1]", "html", "html/head", "html/head/meta", '//head/meta[@http-equiv="Set-Cookie"]',
-      ".//a", ".//script", "//img/@onerror", "//*:svg", "//svg:svg", "/node()", ".//*[@id][1]",
+      ".//a", ".//script", "//img/@onerror", "//*:svg", "//svg:svg", "/node()",
+      "./*[@id][1] | .//*[@id][1]",
       "descendant::*[2]/ancestor::*", "descendant::*[3]/preceding::node()[1]", "descendant::*[3]/following::*[1]",
       "descendant::*[1]/following-sibling::node()", "descendant::*[2]/preceding-sibling::*",
       "descendant-or-self::node()[@lang]/@*", "//*[@class = 'x']", "..faulty_xpath",

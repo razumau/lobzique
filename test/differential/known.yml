@@ -89,3 +89,36 @@
     the SAX pass of EncodingReader stops in Nokogiri, so libxml2 takes the
     name during the parse as written ("utf-8"). lobzique's pass sees it and
     the given name is canonicalized ("UTF-8").
+- match: \A(wpt-parsing/tree-construction/(domjs-unsafe\.dat#(1|2|3)|html5test-com\.dat#(14|15|17|18)|plain-text-unsafe\.dat#(11|26|40)|tests21\.dat#(1|2|4|7|8|9|10|11|12|13|15|16|17|18|19|20|21|23))|dompurify/expect\.json#98)\z
+  reason: >-
+    CDATA sections in SVG and MathML. gumbo makes a CDATA node of a section
+    and of the text next to it, which to_html writes raw, so escaped text
+    beside a section comes back as markup. lobzique makes text of them, as
+    the standard does (ARCHITECTURE.md, Departures).
+- mode: sanitize
+  match: \A(wpt-parsing/tree-construction/(domjs-unsafe\.dat#(1|2|3)|html5test-com\.dat#(14|15|17|18)|plain-text-unsafe\.dat#(11|26|40)|tests21\.dat#(1|2|4|7|8|9|10|11|12|13|15|16|17|18|19|20|21|23))|dompurify/expect\.json#98)\z
+  reason: >-
+    CDATA sections are text (above). Loofah escapes libxml2's CDATA nodes,
+    so Rails::HTML5 writes a section's "<" as "&amp;lt;"; lobzique writes
+    "&lt;", the text the section held.
+- mode: action_text
+  match: \A(wpt-parsing/tree-construction/(domjs-unsafe\.dat#(1|2|3)|html5test-com\.dat#(14|15|17|18)|plain-text-unsafe\.dat#(11|26|40)|tests21\.dat#(1|2|4|7|8|9|10|11|12|13|15|16|17|18|19|20|21|23))|dompurify/expect\.json#98)\z
+  reason: >-
+    CDATA sections are text (above), so Action Text stores and renders a
+    section's characters as the text they are.
+- match: \Acrawl/CC-MAIN-(20261005105623-20261005135623-00000\.warc\.gz@(15285101|2958049)|20261009160033-20261009190033-00333\.warc\.gz@(17306857|22608327|23967003|29550467|6665270|8577335)|20261013211541-20261014001541-00666\.warc\.gz@(11335497|11341311|15519250|16317507|17151253|18570536))\z
+  reason: >-
+    Bytes invalid or undefined in the page's declared encoding. Nokogiri
+    raises Encoding::InvalidByteSequenceError or UndefinedConversionError;
+    lobzique reads them as U+FFFD and parses the page (ARCHITECTURE.md,
+    Departures).
+- mode: sanitize
+  match: \Acrawl/CC-MAIN-(20261005105623-20261005135623-00000\.warc\.gz@(15285101|2958049)|20261009160033-20261009190033-00333\.warc\.gz@(17306857|22608327|23967003|29550467|6665270|8577335)|20261013211541-20261014001541-00666\.warc\.gz@(11335497|11341311|15519250|16317507|17151253|18570536))\z
+  reason: >-
+    Bytes invalid in the page's declared encoding (above): Nokogiri raises,
+    lobzique reads them as U+FFFD.
+- mode: action_text
+  match: \Acrawl/CC-MAIN-(20261005105623-20261005135623-00000\.warc\.gz@(15285101|2958049)|20261009160033-20261009190033-00333\.warc\.gz@(17306857|22608327|23967003|29550467|6665270|8577335)|20261013211541-20261014001541-00666\.warc\.gz@(11335497|11341311|15519250|16317507|17151253|18570536))\z
+  reason: >-
+    Bytes invalid in the page's declared encoding (above): Nokogiri raises,
+    lobzique reads them as U+FFFD.

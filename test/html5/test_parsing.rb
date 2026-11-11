@@ -217,9 +217,7 @@ module ParsingContract
     assert_equal ["svg", "http://www.w3.org/2000/svg"], [svg.namespace.prefix, svg.namespace.href]
     attr = svg.attribute_nodes[0]
     assert_equal ["href", "xlink", "x"], [attr.name, attr.namespace.prefix, attr.value]
-    assert_predicate svg.children[0], :cdata?
     assert_equal "a<b", svg.children[0].content
-    assert_equal '<svg xlink:href="x"><![CDATA[a<b]]></svg>', svg.to_html
     assert_nil body(svg.document).namespace
   end
 
@@ -280,6 +278,26 @@ class TestParsingLobzique < Minitest::Test
   include ParsingContract
 
   def root = Lobzique
+
+  # A departure: Nokogiri raises Encoding::UndefinedConversionError and
+  # InvalidByteSequenceError
+  def test_bytes_invalid_in_the_declared_encoding_are_replaced
+    undefined = "<meta charset=windows-1252><p>a\x81b".b
+    assert_equal "a\uFFFDb", root::HTML5(undefined).at_css("p").content
+    invalid = "<meta charset=utf-16le><p>a\xFF".b
+    assert_predicate root::HTML5(invalid).to_html, :valid_encoding?
+    assert_equal "a\uFFFD", root::HTML5.fragment("<meta charset=shift_jis>a\x81".b).content
+  end
+
+  # A departure: gumbo makes a CDATA node of a section and the text around
+  # it, which to_html writes raw (ARCHITECTURE.md)
+  def test_cdata_sections_are_text
+    html = "<svg>]]&gt;&lt;img src=x onerror=alert(1)&gt;<![CDATA[a<b]]></svg>"
+    svg = root::HTML5.fragment(html).children[0]
+    assert_equal ["text"], svg.children.map(&:name)
+    assert_equal "<svg>]]&gt;&lt;img src=x onerror=alert(1)&gt;a&lt;b</svg>", svg.to_html
+    assert_equal svg.to_html, root::HTML5.fragment(svg.to_html).to_html
+  end
 
   # A departure: Node#parse parses noscript content as its document did,
   # where Nokogiri uses libxml2's parser (ARCHITECTURE.md)

@@ -632,18 +632,22 @@ fn refused_reparenting_follows_nokogiri() {
         ReparentError::Cycle
     );
     assert_eq!(error(&mut doc, b, Position::After, p), ReparentError::Cycle);
-    assert_eq!(snapshot(&doc), before, "nothing changed");
-
     assert_eq!(
         error(&mut doc, b, Position::After, b),
         ReparentError::Refused
     );
-    assert_eq!(doc.parent(b), None, "unlinked first, as in Nokogiri");
+    assert_eq!(snapshot(&doc), before, "nothing changed");
     let loose = doc.create_element(html_name("q"));
     assert_eq!(
         error(&mut doc, loose, Position::Before, a),
         ReparentError::Refused
     );
+    assert!(doc.parent(a).is_some());
+    for position in [Position::Before, Position::After, Position::Replace] {
+        assert_eq!(error(&mut doc, id, position, b), ReparentError::Refused);
+        assert_eq!(error(&mut doc, b, position, b), ReparentError::Refused);
+    }
+    assert_eq!(snapshot(&doc), before, "nothing changed");
     doc.check_invariants().unwrap();
 }
 

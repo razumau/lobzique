@@ -149,9 +149,10 @@ html5lib tokenizer inputs.
       function calls on every case return. libxml2 quirks kept:
       `node()` passes neither doctypes nor fragments, `.` is no step at
       all, `descendant-or-self::node()/x` becomes `descendant::x` only when
-      `x` has no predicates (so from a fragment `.//p` and `.//p[@id]`
-      differ), and numbers are read and printed as libxml2 does it, not
-      correctly rounded.
+      `x` has no predicates, and numbers are read and printed as libxml2
+      does it, not correctly rounded. One quirk is not kept: from a
+      fragment `.//p[@id]` finds the fragment's children, as `.//p` does
+      (ARCHITECTURE.md, Departures).
    7. `Node#parse` and `in_context`: the HTML5 fragment parser with the
       node as context. Done, in HTML documents; XML documents raise
       `NotImplementedError` (decision 4). The departures are in

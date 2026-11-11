@@ -91,7 +91,7 @@ fuzz_target!(|data: &[u8]| {
                     system_id: None,
                 })
             }
-            17 => doc.set_cdata(a, flags & 0x10 != 0),
+            17 => _ = doc.create_cdata(bytes(x, y).to_vec()),
             18 => {
                 // Enough comparisons to number the nodes, each checked
                 // against its reverse

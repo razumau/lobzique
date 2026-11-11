@@ -306,13 +306,7 @@ impl<'a> Evaluator<'a> {
         for predicate in &filter.predicates {
             nodes = self.filter(nodes, predicate)?;
         }
-        for step in &filter.steps {
-            if nodes.is_empty() {
-                break;
-            }
-            nodes = self.step(step, &nodes)?;
-        }
-        Ok(nodes)
+        self.steps(&filter.steps, nodes)
     }
 
     /// libxml2 evaluates the arguments, then checks how many there are,
@@ -721,16 +715,32 @@ impl<'a> Evaluator<'a> {
     }
 
     fn path(&self, path: &Path, context: NodeId) -> Eval<Vec<NodeId>> {
-        let mut nodes = vec![if path.absolute {
+        let start = if path.absolute {
             NodeId::DOCUMENT
         } else {
             context
-        }];
-        for step in &path.steps {
+        };
+        self.steps(&path.steps, vec![start])
+    }
+
+    /// `steps` in turn from `nodes`, which are in document order.
+    fn steps(&self, steps: &[Step], nodes: Vec<NodeId>) -> Eval<Vec<NodeId>> {
+        match steps.split_last() {
+            Some((last, init)) => {
+                let nodes = self.steps_before(init, nodes)?;
+                self.step(last, &nodes, false)
+            }
+            None => Ok(nodes),
+        }
+    }
+
+    /// `steps` that have a step after them.
+    fn steps_before(&self, steps: &[Step], mut nodes: Vec<NodeId>) -> Eval<Vec<NodeId>> {
+        for step in steps {
             if nodes.is_empty() {
                 break;
             }
-            nodes = self.step(step, &nodes)?;
+            nodes = self.step(step, &nodes, true)?;
         }
         Ok(nodes)
     }
@@ -745,18 +755,12 @@ impl<'a> Evaluator<'a> {
         if last.predicates.iter().any(Expr::is_positional) {
             return Ok(!self.path(path, context)?.is_empty());
         }
-        let mut nodes = vec![if path.absolute {
+        let start = if path.absolute {
             NodeId::DOCUMENT
         } else {
             context
-        }];
-        for step in init {
-            if nodes.is_empty() {
-                return Ok(false);
-            }
-            nodes = self.step(step, &nodes)?;
-        }
-        for node in nodes {
+        };
+        for node in self.steps_before(init, vec![start])? {
             for candidate in self.axis(last.axis, node) {
                 if !self.passes(&last.test, last.axis, candidate) {
                     continue;
@@ -782,8 +786,16 @@ impl<'a> Evaluator<'a> {
     }
 
     /// One step from each node of `input`, which is in document order.
-    fn step(&self, step: &Step, input: &[NodeId]) -> Eval<Vec<NodeId>> {
+    /// `inner` steps have a step after them.
+    fn step(&self, step: &Step, input: &[NodeId], inner: bool) -> Eval<Vec<NodeId>> {
         let document = self.document;
+        // libxml2's `node()` doesn't pass a fragment, so `.//p[@id]` from
+        // one skips its children, though `.//p`, which libxml2 rewrites as
+        // `descendant::p`, has them. Here `//` goes on from a fragment.
+        let from_fragment = inner
+            && step.axis == Axis::DescendantOrSelf
+            && step.test == NodeTest::Node
+            && step.predicates.is_empty();
         // Descendants of a node already searched are found again from it,
         // unless positions differ by starting point
         let subsumes = matches!(step.axis, Axis::Descendant | Axis::DescendantOrSelf)
@@ -807,7 +819,14 @@ impl<'a> Evaluator<'a> {
             }
             let mut candidates: Vec<NodeId> = self
                 .axis(step.axis, node)
-                .filter(|&candidate| self.passes(&step.test, step.axis, candidate))
+                .filter(|&candidate| {
+                    self.passes(&step.test, step.axis, candidate)
+                        || (from_fragment
+                            && matches!(
+                                document.node_kind(candidate),
+                                NodeKind::DocumentFragment
+                            ))
+                })
                 .take(limit)
                 .collect();
             for predicate in &step.predicates {
