@@ -31,6 +31,10 @@ jobs:
           cargo-cache: true
       - name: Verify test fixtures
         run: script/fetch_fixtures --verify
+      - name: Verify generated CSS tables
+        run: |
+          bundle exec ruby script/generate_css_tables
+          git diff --exit-code crates/lobzique-core/src/css/tables.rs
       - name: Lint
         run: bundle exec rake standard
       # Enforces what code borrowing an arena may call (ext/lobzique/clippy.toml)
