@@ -49,24 +49,10 @@ module SameAsRailsHTML5
     result = yield
     return result if DIFFERENT.key?(name)
 
-    expected = with_allowed_lists_of(module_under_test::SafeListSanitizer) do
-      Rails::HTML5.const_get(sanitizer).new.sanitize(input, options)
-    end
+    expected = Rails::HTML5.const_get(sanitizer).new.sanitize(input, options)
     message = "#{sanitizer} differs from Rails::HTML5 on #{input.inspect}"
     expected.nil? ? assert_nil(result, message) : assert_equal(expected, result, message)
     result
-  end
-
-  # scope_allowed_tags and scope_allowed_attributes set the lists on the
-  # vendor's class.
-  def with_allowed_lists_of(klass)
-    html5 = Rails::HTML5::SafeListSanitizer
-    saved = [html5.allowed_tags, html5.allowed_attributes]
-    html5.allowed_tags = klass.allowed_tags
-    html5.allowed_attributes = klass.allowed_attributes
-    yield
-  ensure
-    html5.allowed_tags, html5.allowed_attributes = saved
   end
 end
 
@@ -103,6 +89,26 @@ class LobziqueSafeListSanitizerTest < Minitest::Test
         end
       end
     end
+  end
+
+  # Apps add tags in an initializer, on Rails' class by name.
+  def test_lists_are_those_of_rails_html5
+    rails = Rails::HTML5::SafeListSanitizer
+    vendor = Lobzique::Sanitizer::SafeListSanitizer
+    saved = [rails.allowed_tags, rails.allowed_attributes]
+    input = '<table data-x="1"><tbody><tr><td>a</td></tr></tbody></table>'
+
+    rails.allowed_tags += %w[table tbody tr td]
+    rails.allowed_attributes += %w[data-x]
+
+    assert_equal rails.new.sanitize(input), vendor.new.sanitize(input)
+    assert_equal input, vendor.new.sanitize(input)
+
+    vendor.allowed_tags = %w[td]
+
+    assert_equal %w[td], rails.allowed_tags
+  ensure
+    rails.allowed_tags, rails.allowed_attributes = saved
   end
 
   # Loofah's API, which skips the sanitizers' serialize.

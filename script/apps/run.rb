@@ -7,6 +7,7 @@
 # tmp/apps/src, gems into tmp/apps/bundle, logs and failing test names into
 # tmp/apps/out. Uses the Ruby running this script, and compiles lobzique for
 # it (run `mise run compile` afterwards if that isn't the repo's Ruby).
+# Databases an app needs run in Docker containers named lobzique-apps-*.
 #
 #   ruby script/apps/run.rb [NAME...]
 
@@ -19,9 +20,31 @@ APPS = {
     ruby: ">= 3.4.5",
     setup: %w[bin/rails db:prepare],
     suite: %w[bin/rails test]
+  },
+  "fizzy" => {
+    repo: "basecamp/fizzy",
+    ruby: ">= 4.0.9",
+    setup: %w[bin/rails db:prepare],
+    suite: %w[bin/rails test]
+  },
+  "loomio" => {
+    repo: "loomio/loomio",
+    ruby: ">= 4.0.9",
+    services: %w[postgres],
+    env: {"TEST_DATABASE_URL" => "postgresql://postgres@localhost:5432/loomio_test"},
+    setup: %w[bin/rails db:prepare],
+    suite: %w[bin/rails test]
   }
 }.freeze
 MODES = %w[baseline lobzique].freeze
+
+# Started with Docker, left running for the next run.
+SERVICES = {
+  "postgres" => {
+    run: %w[-p 5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:18],
+    ready: %w[pg_isready -U postgres -h localhost]
+  }
+}.freeze
 
 VENDORS = <<~RUBY
   require "lobzique/sanitizer"
@@ -56,6 +79,19 @@ def use_lobzique(dir, root)
   File.write(application, source)
 end
 
+def start_service(name)
+  service = SERVICES.fetch(name)
+  container = "lobzique-apps-#{name}"
+  unless system("docker", "start", container, out: File::NULL, err: File::NULL)
+    system("docker", "run", "-d", "--name", container, *service[:run], out: File::NULL, exception: true)
+  end
+  60.times do
+    return if system("docker", "exec", container, *service[:ready], out: File::NULL, err: File::NULL)
+    sleep 1
+  end
+  abort "#{name} isn't ready"
+end
+
 def failures(log)
   SuiteRunner.read(log).scan(/^(\S+#test_.+?)(?: \[[^\]]+\])?:$/).flatten
 end
@@ -70,18 +106,20 @@ results = names.map do |name|
   unless Gem::Requirement.new(app[:ruby]).satisfied_by?(Gem::Version.new(RUBY_VERSION))
     abort "#{name} needs Ruby #{app[:ruby]}, this is #{RUBY_VERSION}"
   end
+  app.fetch(:services, []).each { start_service(_1) }
+  app_env = env.merge(app.fetch(:env, {}))
   dir = File.join(tmp, "src", name)
   out = File.join(tmp, "out", name)
   FileUtils.mkdir_p(out)
   MODES.to_h do |mode|
-    SuiteRunner.checkout(env, app[:repo], refs.fetch(app[:repo]), dir)
+    SuiteRunner.checkout(app_env, app[:repo], refs.fetch(app[:repo]), dir)
     use_lobzique(dir, root) if mode == "lobzique"
-    SuiteRunner.run(env, "bundle", "config", "set", "--local", "path", File.join(tmp, "bundle"), chdir: dir)
-    SuiteRunner.run(env, "bundle", "install", "--quiet", chdir: dir)
-    SuiteRunner.run(env, *app[:setup], chdir: dir)
-    SuiteRunner.run(env, "bin/rails", "runner", CHECK, chdir: dir) if mode == "lobzique"
+    SuiteRunner.run(app_env, "bundle", "config", "set", "--local", "path", File.join(tmp, "bundle"), chdir: dir)
+    SuiteRunner.run(app_env, "bundle", "install", "--quiet", chdir: dir)
+    SuiteRunner.run(app_env, *app[:setup], chdir: dir)
+    SuiteRunner.run(app_env, "bin/rails", "runner", CHECK, chdir: dir) if mode == "lobzique"
     log = File.join(out, "#{mode}.log")
-    status = SuiteRunner.run_suite(env, app[:suite], chdir: dir, log:)
+    status = SuiteRunner.run_suite(app_env, app[:suite], chdir: dir, log:)
     failed = failures(log).sort
     File.write(File.join(out, "#{mode}.failures"), failed.map { "#{_1}\n" }.join)
     [mode, {summary: SuiteRunner.minitest_summary(log), status:, log:, failed: failed.to_set}]

@@ -44,8 +44,9 @@ module SuiteRunner
     File.read(log, encoding: "UTF-8").scrub
   end
 
+  # minitest-reporters prints "N tests" instead of "N runs".
   def minitest_summary(log)
-    read(log).scan(/^\d+ runs, .*$/).last
+    read(log).scan(/^\d+ (?:runs|tests), .*$/).last
   end
 
   # result: {summary:, status:, log:}

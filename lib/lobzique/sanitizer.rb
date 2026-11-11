@@ -43,6 +43,15 @@ module Lobzique
       end
     end
 
+    # The vendor stands in for Rails::HTML5, so its safe list sanitizer reads
+    # and writes that one's lists: apps and gems edit them on Rails' class
+    # by name.
+    module RailsAllowedLists
+      %i[allowed_tags allowed_tags= allowed_attributes allowed_attributes=].each do |name|
+        define_method(name) { |*args| Rails::HTML5::SafeListSanitizer.public_send(name, *args) }
+      end
+    end
+
     class FullSanitizer < Rails::HTML::Sanitizer
       include Rails::HTML::Concern::ComposedSanitize
       include Parser
@@ -62,6 +71,7 @@ module Lobzique
       include Parser
       include Rails::HTML::Concern::Scrubber::SafeList
       include Rails::HTML::Concern::Serializer::UTF8Encode
+      singleton_class.prepend(RailsAllowedLists)
     end
 
     # The vendor interface, as Rails::HTML5::Sanitizer has it.

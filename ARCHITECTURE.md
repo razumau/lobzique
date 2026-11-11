@@ -95,7 +95,9 @@ root, whose HTML5 context would wrap the input in a `body`.
 Everything else is Loofah's and rails-html-sanitizer's code, unchanged:
 the scrubbers, `Loofah::HTML5::Scrub` and the sanitizer concerns, which
 `FullSanitizer`, `LinkSanitizer` and `SafeListSanitizer` include with
-lobzique's parser in place of Loofah's. Ported files name their Loofah
+lobzique's parser in place of Loofah's. `SafeListSanitizer.allowed_tags`
+and `allowed_attributes` are `Rails::HTML5::SafeListSanitizer`'s, read and
+written through, so lists an app edits on Rails' class apply. Ported files name their Loofah
 source, and changes carry `# lobzique:` comments, as in the rest of `lib/`.
 
 One addition of lobzique's own: `scrub!` escapes the text of raw-text

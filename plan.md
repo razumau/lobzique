@@ -195,15 +195,9 @@ html5lib tokenizer inputs.
      raw-text elements inside a `select` is escaped, so browsers on either
      set of rules parse it the same way (README, `known.yml`).
 
-   - **An app's suite.** `mise run measure:apps` (`script/apps`) runs
-     Campfire's suite (`apps.tsv` ref) as checked out, then with lobzique
-     in its Gemfile and both `sanitizer_vendor`s set in
-     `config/application.rb` as the README says. Campfire renders Action
-     Text, and its content filters and Opengraph metadata sanitize with
-     `ActionText::ContentHelper.sanitizer.class`. Both runs pass: 649 runs,
-     3921 assertions, Ruby 4.0.6. DNS is answered locally in both runs,
-     because Campfire's SSRF guard resolves hosts before WebMock stubs the
-     request.
+   - **Apps' suites.** Campfire, Fizzy and Loomio pass with the same
+     results on Nokogiri and on lobzique; Lobsters and DocuSeal wait for the
+     facade. Per-app results and the method are in `docs/app-suites.md`.
 
    Later:
    - a Rust scrubber for calls without an app scrubber (`PermitScrubber`
