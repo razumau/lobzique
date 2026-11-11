@@ -3,84 +3,16 @@
 #![allow(unsafe_code)]
 #![allow(clippy::disallowed_methods)]
 
-use lobzique_core::html5::{DocumentParser, FragmentParser};
 use magnus::{
     prelude::*,
     rb_sys::{protect, AsRawId, AsRawValue, FromRawValue},
     Error, RArray, RClass, RString, Ruby, Value,
 };
-use std::any::Any;
-use std::ffi::{c_void, CString};
-use std::panic::AssertUnwindSafe;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::ffi::CString;
 
-/// Work that can run without the GVL: a lobzique-core type, which can't
-/// hold a Ruby value because the core doesn't depend on Ruby, done a step
-/// at a time. Sealed, so the list of such types is the one below.
-pub trait Resumable: sealed::Sealed {
-    /// Does the next piece of the work; false once there is none left.
-    fn step(&mut self) -> bool;
-}
-
-mod sealed {
-    pub trait Sealed {}
-    impl Sealed for super::DocumentParser {}
-    impl Sealed for super::FragmentParser {}
-}
-
-impl Resumable for DocumentParser {
-    fn step(&mut self) -> bool {
-        DocumentParser::step(self)
-    }
-}
-
-impl Resumable for FragmentParser {
-    fn step(&mut self) -> bool {
-        FragmentParser::step(self)
-    }
-}
-
-/// Steps `work` to the end without the GVL (`rb_thread_call_without_gvl`),
-/// so other threads run meanwhile. An interrupt (`Thread#raise`, `Timeout`,
-/// a signal) stops it after the current step; Ruby then handles the
-/// interrupt with the GVL, and the work goes on from where it stopped
-/// unless that raised. A panic in `work` resumes here, with the GVL.
-pub fn without_gvl<W: Resumable>(work: &mut W) -> Result<(), Error> {
-    let interrupted = AtomicBool::new(false);
-    let mut run = Run {
-        work,
-        interrupted: &interrupted,
-        done: false,
-        panic: None,
-    };
-    while !run.done {
-        interrupted.store(false, Ordering::Relaxed);
-        let data = (&raw mut run).cast::<c_void>();
-        let flag = (&raw const interrupted).cast_mut().cast::<c_void>();
-        // SAFETY: `run` and `interrupted` outlive the call, which returns
-        // only once `step_until_interrupted` has. That function catches
-        // panics, and `set_interrupted` can't panic. `protect` catches what
-        // Ruby raises when it handles an interrupt before or after them;
-        // the closure owns nothing that a jump out of it would leak.
-        let result = protect(|| unsafe {
-            rb_sys::rb_thread_call_without_gvl(
-                Some(step_until_interrupted::<W>),
-                data,
-                Some(set_interrupted),
-                flag,
-            );
-            rb_sys::Qnil as rb_sys::VALUE
-        });
-        if let Some(panic) = run.panic.take() {
-            std::panic::resume_unwind(panic);
-        }
-        result?;
-    }
-    Ok(())
-}
-
-/// `rb_thread_check_ints`: lets Ruby handle interrupts, and switch threads
-/// if this one's time slice is over, as it does between Ruby calls.
+/// `rb_thread_check_ints`: lets Ruby handle interrupts (`Timeout`,
+/// `Thread#raise`, signals), and switch threads if this one's time slice is
+/// over, as it does between Ruby calls. Nothing here runs without the GVL.
 pub fn check_interrupts() -> Result<(), Error> {
     // SAFETY: `protect` turns what an interrupt raises into an `Err`.
     protect(|| unsafe {
@@ -88,44 +20,6 @@ pub fn check_interrupts() -> Result<(), Error> {
         rb_sys::Qnil as rb_sys::VALUE
     })?;
     Ok(())
-}
-
-/// What the function run without the GVL reaches through its one pointer.
-/// `interrupted` is also written from the thread that interrupts.
-struct Run<'a, W> {
-    work: &'a mut W,
-    interrupted: &'a AtomicBool,
-    done: bool,
-    panic: Option<Box<dyn Any + Send>>,
-}
-
-/// One step at least, so interrupts that don't raise can't stall the work.
-unsafe extern "C" fn step_until_interrupted<W: Resumable>(data: *mut c_void) -> *mut c_void {
-    // SAFETY: `without_gvl` passes its `Run`, which nothing else touches
-    // during the call.
-    let run = unsafe { &mut *data.cast::<Run<'_, W>>() };
-    let stepped = std::panic::catch_unwind(AssertUnwindSafe(|| loop {
-        if !run.work.step() {
-            return true;
-        }
-        if run.interrupted.load(Ordering::Relaxed) {
-            return false;
-        }
-    }));
-    match stepped {
-        Ok(done) => run.done = done,
-        Err(panic) => {
-            run.done = true;
-            run.panic = Some(panic);
-        }
-    }
-    std::ptr::null_mut()
-}
-
-/// The unblocking function, which Ruby calls from the interrupting thread.
-unsafe extern "C" fn set_interrupted(flag: *mut c_void) {
-    // SAFETY: `without_gvl` passes its `AtomicBool`, which outlives the call.
-    unsafe { &*flag.cast::<AtomicBool>() }.store(true, Ordering::Relaxed);
 }
 
 /// Ruby's `rb_obj_call_init`: runs `initialize` with the arguments and block

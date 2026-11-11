@@ -3,10 +3,7 @@
 //! `HTML5::DocumentFragment#initialize`, and the parse behind
 //! `Node#in_context`.
 
-use crate::support::{
-    c_string, call_initialize, check_interrupts, check_string, string_bytes, without_gvl,
-    Resumable,
-};
+use crate::support::{c_string, call_initialize, check_interrupts, check_string, string_bytes};
 use crate::xml::document::{self, wrap_document};
 use crate::xml::node::{utf8_string, Node};
 use crate::xml::node_set;
@@ -33,11 +30,10 @@ fn parse(ruby: &Ruby, args: &[Value]) -> Result<Value, Error> {
     let (input, url, klass) = args.required;
     let options = options(args.keywords)?;
     let input = input_bytes(ruby, input)?;
-    let input_length = input.len();
     let klass = RClass::try_convert(klass)?;
 
     let mut parser = DocumentParser::new(input, &options);
-    run(&mut parser, input_length)?;
+    run(|| parser.step())?;
     let (arena, parsed) = parser.finish().map_err(|error| limit_error(ruby, error))?;
     let document = wrap_document(ruby, klass, arena)?;
     call_initialize(document, &[])?;
@@ -58,11 +54,10 @@ fn fragment(ruby: &Ruby, args: &[Value]) -> Result<(), Error> {
     let document: Value = fragment.funcall("document", ())?;
     let context = context_for(ruby, context_arg, document)?;
     let input = input_bytes(ruby, input)?;
-    let input_length = input.len();
     let target = Obj::<Node>::try_convert(fragment)?;
 
     let mut parser = FragmentParser::new(input, &context, &options);
-    run(&mut parser, input_length)?;
+    run(|| parser.step())?;
     let nodes = parser.finish().map_err(|error| limit_error(ruby, error))?;
     // Nokogiri builds in the document `fragment.document` names; the nodes
     // can only go into the arena the fragment itself is in, which another
@@ -82,8 +77,7 @@ fn fragment(ruby: &Ruby, args: &[Value]) -> Result<(), Error> {
 /// unlinked, and the parse errors are added to the document's `@errors`.
 pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error> {
     let input = input_bytes(ruby, input)?;
-    let input_length = input.len();
-    let document_object = Obj::<Node>::try_convert(node.document(ruby)?)?;
+    let document_object = node.document(ruby)?;
     let parsed = !document_object
         .ivar_get::<_, Value>("@quirks_mode")?
         .is_nil();
@@ -100,29 +94,23 @@ pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error
 
     let context = node.with_arena(ruby, |arena, id| Context::for_node(arena, id, parsed))?;
     let mut parser = FragmentParser::new(input, &context, &options);
-    run(&mut parser, input_length)?;
+    run(|| parser.step())?;
     let nodes = parser.finish().map_err(|error| limit_error(ruby, error))?;
     // The node's document now, which another thread may have changed
     // during the parse
     let document = node.document(ruby)?;
     let (ids, parsed) = document::with_arena_mut(ruby, document, move |arena| nodes.import(arena))?;
-    let errors = Obj::<Node>::try_convert(document)?.ivar_get::<_, RArray>("@errors")?;
+    let errors = document.ivar_get::<_, RArray>("@errors")?;
     errors.concat(syntax_errors(ruby, parsed.errors, ruby.qnil().as_value())?)?;
     node_set::wrap(ruby, document, ids)
 }
 
-/// Inputs from this size (about 40 ms of parsing) are parsed without the
-/// GVL. Getting it back from a thread running Ruby can take that thread's
-/// whole time slice, 100 ms, which would more than double a shorter parse.
-const WITHOUT_GVL_FROM: usize = 1 << 20;
-
 /// Parses the input up to the end, so the parser's `finish` only ends the
-/// tree. Interrupts are handled between steps, as between Ruby calls.
-fn run(parser: &mut impl Resumable, input_length: usize) -> Result<(), Error> {
-    if input_length >= WITHOUT_GVL_FROM {
-        return without_gvl(parser);
-    }
-    while parser.step() {
+/// tree. Between chunks Ruby handles interrupts and may switch threads, as
+/// between Ruby calls; the parser borrows no document, so nothing is locked
+/// meanwhile.
+fn run(mut step: impl FnMut() -> bool) -> Result<(), Error> {
+    while step() {
         check_interrupts()?;
     }
     Ok(())
@@ -237,7 +225,8 @@ fn named_context(ruby: &Ruby, tag: &[u8]) -> Result<Context, Error> {
 /// For a node context: no quirks unless the fragment's document was
 /// parsed, then the quirks mode of its doctype.
 fn quirks_mode_for(ruby: &Ruby, document: Value) -> Result<QuirksMode, Error> {
-    let parsed = !Obj::<Node>::try_convert(document)?
+    let document = document::unwrap(ruby, document)?;
+    let parsed = !document
         .ivar_get::<_, Value>("@quirks_mode")?
         .is_nil();
     if !parsed {

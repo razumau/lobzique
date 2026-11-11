@@ -134,8 +134,8 @@ module ParsingContract
     assert_raises(ArgumentError) { root::HTML5("<p a b>", max_attributes: 1) }
   end
 
-  # From 1 MiB, lobzique parses without the GVL. Compared as HTML, since a
-  # Ruby object per node is slow under GC.stress
+  # Many chunks of input. Compared as HTML, since a Ruby object per node is
+  # slow under GC.stress
   def test_large_inputs
     html = "<div>#{"<p>large</p>" * 100_000}</div>"
     assert_equal "<html><head></head><body>#{html}</body></html>", root::HTML5(html).to_html
@@ -314,39 +314,12 @@ class TestParsingLobzique < Minitest::Test
     refute_same svg.namespace, svg.namespace
   end
 
-  # Departures: a large parse runs without the GVL, and a smaller one
-  # handles interrupts between chunks, as Ruby code does
-
-  LARGE = "<p>large</p>" * 100_000
-
-  def test_other_threads_run_during_a_large_parse
-    count, stop = 0, false
-    counter = Thread.new { count += 1 until stop }
-    Thread.pass until count > 0
-    before = count
-    Lobzique::HTML5(LARGE)
-    assert_operator count, :>, before
-  ensure
-    stop = true
-    counter&.join
-  end
-
-  def test_timeout_interrupts_a_large_parse
-    assert_raises(Timeout::Error) { Timeout.timeout(0.001) { Lobzique::HTML5(LARGE) } }
-    assert_raises(Timeout::Error) { Timeout.timeout(0.001) { Lobzique::HTML5.fragment(LARGE) } }
-  end
-
-  def test_interrupts_that_dont_raise_resume_the_parse
-    expected = Lobzique::HTML5(LARGE).to_html
-    parser = Thread.current
-    waker = Thread.new do
-      loop do
-        parser.wakeup
-        sleep 0.0005
-      end
-    end
-    assert_equal expected, Lobzique::HTML5(LARGE).to_html
-  ensure
-    waker&.kill&.join
+  # A departure: interrupts are handled between chunks of input, as between
+  # Ruby calls. Ruby gives the timeout's thread its turn once the parsing
+  # one has used its 100 ms time slice, so the parse must outlast that.
+  def test_timeout_interrupts_a_long_parse
+    html = "<p>large</p>" * 1_000_000
+    assert_raises(Timeout::Error) { Timeout.timeout(0.001) { Lobzique::HTML5(html) } }
+    assert_raises(Timeout::Error) { Timeout.timeout(0.001) { Lobzique::HTML5.fragment(html) } }
   end
 end

@@ -509,6 +509,13 @@ are in `inventory/raw/src`.
      across a call into Ruby (decorators, blocks in `traverse`/`each`,
      custom CSS pseudo-class handlers). A re-entrant mutation then can't
      panic.
+   - **Memory model.** Kept as simple as it can be explained: Ruby's GC
+     owns everything, data crosses by copy, a borrow lasts one closure
+     with no Ruby inside, and the GVL is always held (ARCHITECTURE.md, "Memory
+     model"). Releasing the GVL for large parses was built and removed:
+     it was the extension's only memory-unsafe code, and no caller in the
+     inventory needs it. Borrowed strings and a GVL release come back
+     only with a benchmark that needs them.
    - **Depth.** Tree building, traversal, serialization and drop are
      iterative, so input depth can't overflow the Rust stack. The parser
      enforces Nokogiri::HTML5's `max_tree_depth` (400) and `max_attributes`

@@ -184,28 +184,34 @@ Every node object, documents included, wraps the same Rust struct
 
 ```rust
 struct Node {
-    document: Cell<Option<Opaque<Value>>>,        // the Ruby document object
-    id: Cell<Option<NodeId>>,                     // index in that document's arena
-    arena: OnceCell<Box<RefCell<dom::Document>>>, // set only on the document itself
+    document: Cell<Option<Opaque<Obj<Node>>>>, // the Ruby document object
+    id: Cell<Option<NodeId>>,                  // index in that document's arena
+    owned: OnceCell<Box<Owned>>,               // set only on the document itself
+}
+
+struct Owned {
+    arena: RefCell<dom::Document>,     // every node of the document
+    cache: Cell<Option<Opaque<RArray>>>, // node objects by node id
 }
 ```
 
 A node is its document plus an id. A document is the node that owns the
-arena, which is how `Document < Node` works with a single data type. The
-arena is boxed so that other nodes pay one pointer for it, not its size.
-`document` and `id` are cells because a node moved into another document is
-repointed, as in Nokogiri.
+arena and the node cache, which is how `Document < Node` works with a
+single data type. `Owned` is boxed so that other nodes pay one pointer for
+it, not its size. `document` and `id` are cells because a node moved into
+another document is repointed, as in Nokogiri.
 
 What Nokogiri guarantees, and how lobzique keeps it:
 
 - **One object per node.**
-  - The document's `@node_cache` (Nokogiri's ivar name) is a Ruby Array
-    indexed by node id.
+  - The document's node cache (Nokogiri's `@node_cache`) is a Ruby Array
+    indexed by node id. It is a field, not an instance variable, so a
+    lookup is an Array read.
   - `wrap` returns the cached object, or creates one whose class follows the
     node type, using Nokogiri's table.
   - So `equal?`, Hash keys, instance variables and `extend`ed modules all
     survive.
-  - Ruby marks and compacts the cache itself, so no GC code is needed for it.
+  - The document marks the Array, and Ruby marks what is in it.
 - **Decorators.** Every new node object goes through `Document#decorate`, so
   Loofah's `decorators(XML::Node) << ScrubBehavior::Node` applies everywhere.
   `wrap` never calls `initialize`.
@@ -214,7 +220,7 @@ What Nokogiri guarantees, and how lobzique keeps it:
   | call | what runs |
   |---|---|
   | `Node.new`, `Text.new`, `Comment.new`, `CDATA.new` | native: create, wrap (decorates), `initialize(*args, &block)`, then yield |
-  | `Document.new(*args)` | native: new arena, `@node_cache`/`@decorators`/`@errors`, then `initialize(*args)` |
+  | `Document.new(*args)` | native: new arena and node cache, `@decorators`/`@errors`, then `initialize(*args)` |
   | `HTML4::Document.new` | same, starting with the HTML 4.0 doctype libxml2's `htmlNewDoc` adds; `HTML5::Document.new` inherits it |
   | `DocumentFragment.new(doc, …)` | Ruby: `native_new(doc)` (wrapped, decorated), then `initialize(doc, …)` |
   | parsing | native: the arena is wrapped as the receiving class, then `initialize` runs with no arguments |
@@ -235,7 +241,7 @@ What Nokogiri guarantees, and how lobzique keeps it:
   gets the original's instance variables (and, for `clone`, singleton
   modules), then native `initialize_copy_with_args` fills in the copied
   node, caches and decorates it. `Document#dup` copies the arena's tree
-  into a new one, with a new `@node_cache`; other instance variables,
+  into a new one, with a new node cache; instance variables,
   `@decorators` and `@errors` included, are shared, as in Nokogiri.
 - **Lifetime.**
   - A node object marks its document, and the document owns every node it
@@ -250,55 +256,69 @@ What Nokogiri guarantees, and how lobzique keeps it:
   - The `document` reference is marked movable and updated in `compact`.
   - A document reports its arena's heap size, unlinked nodes included, to
     `ObjectSpace.memsize_of`. Nokogiri's counts only the linked tree.
-- **No borrow across Ruby.** The arena's `RefCell` is borrowed inside
-  `with_arena`/`with_arena_mut` and released before any call into Ruby:
-  decorate, `initialize`, blocks, CSS handlers. The closures can't reach
-  Ruby:
-  - they must be `Send`, and neither `&Ruby` nor `Value` is. `Opaque` and
-    `Lazy` are, but reading one takes a `&Ruby`, so a closure can carry one
-    and not use it;
-  - the extension denies `unsafe` outside `support.rs`, which rules out
-    raw rb-sys calls, and denies deprecated magnus API, which fetches a
-    handle itself;
-  - `ext/lobzique/clippy.toml` bans the rest: `Ruby::get`,
-    `Ruby::get_with`, `eval` and the `eval!` and `rb_assert!` macros,
-    `rb_sys::protect` outside `support.rs`, and `LazyId`, which is `Send`.
-    CI runs clippy with warnings as errors.
 
-  A Ruby exception therefore never unwinds past a held borrow, and a
-  re-entrant call can't hit one. If one ever did, it would raise instead
-  of panicking.
-- **Strings.** Native methods take strings as Nokogiri hands them to
-  libxml2 (`StringValueCStr`): converted with `to_str`, refused if they
-  contain a NUL character, and stored as bytes without transcoding. They
-  come back tagged UTF-8, valid or not.
+### Memory model
 
-### Threads, Ractors and panics
+Four rules cover every native method.
 
-- **Threads.** Native methods hold the GVL, and Ruby switches threads only
-  while Ruby code runs, which happens only with no borrow held. So other
-  threads see a document before or after a native call, never during one.
-- **Parsing** is the exception, unlike Nokogiri, which holds the GVL
-  throughout. The parser builds in a document of its own and goes through
-  its input 64 KB at a time (`DocumentParser`, `FragmentParser`). Between
-  chunks, the extension lets Ruby handle interrupts and switch threads, as
-  it does between Ruby calls (`support::check_interrupts`), so `Timeout`
-  and `Thread#raise` stop a long parse.
-  - From 1 MB of input it parses without the GVL instead
-    (`support::without_gvl`), so other threads run meanwhile. An interrupt
-    stops it after the current chunk, and it goes on from there unless the
-    interrupt raised. Below 1 MB, getting the GVL back from a busy thread,
-    up to that thread's 100 ms time slice, would cost more than the parse.
-  - Code without the GVL can't reach Ruby: it is the `step` of a core type
-    (`support::Resumable`, sealed), which can't hold a Ruby value.
-  - The tree reaches the target document only after the parse, under a
-    borrow taken then, in whatever document the fragment or context node is
-    in by that time.
+1. **Ruby's GC is the only owner.** A document object owns its arena, which
+   is Rust memory freed with the object, and its node cache. Every other
+   node object is a document reference and an id, and owns nothing. A node
+   object marks its document; the document marks its cache. Nothing in the
+   arena points at a Ruby object, and no Ruby object points into the arena.
+   - Node objects are write-barrier protected, so a minor GC doesn't mark
+     every node object of every live document. The two Ruby references are
+     stored in two places, `Node::complete_document` and `Node::repoint`,
+     which tell the GC.
+2. **Data crosses the boundary by copy.** Nodes cross as ids. A string
+   argument is copied into a `Vec<u8>` before the arena is touched
+   (`support::c_string`), and a string result is copied out of the arena
+   and then into a new Ruby String. Rust never holds a pointer into a Ruby
+   string. Attribute reads cost the same as Nokogiri's this way, so
+   borrowing would buy nothing.
+   - Strings are taken as Nokogiri hands them to libxml2
+     (`StringValueCStr`): converted with `to_str`, refused if they contain
+     a NUL character, and stored as bytes without transcoding. They come
+     back tagged UTF-8, valid or not.
+3. **A borrow lasts one closure, with no Ruby inside it.** A native method
+   converts its arguments, runs a closure on the arena
+   (`with_arena`/`with_arena_mut`), and wraps the result. The arena's
+   `RefCell` is borrowed only inside the closure. Decorators, `initialize`,
+   blocks and handlers run before or after it.
+   - The closure must be `Send`, which `&Ruby` and `Value` aren't, so it
+     can't take a Ruby object in or hand one out.
+   - The lints in `lib.rs` and `ext/lobzique/clippy.toml` close the known
+     ways around that (raw rb-sys calls, calls that fetch a Ruby handle
+     themselves). They are a list, not a proof.
+   - The backstop is `try_borrow`: a call that did reach a borrowed
+     document would raise `RuntimeError: document is in use by a native
+     call`, with no panic and nothing corrupted. The Ruby fuzzer looks for
+     it.
+   - The cost: custom XPath and CSS functions can't run during an
+     evaluation, so `XPathContext#evaluate` runs them between rounds
+     (Departures). If a handler edits the document, the next round sees the
+     edited tree with the answers already given. Ids stay valid, so the
+     result may be stale but nothing is unsafe.
+4. **The GVL is always held.** Ruby switches threads only where Ruby code
+   runs, which rule 3 keeps outside borrows, so another thread sees a
+   document before or after a native call, never during one.
+   - Parsing is the one long call. The parser builds a document of its own,
+     64 KB of input at a time (`DocumentParser`, `FragmentParser`), and
+     between chunks the extension lets Ruby handle interrupts and switch
+     threads, as it does between Ruby calls (`support::check_interrupts`).
+     So `Timeout` and `Thread#raise` stop a long parse, and other threads
+     get their time slices. No borrow is held meanwhile. A fragment's nodes
+     reach the target document after the parse, under a borrow taken then,
+     in whatever document the fragment or context node is in by that time.
 
-  XPath and CSS handlers run between evaluations
-  (`XPathContext#evaluate`): if the handler or another thread edits the
-  document, the next evaluation sees the edited tree with answers already
-  given. Ids stay valid, so the result may be stale but nothing is unsafe.
+Most of a call's cost is the crossing itself: the method dispatch, the type
+check on the receiver, and a Ruby object per node returned. So crossings are
+kept few: one native call per ported Nokogiri method, a node object made
+once and then read from the cache, and whole results (`children`, a search)
+returned in one call.
+
+### Ractors and panics
+
 - **Ractors.** Not supported, as in Nokogiri: the extension isn't declared
   Ractor-safe, so native methods raise `Ractor::UnsafeError` outside the
   main Ractor, and node types aren't `frozen_shareable`, so
@@ -398,13 +418,13 @@ assemble it.
 | `XML::Namespace` objects | one per libxml2 `xmlNs`, shared by the nodes that use it | a new object per call to `namespace`, `namespace_definitions` or `namespace_scopes` | the arena keeps namespaces as names, not objects; Loofah and rails-html-sanitizer read only `prefix` and `href` |
 | `Node#pointer_id` | the libxml2 node's address | the address of the document's data, which doesn't move, and the node id | arena nodes have no address of their own; the value is still unique among live nodes, which is what `==` needs |
 | native parser module | `Gumbo` | `Html5ever` | named after the engine it binds |
-| threads while parsing | the GVL is held throughout; `Timeout` waits for the parse | interrupts are handled between 64 KB chunks, and from 1 MB the GVL is released | a long parse stalls neither the process nor `Timeout` (Threads, Ractors and panics) |
+| threads while parsing | `Timeout` and other threads wait for the parse | interrupts are handled, and threads may switch, between 64 KB chunks; the GVL is held | a long parse stalls neither the process nor `Timeout` (Memory model, rule 4) |
 
 ## How a call flows
 
 - **Parsing.** `HTML5.parse(html)` → `HTML5::Document.parse` (Ruby: options,
   `HTML5.read_and_encode`) → `Html5ever.parse(string, url, self, …)` → the
-  core builds an arena, a chunk at a time, without the GVL from 1 MB → it
+  core builds an arena, a chunk at a time → it
   is wrapped as `self`, which may be Loofah's subclass → `initialize` →
   `@url`, `@quirks_mode`, `@errors`. `HTML4.parse(bytes)` →
   `HTML4::Document.parse` → `EncodingReader.detect_encoding` →

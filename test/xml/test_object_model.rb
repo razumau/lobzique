@@ -174,6 +174,17 @@ module ObjectModelContract
     assert_match(/\(no data\)>\z/, node.inspect)
   end
 
+  # Node objects are write-barrier protected: an old one that is pointed
+  # at a young document has to tell the GC
+  def test_an_old_node_keeps_the_document_it_moved_to
+    node = root::XML::Node.new("p", root::HTML5::Document.new)
+    4.times { GC.start }
+    root::HTML5::Document.new.add_child(node)
+    GC.start(full_mark: false)
+    Array.new(10_000) { +"garbage" }
+    assert_equal "<p></p>", node.document.root.to_html
+  end
+
   def test_wrappers_survive_compaction
     skip "needs GC.verify_compaction_references" unless GC.respond_to?(:verify_compaction_references)
 

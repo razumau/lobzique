@@ -23,7 +23,7 @@ fn new(ruby: &Ruby, class: RClass, args: &[Value]) -> Result<Value, Error> {
             "first argument must be a XML::Document or XML::Node",
         ));
     }
-    let document: Value = args[0].funcall("document", ())?;
+    let document = document::unwrap(ruby, args[0].funcall("document", ())?)?;
     let content = c_string(args[1])?;
     let id = document::with_arena_mut(ruby, document, |arena| arena.create_comment(content))?;
     finish_new(ruby, document, id, class, args)

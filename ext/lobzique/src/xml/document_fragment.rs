@@ -15,6 +15,7 @@ pub static DOCUMENT_FRAGMENT: Lazy<RClass> = Lazy::new(|ruby| {
 /// `DocumentFragment.native_new(document)`: a fragment of the receiving
 /// class, wrapped and decorated, before `initialize`.
 fn native_new(ruby: &Ruby, class: RClass, document: Value) -> Result<Value, Error> {
+    let document = document::unwrap(ruby, document)?;
     let id = document::with_arena_mut(ruby, document, |arena| arena.create_fragment())?;
     wrap_as(ruby, document, id, Some(class))
 }

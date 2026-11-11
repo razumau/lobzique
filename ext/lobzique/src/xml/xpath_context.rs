@@ -175,7 +175,7 @@ struct Handler<'a> {
 /// `Nokogiri_marshal_xpath_funcall_and_return_values`.
 fn call_handler(
     ruby: &Ruby,
-    document: Value,
+    document: Obj<Node>,
     handler: Handler,
     query: &Query,
     call: &Call,
@@ -245,7 +245,7 @@ fn call_handler(
 }
 
 /// Nokogiri's `_noko_xml_xpath_context__xpath2ruby`.
-fn to_ruby(ruby: &Ruby, document: Value, value: xpath::Value<'static>) -> Result<Value, Error> {
+fn to_ruby(ruby: &Ruby, document: Obj<Node>, value: xpath::Value<'static>) -> Result<Value, Error> {
     Ok(match value {
         xpath::Value::NodeSet(ids) => node_set::wrap(ruby, document, ids)?,
         xpath::Value::Boolean(b) => b.into_value_with(ruby),

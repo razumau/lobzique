@@ -20,8 +20,7 @@ pub static DOCUMENT: Lazy<RClass> = Lazy::new(|ruby| {
 /// run: Nokogiri's `noko_xml_document_wrap`.
 pub fn wrap_document(ruby: &Ruby, class: RClass, arena: dom::Document) -> Result<Value, Error> {
     let document = ruby.obj_wrap_as(Node::new_document(arena), class);
-    document.set_document(document.as_value());
-    document.ivar_set("@node_cache", ruby.ary_new())?;
+    Node::complete_document(ruby, document);
     document.ivar_set("@decorators", ruby.qnil())?;
     document.ivar_set("@errors", ruby.qnil())?;
     Ok(document.as_value())
@@ -42,8 +41,10 @@ fn new(ruby: &Ruby, class: RClass, args: &[Value]) -> Result<Value, Error> {
     Ok(document)
 }
 
-/// The data of a document object; raises the way `noko_xml_document_unwrap` does.
-pub fn unwrap(ruby: &Ruby, document: Value) -> Result<&Node, Error> {
+/// A document object given by Ruby code; raises the way
+/// `noko_xml_document_unwrap` does. Nodes keep their document in this form,
+/// so only arguments need the check.
+pub fn unwrap(ruby: &Ruby, document: Value) -> Result<Obj<Node>, Error> {
     let class = ruby.get_inner(&DOCUMENT);
     if !document.is_kind_of(class) {
         let message = format!(
@@ -53,34 +54,21 @@ pub fn unwrap(ruby: &Ruby, document: Value) -> Result<&Node, Error> {
         );
         return Err(Error::new(ruby.exception_type_error(), message));
     }
-    <&Node>::try_convert(document)
-}
-
-fn arena<'a>(
-    ruby: &Ruby,
-    document: &'a Node,
-) -> Result<&'a std::cell::RefCell<dom::Document>, Error> {
-    document.arena().ok_or_else(|| {
-        Error::new(
-            ruby.exception_runtime_error(),
-            "Uninitialized document struct (null data pointer)",
-        )
-    })
+    Obj::try_convert(document)
 }
 
 /// Runs `f` on the document's arena; the borrow ends when `f` returns.
 ///
-/// `f` can't reach Ruby while the arena is borrowed: Ruby handles and
-/// values aren't `Send`, so `f` can neither capture nor return one, and
-/// the lints in `lib.rs` and `clippy.toml` close the ways to get a handle
-/// inside it. A Ruby exception can therefore never unwind past the borrow
-/// and leave the document locked.
+/// `f` must be `Send`, which Ruby handles and values aren't, so it can
+/// neither call Ruby nor return a Ruby object (ARCHITECTURE.md, "Memory
+/// model"). What it needs from Ruby is copied in beforehand, and what Ruby
+/// needs from the arena is copied out.
 pub fn with_arena<R: Send>(
     ruby: &Ruby,
-    document: Value,
+    document: Obj<Node>,
     f: impl FnOnce(&dom::Document) -> R + Send,
 ) -> Result<R, Error> {
-    let arena = arena(ruby, unwrap(ruby, document)?)?;
+    let arena = document.arena(ruby)?;
     let arena = arena.try_borrow().map_err(|_| busy(ruby))?;
     Ok(f(&arena))
 }
@@ -88,10 +76,10 @@ pub fn with_arena<R: Send>(
 /// [`with_arena`] with a mutable borrow.
 pub fn with_arena_mut<R: Send>(
     ruby: &Ruby,
-    document: Value,
+    document: Obj<Node>,
     f: impl FnOnce(&mut dom::Document) -> R + Send,
 ) -> Result<R, Error> {
-    let arena = arena(ruby, unwrap(ruby, document)?)?;
+    let arena = document.arena(ruby)?;
     let mut arena = arena.try_borrow_mut().map_err(|_| busy(ruby))?;
     Ok(f(&mut arena))
 }
@@ -99,12 +87,11 @@ pub fn with_arena_mut<R: Send>(
 /// [`with_arena_mut`] on two different documents at once.
 pub fn with_arenas_mut<R: Send>(
     ruby: &Ruby,
-    first: Value,
-    second: Value,
+    first: Obj<Node>,
+    second: Obj<Node>,
     f: impl FnOnce(&mut dom::Document, &mut dom::Document) -> R + Send,
 ) -> Result<R, Error> {
-    let first = arena(ruby, unwrap(ruby, first)?)?;
-    let second = arena(ruby, unwrap(ruby, second)?)?;
+    let (first, second) = (first.arena(ruby)?, second.arena(ruby)?);
     let mut first = first.try_borrow_mut().map_err(|_| busy(ruby))?;
     let mut second = second.try_borrow_mut().map_err(|_| busy(ruby))?;
     Ok(f(&mut first, &mut second))
@@ -119,7 +106,7 @@ fn busy(ruby: &Ruby) -> Error {
 }
 
 /// libxml2's `xmlDocGetRootElement`: the first element child.
-fn root(ruby: &Ruby, rb_self: Value) -> Result<Option<Value>, Error> {
+fn root(ruby: &Ruby, rb_self: Obj<Node>) -> Result<Option<Value>, Error> {
     let root = with_arena(ruby, rb_self, |arena| {
         arena.element_children(NodeId::DOCUMENT).next()
     })?;
@@ -128,8 +115,7 @@ fn root(ruby: &Ruby, rb_self: Value) -> Result<Option<Value>, Error> {
 
 /// `Document#root=`. A root from another document is copied, and the
 /// argument returned as given, still in its own document.
-fn set_root(ruby: &Ruby, rb_self: Value, new_root: Value) -> Result<Value, Error> {
-    unwrap(ruby, rb_self)?;
+fn set_root(ruby: &Ruby, rb_self: Obj<Node>, new_root: Value) -> Result<Value, Error> {
     if new_root.is_nil() {
         with_arena_mut(ruby, rb_self, |arena| arena.set_root(None))?
             .expect("no root is always allowed");
@@ -171,6 +157,7 @@ fn initialize_copy_with_args(
     other: Value,
     level: i32,
 ) -> Result<Value, Error> {
+    let other = unwrap(ruby, other)?;
     let copy = with_arena(ruby, other, move |arena| arena.copy_document(level != 0))?;
     if !rb_self.adopt_arena(copy) {
         return Err(Error::new(
@@ -178,23 +165,22 @@ fn initialize_copy_with_args(
             "document is already initialized",
         ));
     }
-    rb_self.set_document(rb_self.as_value());
-    rb_self.ivar_set("@node_cache", ruby.ary_new())?;
+    Node::complete_document(ruby, rb_self);
     Ok(rb_self.as_value())
 }
 
-fn encoding(ruby: &Ruby, rb_self: Value) -> Result<Option<RString>, Error> {
+fn encoding(ruby: &Ruby, rb_self: Obj<Node>) -> Result<Option<RString>, Error> {
     let encoding = with_arena(ruby, rb_self, |arena| arena.encoding().map(<[u8]>::to_vec))?;
     Ok(encoding.map(|encoding| utf8_string(ruby, encoding)))
 }
 
-fn set_encoding(ruby: &Ruby, rb_self: Value, encoding: Value) -> Result<Value, Error> {
+fn set_encoding(ruby: &Ruby, rb_self: Obj<Node>, encoding: Value) -> Result<Value, Error> {
     let label = c_string(encoding)?;
     with_arena_mut(ruby, rb_self, |arena| arena.set_encoding(Some(label)))?;
     Ok(encoding)
 }
 
-fn version(ruby: &Ruby, rb_self: Value) -> Result<Option<RString>, Error> {
+fn version(ruby: &Ruby, rb_self: Obj<Node>) -> Result<Option<RString>, Error> {
     let version = with_arena(ruby, rb_self, |arena| arena.version().map(<[u8]>::to_vec))?;
     Ok(version.map(|version| utf8_string(ruby, version)))
 }

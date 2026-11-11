@@ -18,7 +18,7 @@ use magnus::{
     gc, method,
     prelude::*,
     rb_sys::AsRawValue,
-    typed_data::Obj,
+    typed_data::{Obj, Writebarrier},
     value::{Lazy, Opaque},
     DataTypeFunctions, Error, KwArgs, RArray, RClass, RString, Ruby, TypedData, Value,
 };
@@ -35,20 +35,46 @@ pub static NODE: Lazy<RClass> = Lazy::new(|ruby| {
 /// that document's arena; both change when the node moves to another
 /// document. A document is the node that owns the arena, so `Document <
 /// Node` works without a second data type.
+///
+/// Its objects are write-barrier protected, so that a minor GC doesn't mark
+/// every node object of every live document. The two Ruby references are
+/// therefore stored only by `complete_document` and `repoint`, which tell
+/// the GC.
 #[derive(Default, TypedData)]
-#[magnus(class = "Lobzique::XML::Node", mark, compact, size, free_immediately)]
+#[magnus(class = "Lobzique::XML::Node", mark, compact, size, free_immediately, wb_protected)]
 pub struct Node {
     /// `None` only on an object made with `allocate` and never initialized.
-    document: Cell<Option<Opaque<Value>>>,
+    /// Typed, so that reaching the arena from a node needs no check.
+    document: Cell<Option<Opaque<Obj<Node>>>>,
     id: Cell<Option<NodeId>>,
     /// Boxed so that the other nodes' objects don't carry an empty one.
-    arena: OnceCell<Box<RefCell<dom::Document>>>,
+    owned: OnceCell<Box<Owned>>,
+}
+
+/// What only a document's object has.
+struct Owned {
+    arena: RefCell<dom::Document>,
+    /// Node objects by node id: Nokogiri's `@node_cache`. `None` until the
+    /// document's own object exists.
+    cache: Cell<Option<Opaque<RArray>>>,
+}
+
+impl Owned {
+    fn new(arena: dom::Document) -> Box<Owned> {
+        Box::new(Owned {
+            arena: RefCell::new(arena),
+            cache: Cell::new(None),
+        })
+    }
 }
 
 impl DataTypeFunctions for Node {
     fn mark(&self, marker: &gc::Marker) {
         if let Some(document) = self.document.get() {
             marker.mark_movable(document);
+        }
+        if let Some(cache) = self.owned.get().and_then(|owned| owned.cache.get()) {
+            marker.mark(cache);
         }
     }
 
@@ -60,59 +86,83 @@ impl DataTypeFunctions for Node {
 
     /// A document reports its arena, which holds all of its nodes.
     fn size(&self) -> usize {
-        let Some(arena) = self.arena.get() else {
+        let Some(owned) = self.owned.get() else {
             return size_of::<Self>();
         };
-        let heap = arena.try_borrow().map_or(0, |arena| arena.heap_size());
-        size_of::<Self>() + size_of::<RefCell<dom::Document>>() + heap
+        let heap = owned.arena.try_borrow().map_or(0, |arena| arena.heap_size());
+        size_of::<Self>() + size_of::<Owned>() + heap
     }
 }
 
 impl Node {
-    fn new(document: Value, id: NodeId) -> Node {
+    fn new(document: Obj<Node>, id: NodeId) -> Node {
         Node {
             document: Cell::new(Some(document.into())),
             id: Cell::new(Some(id)),
-            arena: OnceCell::new(),
+            owned: OnceCell::new(),
         }
     }
 
-    /// The document node's own data, which owns the arena.
+    /// The document node's own data, which owns the arena. It isn't usable
+    /// before [`Node::complete_document`].
     pub fn new_document(arena: dom::Document) -> Node {
         Node {
             document: Cell::new(None),
             id: Cell::new(Some(NodeId::DOCUMENT)),
-            arena: OnceCell::from(Box::new(RefCell::new(arena))),
+            owned: OnceCell::from(Owned::new(arena)),
         }
-    }
-
-    /// Completes a document node's data once its Ruby object exists.
-    pub fn set_document(&self, document: Value) {
-        self.document.set(Some(document.into()));
     }
 
     /// Gives an allocated, empty object the arena it is the document of;
     /// `false` if it has one already.
     pub fn adopt_arena(&self, arena: dom::Document) -> bool {
-        if self.arena.set(Box::new(RefCell::new(arena))).is_err() {
+        if self.owned.set(Owned::new(arena)).is_err() {
             return false;
         }
         self.id.set(Some(NodeId::DOCUMENT));
         true
     }
 
+    /// Once a document's Ruby object exists: it is its own document, and
+    /// starts with an empty node cache.
+    pub fn complete_document(ruby: &Ruby, document: Obj<Node>) {
+        document.document.set(Some(document.into()));
+        if let Some(owned) = document.owned.get() {
+            let cache = ruby.ary_new();
+            owned.cache.set(Some(cache.into()));
+            document.writebarrier(cache);
+        }
+    }
+
     /// Points the object at another node, possibly in another document, as
     /// Nokogiri resets `DATA_PTR` after copying or merging a node.
-    fn repoint(&self, document: Value, id: NodeId) {
-        self.document.set(Some(document.into()));
-        self.id.set(Some(id));
+    fn repoint(node: Obj<Node>, document: Obj<Node>, id: NodeId) {
+        node.document.set(Some(document.into()));
+        node.id.set(Some(id));
+        node.writebarrier(document);
     }
 
-    pub fn arena(&self) -> Option<&RefCell<dom::Document>> {
-        self.arena.get().map(Box::as_ref)
+    fn owned(&self, ruby: &Ruby) -> Result<&Owned, Error> {
+        self.owned.get().map(Box::as_ref).ok_or_else(|| {
+            Error::new(
+                ruby.exception_runtime_error(),
+                "Uninitialized document struct (null data pointer)",
+            )
+        })
     }
 
-    pub fn document(&self, ruby: &Ruby) -> Result<Value, Error> {
+    /// A document's arena.
+    pub fn arena(&self, ruby: &Ruby) -> Result<&RefCell<dom::Document>, Error> {
+        Ok(&self.owned(ruby)?.arena)
+    }
+
+    /// A document's node cache.
+    fn cache(&self, ruby: &Ruby) -> Result<RArray, Error> {
+        let cache = self.owned(ruby)?.cache.get();
+        Ok(ruby.get_inner(cache.expect("a document object has a node cache")))
+    }
+
+    pub fn document(&self, ruby: &Ruby) -> Result<Obj<Node>, Error> {
         self.document
             .get()
             .map(|document| ruby.get_inner(document))
@@ -147,7 +197,7 @@ impl Node {
         self.document.get().is_some()
     }
 
-    fn document_method(ruby: &Ruby, rb_self: &Self) -> Result<Value, Error> {
+    fn document_method(ruby: &Ruby, rb_self: &Self) -> Result<Obj<Node>, Error> {
         rb_self.document(ruby)
     }
 
@@ -274,8 +324,8 @@ impl Node {
     /// Unique among live nodes, as libxml2's node address is: the address
     /// of the document's data, which doesn't move, and the node's id.
     fn pointer_id(ruby: &Ruby, rb_self: &Self) -> Result<u128, Error> {
-        let document = document::unwrap(ruby, rb_self.document(ruby)?)?;
-        let address = document as *const Node as usize;
+        let document = rb_self.document(ruby)?;
+        let address = &*document as *const Node as usize;
         Ok((address as u128) << 32 | rb_self.id(ruby)?.index() as u128)
     }
 
@@ -297,14 +347,14 @@ impl Node {
         let definitions = rb_self.with_arena(ruby, |arena, id| {
             owned_namespaces(arena.namespace_definitions(id).iter().map(Into::into))
         })?;
-        wrap_namespaces(ruby, rb_self.document(ruby)?, definitions)
+        wrap_namespaces(ruby, rb_self.document(ruby)?.as_value(), definitions)
     }
 
     fn namespace_scopes(ruby: &Ruby, rb_self: &Self) -> Result<RArray, Error> {
         let scopes = rb_self.with_arena(ruby, |arena, id| {
             owned_namespaces(arena.namespace_scopes(id).into_iter())
         })?;
-        wrap_namespaces(ruby, rb_self.document(ruby)?, scopes)
+        wrap_namespaces(ruby, rb_self.document(ruby)?.as_value(), scopes)
     }
 
     fn encode_special_chars(ruby: &Ruby, _rb_self: &Self, string: Value) -> Result<RString, Error> {
@@ -330,8 +380,9 @@ impl Node {
                 .namespace(id)
                 .map(|ns| (ns.prefix.map(str::to_owned), ns.href.to_owned()))
         })?;
+        let document = rb_self.document(ruby)?.as_value();
         namespace
-            .map(|(prefix, href)| namespace::wrap(ruby, rb_self.document(ruby)?, prefix, href))
+            .map(|(prefix, href)| namespace::wrap(ruby, document, prefix, href))
             .transpose()
     }
 
@@ -496,7 +547,7 @@ impl Node {
         }
         let other = <&Node>::try_convert(other)?;
         let (source, id) = (other.document(ruby)?, other.id(ruby)?);
-        document::unwrap(ruby, new_parent_doc)?;
+        let new_parent_doc = document::unwrap(ruby, new_parent_doc)?;
         let depth = CopyDepth::from_level(level);
         let copy = if source.as_raw() == new_parent_doc.as_raw() {
             document::with_arena_mut(ruby, source, move |arena| arena.copy(id, depth))?
@@ -508,8 +559,8 @@ impl Node {
         let Some(copy) = copy else {
             return Ok(None);
         };
-        rb_self.repoint(new_parent_doc, copy);
-        let cache: RArray = Obj::<Node>::try_convert(new_parent_doc)?.ivar_get("@node_cache")?;
+        Node::repoint(rb_self, new_parent_doc, copy);
+        let cache = new_parent_doc.cache(ruby)?;
         cache.store(cache_index(copy), rb_self)?;
         new_parent_doc.funcall::<_, _, Value>("decorate", (rb_self,))?;
         Ok(Some(rb_self))
@@ -537,10 +588,10 @@ fn reparent(ruby: &Ruby, pivot: &Node, node: Value, position: Position) -> Resul
         let message = format!("node must be a {}", node_class.inspect());
         return Err(Error::new(ruby.exception_arg_error(), message));
     }
-    let reparentee = <&Node>::try_convert(node)?;
+    let reparentee = Obj::<Node>::try_convert(node)?;
     let (document, pivot_id) = (pivot.document(ruby)?, pivot.id(ruby)?);
     let (source, id) = (reparentee.document(ruby)?, reparentee.id(ruby)?);
-    let namespace_inheritance = Obj::<Node>::try_convert(document)?
+    let namespace_inheritance = document
         .ivar_get::<_, Value>("@namespace_inheritance")?
         .to_bool();
     let is_text = reparentee.with_arena(ruby, |arena, id| arena.node_type(id) == NodeType::Text)?;
@@ -576,10 +627,9 @@ fn reparent(ruby: &Ruby, pivot: &Node, node: Value, position: Position) -> Resul
     };
 
     if is_text {
-        let cache: RArray = Obj::<Node>::try_convert(source)?.ivar_get("@node_cache")?;
-        cache.store(cache_index(id), ruby.qnil())?;
+        source.cache(ruby)?.store(cache_index(id), ruby.qnil())?;
     }
-    reparentee.repoint(document, reparented);
+    Node::repoint(reparentee, document, reparented);
     let reparented = wrap(ruby, document, reparented)?;
     reparented.funcall::<_, _, Value>("decorate!", ())?;
     Ok(reparented)
@@ -679,7 +729,7 @@ fn wrap_namespaces(
 }
 
 /// The node objects for `ids`, in an Array.
-pub fn wrap_all(ruby: &Ruby, document: Value, ids: Vec<NodeId>) -> Result<RArray, Error> {
+pub fn wrap_all(ruby: &Ruby, document: Obj<Node>, ids: Vec<NodeId>) -> Result<RArray, Error> {
     let nodes = ruby.ary_new_capa(ids.len());
     for id in ids {
         nodes.push(wrap(ruby, document, id)?)?;
@@ -704,18 +754,18 @@ fn uninitialized(ruby: &Ruby) -> Error {
 
 /// The one Ruby object for a node, created on first use: Nokogiri's
 /// `noko_xml_node_wrap`. The class follows the node type unless `class` is
-/// given. A new object goes into the document's `@node_cache` and through
+/// given. A new object goes into the document's node cache and through
 /// `Document#decorate`; `initialize` is not called.
 pub fn wrap_as(
     ruby: &Ruby,
-    document: Value,
+    document: Obj<Node>,
     id: NodeId,
     class: Option<RClass>,
 ) -> Result<Value, Error> {
     if id == NodeId::DOCUMENT {
-        return Ok(document);
+        return Ok(document.as_value());
     }
-    let cache: RArray = Obj::<Node>::try_convert(document)?.ivar_get("@node_cache")?;
+    let cache = document.cache(ruby)?;
     let cached: Value = cache.entry(cache_index(id))?;
     if !cached.is_nil() {
         return Ok(cached);
@@ -733,7 +783,7 @@ pub fn wrap_as(
     Ok(node)
 }
 
-pub fn wrap(ruby: &Ruby, document: Value, id: NodeId) -> Result<Value, Error> {
+pub fn wrap(ruby: &Ruby, document: Obj<Node>, id: NodeId) -> Result<Value, Error> {
     wrap_as(ruby, document, id, None)
 }
 
@@ -763,9 +813,9 @@ pub fn document_for_new_node(
     ruby: &Ruby,
     document: Value,
     deprecation: &str,
-) -> Result<Value, Error> {
+) -> Result<Obj<Node>, Error> {
     if document.is_kind_of(ruby.get_inner(&document::DOCUMENT)) {
-        return Ok(document);
+        return document::unwrap(ruby, document);
     }
     warn_deprecated(deprecation)?;
     <&Node>::try_convert(document)?.document(ruby)
@@ -775,7 +825,7 @@ pub fn document_for_new_node(
 /// class, run `initialize` with the original arguments, then yield.
 pub fn finish_new(
     ruby: &Ruby,
-    document: Value,
+    document: Obj<Node>,
     id: NodeId,
     class: RClass,
     args: &[Value],
