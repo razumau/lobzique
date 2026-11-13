@@ -160,17 +160,18 @@ module Lobzique
         # Input bytes as libxml2's HTML parser decodes them with +encoding+
         # (a name, or nil): [UTF-8 string, document.encoding, errors]. Input
         # read from an IO in +chunk+-sized reads is only partly buffered
-        # when libxml2 guesses.
-        def decode(input, encoding, chunk: nil)
+        # when libxml2 guesses. Input that isn't +at_start+ of what libxml2
+        # parses has no byte order mark.
+        def decode(input, encoding, chunk: nil, at_start: true)
           bytes = input.to_str.b
           errors = []
           if encoding
             ruby_encoding, name = open_decoder(encoding)
-            return decode_with(bytes, ruby_encoding, name, errors) if ruby_encoding
+            return decode_with(bytes, ruby_encoding, name, errors, at_start) if ruby_encoding
 
             errors << syntax_error("Unsupported encoding: #{encoding}", domain: 1, code: 32, level: 1, str1: encoding)
           end
-          guess(bytes, errors, chunk)
+          guess(bytes, errors, chunk, at_start)
         end
 
         private
@@ -180,38 +181,38 @@ module Lobzique
         # byte; else at the first non-ASCII byte an http-equiv charset
         # anywhere after it (htmlFindEncoding), or ISO-8859-1. ASCII input
         # has no encoding.
-        def guess(bytes, errors, chunk)
-          bom = BOMS.keys.find { |mark| bytes.start_with?(mark) } if bytes.bytesize >= 4
+        def guess(bytes, errors, chunk, at_start)
+          bom = BOMS.keys.find { |mark| bytes.start_with?(mark) } if at_start && bytes.bytesize >= 4
           if bom
             ruby_encoding, size = BOMS[bom]
             return [transcode(bytes.byteslice(size..).force_encoding(ruby_encoding), bytes, errors), nil, errors]
           end
 
           # htmlParseDocument: "wrong but matches long-standing behavior"
-          return decode_with(bytes, Encoding::UTF_8, "UTF-8", errors) if bytes.start_with?("<?xm")
+          return decode_with(bytes, Encoding::UTF_8, "UTF-8", errors, at_start) if at_start && bytes.start_with?("<?xm")
 
           first = bytes.index(/[\x80-\xFF]/n)
-          declared = declared_while_parsing(bytes, first, errors)
+          declared = declared_while_parsing(bytes, first, errors, at_start)
           return declared if declared
           return [bytes.force_encoding(Encoding::UTF_8), nil, errors] unless first
 
           declared = find_encoding(bytes, first, chunk)
-          return decode_with(bytes, Encoding::ISO_8859_1, "ISO-8859-1", errors) unless declared
+          return decode_with(bytes, Encoding::ISO_8859_1, "ISO-8859-1", errors, at_start) unless declared
 
           ruby_encoding, name = open_decoder(declared)
-          return decode_with(bytes, ruby_encoding, name, errors) if ruby_encoding
+          return decode_with(bytes, ruby_encoding, name, errors, at_start) if ruby_encoding
 
           line, column = position(bytes, first)
           errors << syntax_error("Unsupported encoding: #{declared}", domain: 1, code: 32, level: 1, str1: declared, line:, column:)
           # libxml2 has stopped guessing, so the input is UTF-8
-          decode_with(bytes, Encoding::UTF_8, "UTF-8", errors)
+          decode_with(bytes, Encoding::UTF_8, "UTF-8", errors, at_start)
         end
 
         # htmlCheckMeta, which EncodingReader misses when its regexp doesn't
         # match or the <meta> is past an IO's first chunk: the first
         # supported declaration before the first non-ASCII byte decodes the
         # input, and document.encoding is the last one declared, as written.
-        def declared_while_parsing(bytes, first, errors)
+        def declared_while_parsing(bytes, first, errors, at_start)
           prefix = first ? bytes.byteslice(0, first) : bytes
           return unless prefix.match?(/<meta/ni)
 
@@ -225,7 +226,7 @@ module Lobzique
           return unless switch
 
           declared = declarations(bytes) if first
-          decode_with(bytes, switch.first, declared.last, errors)
+          decode_with(bytes, switch.first, declared.last, errors, at_start)
         end
 
         # What htmlCheckMeta declares, meta by meta: a charset attribute's
@@ -272,10 +273,10 @@ module Lobzique
             rest.byteslice((at + 8)..)[/\A[A-Za-z0-9\-_:\/]+/n]
         end
 
-        def decode_with(bytes, ruby_encoding, name, errors)
+        def decode_with(bytes, ruby_encoding, name, errors, at_start)
           string = transcode(bytes.dup.force_encoding(ruby_encoding), bytes, errors)
           # xmlDetectEncoding skips a UTF-8 BOM even when the encoding is set
-          string = string.byteslice(3..) if string.start_with?("\uFEFF")
+          string = string.byteslice(3..) if at_start && string.start_with?("\uFEFF")
           [string, name, errors]
         end
 

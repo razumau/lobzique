@@ -31,6 +31,12 @@ module NodeParseContract
     assert_empty div.parse("")
   end
 
+  def test_a_leading_bom_is_text
+    [root::HTML5(HTML), root::HTML4(HTML)].each do |doc|
+      assert_equal "﻿﻿x", doc.at_css("div").parse("﻿﻿x").text
+    end
+  end
+
   def test_parse_config_option
     options = nil
     root::HTML5(HTML).at_css("div").parse("<div></div>") { |config| options = config }

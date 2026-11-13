@@ -28,6 +28,8 @@ fuzz_target!(|data: &[u8]| {
         max_errors: Some(100),
         max_tree_depth: Some(400),
         parse_noscript_content_as_text: false,
+        // as Node#in_context parses
+        keep_bom: true,
     };
     let (namespace, name) = CONTEXTS[usize::from(selector) % CONTEXTS.len()];
     let context = Context::new(namespace, name)

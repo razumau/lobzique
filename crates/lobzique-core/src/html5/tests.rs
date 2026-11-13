@@ -142,6 +142,27 @@ fn noscript_text_is_escaped_unless_scripting_is_enabled() {
 }
 
 #[test]
+fn a_leading_bom_is_dropped_unless_kept() {
+    let input = "\u{FEFF}\u{FEFF}x";
+    let body = |document: &Document| html(document, find(document, "body"));
+    assert_eq!(body(&parse(input)), "<body>\u{FEFF}x</body>");
+    let options = Options {
+        keep_bom: true,
+        ..Options::default()
+    };
+    let (document, _) = parse_document(input.as_bytes(), &options).unwrap();
+    assert_eq!(body(&document), "<body>\u{FEFF}\u{FEFF}x</body>");
+
+    let context = Context::new(ContextNamespace::Html, "body");
+    let (document, root) = fragment(input, &context);
+    assert_eq!(html(&document, root), "\u{FEFF}x");
+    let mut document = Document::new(DocumentKind::Html);
+    let root = document.create_fragment();
+    parse_fragment(&mut document, root, input.as_bytes(), &context, &options).unwrap();
+    assert_eq!(html(&document, root), input);
+}
+
+#[test]
 fn fragments_parse_in_their_context() {
     let (document, root) = fragment("<td>x</td>", &Context::new(ContextNamespace::Html, "TR"));
     assert_eq!(html(&document, root), "<td>x</td>");

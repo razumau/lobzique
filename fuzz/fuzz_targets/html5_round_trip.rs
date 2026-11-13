@@ -85,6 +85,7 @@ fn parse(input: &[u8]) -> Option<(Document, NodeId)> {
         max_errors: Some(0),
         max_tree_depth: Some(MAX_TREE_DEPTH),
         parse_noscript_content_as_text: false,
+        keep_bom: false,
     };
     let context = Context::new(ContextNamespace::Html, "body");
     let mut document = Document::new(DocumentKind::Html);

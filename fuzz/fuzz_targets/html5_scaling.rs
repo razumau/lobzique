@@ -84,6 +84,7 @@ fn run(input: &[u8], flags: u8) -> Option<Run> {
         max_errors: Some(usize::from(flags & 1)),
         max_tree_depth: Some(400),
         parse_noscript_content_as_text: flags & 2 != 0,
+        keep_bom: false,
     };
     work::take();
     let (document, root) = if flags & 4 == 0 {

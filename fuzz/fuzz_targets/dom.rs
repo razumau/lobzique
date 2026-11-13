@@ -35,6 +35,7 @@ fuzz_target!(|data: &[u8]| {
         max_errors: Some(0),
         max_tree_depth: Some(400),
         parse_noscript_content_as_text: false,
+        keep_bom: false,
     };
     let parsed = parse_document(markup, &options).map(|(document, _)| document);
     let mut docs = [

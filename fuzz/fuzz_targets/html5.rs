@@ -32,6 +32,7 @@ fuzz_target!(|data: &[u8]| {
         max_errors: Some(usize::from(selector & 1)),
         max_tree_depth: Some(400),
         parse_noscript_content_as_text: selector & 2 != 0,
+        keep_bom: false,
     };
     let (document, root) = match usize::from(selector >> 2) % (CONTEXTS.len() + 1) {
         0 => match parse_document(input, &options) {

@@ -60,7 +60,9 @@ text are what Nokogiri gives. `HTML4::Document.parse` is Nokogiri's;
   `<meta>` declaration before any non-ASCII byte, with the last one
   declared as `document.encoding` (`htmlCheckMeta`); else at the first
   non-ASCII byte a raw search for `HTTP-EQUIV`…`CHARSET=`, within what an
-  IO has buffered (`htmlFindEncoding`); else ISO-8859-1.
+  IO has buffered (`htmlFindEncoding`); else ISO-8859-1;
+- decoding takes off one byte order mark, so the HTML5 parser, which would
+  drop another, keeps a leading U+FEFF (`keep_bom`).
 
 `detect_encoding` and the `<meta>` rule read `<meta>` elements from an
 extra HTML5 parse of the input as ISO-8859-1, where Nokogiri runs libxml2's
@@ -70,7 +72,9 @@ only input containing `<meta`. `script/differential --mode html4` compares
 
 Fragments parse with the HTML5 fragment parser, in `body` or in the context
 given; `HTML4::Document#fragment` passes none, where Nokogiri passes the
-root, whose HTML5 context would wrap the input in a `body`.
+root, whose HTML5 context would wrap the input in a `body`. Nokogiri parses
+a fragment after markup, so a byte order mark in it is text, as it is in
+`Node#parse` in any document.
 
 **Facade-safe.**
 - Code inside `module Lobzique` refers to constants relatively or through

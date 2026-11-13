@@ -89,6 +89,8 @@ pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error
         // libxml2 keeps at most 100 errors a parse
         max_errors: Some(100),
         parse_noscript_content_as_text: noscript_as_text,
+        // libxml2's in-context parse, which takes no byte order mark
+        keep_bom: true,
         ..default_options(ruby)?
     };
 
@@ -129,24 +131,27 @@ fn default_options(ruby: &Ruby) -> Result<Options, Error> {
         max_errors: default("DEFAULT_MAX_ERRORS")?,
         max_tree_depth: default("DEFAULT_MAX_TREE_DEPTH")?,
         parse_noscript_content_as_text: false,
+        keep_bom: false,
     };
     Ok(DEFAULTS.get_or_init(|| options).clone())
 }
 
-/// Gumbo's options: three required keywords and one optional one.
+/// Gumbo's options: three required keywords and one optional one, plus
+/// `keep_bom` for the HTML4 names, which parse as libxml2 decodes.
 fn options(keywords: RHash) -> Result<Options, Error> {
-    let keywords = get_kwargs::<_, (i32, i32, i32), (Option<Value>,), ()>(
+    let keywords = get_kwargs::<_, (i32, i32, i32), (Option<Value>, Option<Value>), ()>(
         keywords,
         &["max_attributes", "max_errors", "max_tree_depth"],
-        &["parse_noscript_content_as_text"],
+        &["parse_noscript_content_as_text", "keep_bom"],
     )?;
     let (max_attributes, max_errors, max_tree_depth) = keywords.required;
-    let (noscript_as_text,) = keywords.optional;
+    let (noscript_as_text, keep_bom) = keywords.optional;
     Ok(Options {
         max_attributes: limit(max_attributes),
         max_errors: limit(max_errors),
         max_tree_depth: limit(max_tree_depth),
         parse_noscript_content_as_text: noscript_as_text.is_some_and(|value| value.to_bool()),
+        keep_bom: keep_bom.is_some_and(|value| value.to_bool()),
     })
 }
 

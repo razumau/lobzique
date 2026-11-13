@@ -136,6 +136,22 @@ module HTML4ParsingContract
     assert_equal "café", root::HTML4::Document.new.fragment("<p>café</p>").text
   end
 
+  # libxml2's decoder takes off one byte order mark; a fragment's is text
+  def test_byte_order_marks
+    {
+      "\xEF\xBB\xBF\xEF\xBB\xBF<p>x".b => "﻿x",
+      "﻿﻿<p>x" => "﻿x",
+      "\xFF\xFE\xFF\xFE<\x00p\x00>\x00x\x00".b => "﻿x"
+    }.each do |input, expected|
+      assert_equal expected, root::HTML4(input).text, input.inspect
+      assert_equal expected, root::HTML4(StringIO.new(input)).text, input.inspect
+    end
+    assert_equal "﻿﻿x", root::HTML4.fragment("﻿﻿x").text
+    assert_equal "﻿x", root::HTML4.fragment("\xEF\xBB\xBFx".b).text
+    assert_equal "﻿x", root::HTML4("<p>").fragment("﻿x").text
+    assert_equal "﻿x", root::HTML4("<p>").at_css("p").fragment("﻿x").text
+  end
+
   def test_title_and_meta_encoding
     doc = root::HTML4("<html><head><meta charset=koi8-r><title>T</title></head><body><p>x</p></body></html>")
     assert_equal ["T", "koi8-r"], [doc.title, doc.meta_encoding]

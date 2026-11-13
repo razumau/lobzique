@@ -223,7 +223,8 @@ module Lobzique
             html, url, self,
             max_attributes: Html5ever::DEFAULT_MAX_ATTRIBUTES,
             max_errors: 100,
-            max_tree_depth: Html5ever::DEFAULT_MAX_TREE_DEPTH
+            max_tree_depth: Html5ever::DEFAULT_MAX_TREE_DEPTH,
+            keep_bom: true # decoding took one off, as libxml2's does
           )
           doc.encoding = encoding if encoding
           doc.errors = errors + doc.errors

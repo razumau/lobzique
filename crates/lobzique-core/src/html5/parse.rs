@@ -23,6 +23,10 @@ pub struct Options {
     pub max_errors: Option<usize>,
     pub max_tree_depth: Option<usize>,
     pub parse_noscript_content_as_text: bool,
+    /// Keeps a U+FEFF at the start of the input, which gumbo drops.
+    /// libxml2's parses keep it: its decoder takes off the byte order mark
+    /// itself, and an in-context parse takes none.
+    pub keep_bom: bool,
 }
 
 /// Numbered as Nokogiri's `HTML5::QuirksMode`.
@@ -471,6 +475,7 @@ impl Run {
             },
             TokenizerOpts {
                 initial_state,
+                discard_bom: !options.keep_bom,
                 ..TokenizerOpts::default()
             },
         );

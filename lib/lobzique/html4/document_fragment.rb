@@ -50,18 +50,20 @@ module Lobzique
         # lobzique: the HTML5 fragment parser, in <body> or in the context
         # given (plan.md decision 3). Nokogiri parses the input in a document
         # of its own, or as a <div>'s content in the context. The input is
-        # decoded as that document's parse would decode it.
+        # decoded as that document's parse would decode it, after markup, so
+        # a byte order mark is a character.
         input = input.to_str
         encoding = document.encoding
         encoding ||= input.encoding.name unless input.encoding == Encoding::ASCII_8BIT
         encoding ||= EncodingReader.detect_encoding(input)
-        html, _, errors = EncodingReader.decode(input, encoding)
+        html, _, errors = EncodingReader.decode(input, encoding, at_start: false)
 
         Html5ever.fragment(
           self, html, context,
           max_attributes: Html5ever::DEFAULT_MAX_ATTRIBUTES,
           max_errors: 100,
-          max_tree_depth: Html5ever::DEFAULT_MAX_TREE_DEPTH
+          max_tree_depth: Html5ever::DEFAULT_MAX_TREE_DEPTH,
+          keep_bom: true
         )
         # Html5ever.fragment keeps errors in @errors, as HTML5's fragments do
         parse_errors = instance_variable_defined?(:@errors) ? remove_instance_variable(:@errors) : []

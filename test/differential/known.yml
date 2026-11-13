@@ -61,18 +61,19 @@
     ends there, so libxml2 never guesses ISO-8859-1. In real documents the
     guess comes at the first non-ASCII text.
 - mode: html4
-  match: \A(wpt-parsing/tree-construction/processing-instructions\.dat#(75|80|81|82|97)|html5lib-tests/tokenizer/test3\.test#(1152|1207))\z
+  match: \A(wpt-parsing/tree-construction/processing-instructions\.dat#(75|80|81|82|97)|html5lib-tests/tokenizer/test3\.test#(1152|1207)|crawl/CC-MAIN-(20261009160033-20261009190033-00333\.warc\.gz@39363293|20261013211541-20261014001541-00666\.warc\.gz@38986006))\z
   reason: >-
     Markup the parsers read differently, not the decoding: libxml2 keeps a
     malformed "<?" or "</" as text, where the HTML5 parser makes a comment.
+    On crawled pages: PHP source after "<?" and a newline, and "</あ>".
 - mode: html4
-  match: \Acrawl/CC-MAIN-(20261005105623-20261005135623-00000\.warc\.gz@(2958049|15285101|15487349|41087564)|20261009160033-20261009190033-00333\.warc\.gz@(6665270|8577335|22608327|22915978|23967003|27148054|29550467)|20261013211541-20261014001541-00666\.warc\.gz@(11335497|11341311|15519250|16317507|16999152|17151253|18570536))\z
+  match: \Acrawl/CC-MAIN-(20261005105623-20261005135623-00000\.warc\.gz@(2958049|15285101|15487349|41087564)|20261009160033-20261009190033-00333\.warc\.gz@(6665270|8577335|22608327|22915978|23967003|27148054|29550467)|20261013211541-20261014001541-00666\.warc\.gz@(11335497|11341311|15519250|16317507|17151253|18570536))\z
   reason: >-
     Bytes invalid in the declared encoding. libxml2 stops parsing at the
     first one in an iconv encoding and keeps them raw in UTF-8; lobzique
     reads them as U+FFFD and goes on. Open: docs/html4-invalid-bytes.md.
 - mode: html4
-  match: \Acrawl/CC-MAIN-(20261005105623-20261005135623-00000\.warc\.gz@30691169|20261009160033-20261009190033-00333\.warc\.gz@(4813421|6468467|9443749|22896815|29555718|39363293)|20261013211541-20261014001541-00666\.warc\.gz@(16961|22529|41761|15513020|20476349|30202113|35750466|36145018|38986006))\z
+  match: \Acrawl/CC-MAIN-(20261005105623-20261005135623-00000\.warc\.gz@30691169|20261009160033-20261009190033-00333\.warc\.gz@(4813421|6468467|9443749|29555718)|20261013211541-20261014001541-00666\.warc\.gz@(16961|22529|41761|20476349|35750466|36145018))\z
   reason: >-
     iconv's tables (GNU libiconv's and glibc's) and Ruby's transcoders map
     a few characters of the East Asian encodings differently (GB2312 A1AA
