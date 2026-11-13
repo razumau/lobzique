@@ -1,9 +1,14 @@
 # App suites under lobzique
 
 `mise run measure:apps` (`script/apps`) runs an app's suite (`apps.tsv` ref)
-as checked out, then with lobzique in its Gemfile and both
-`sanitizer_vendor`s set in `config/application.rb` as the README says.
-Postgres runs in Docker. Both runs give the same results for every app:
+as checked out, and then in each mode that applies to it (plan.md
+decision 1). Postgres runs in Docker.
+
+## Seam mode
+
+lobzique in the Gemfile and both `sanitizer_vendor`s set in
+`config/application.rb`, as the README says. Both runs give the same
+results for every app:
 
 - Campfire renders Action Text, and its content filters and Opengraph
   metadata sanitize with `ActionText::ContentHelper.sanitizer.class`.
@@ -23,6 +28,27 @@ Postgres runs in Docker. Both runs give the same results for every app:
   runs, 35387 assertions, the same 86 failures in both runs: they need
   the built Vue client or `node`. Ruby 4.0.9.
 
-Lobsters calls Nokogiri directly and never a sanitizer vendor, so it
-waits for the facade. DocuSeal reaches its one `sanitize` call only
-from Chrome system specs that need its JS build.
+## Facade mode
+
+The app's nokogiri replaced with `gem "nokogiri", path:` to this repository,
+and nothing else changed. A check before the suite makes sure `Nokogiri` is
+lobzique.
+
+- Lobsters calls `Nokogiri::HTML` and `Nokogiri::HTML5.fragment` on
+  rendered Markdown and fetched pages, and never a sanitizer vendor, so
+  seam mode changes nothing for it. 899 examples, the same one failure
+  in both runs (`user_administration_spec`, banning). Its feature specs
+  run on Capybara's rack_test driver, which works on the facade.
+  `css_widely_available_spec` is left out: it downloads browser data
+  when it loads.
+- Fizzy: 1809 tests, 6894 assertions, all pass in both runs.
+- Campfire: 649 runs, two new errors, both in
+  `Users::AvatarsControllerTest`. `assert_select "text"` on the SVG
+  avatar makes Action Dispatch parse the response with
+  `Nokogiri::XML::Document.parse`, as it does for any media type ending
+  in `xml`, and the facade has no XML parser (decision 4). The other 647
+  pass.
+- DocuSeal isn't run. It loads a pdfium build of its own, published for
+  Linux only, and its one `sanitize` call is reached only from Chrome
+  system specs that need its JS build.
+- Loomio has XML gems, so it is a seam-mode app.

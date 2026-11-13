@@ -30,7 +30,7 @@ mise run fixtures:verify  # checksum test/fixtures, as CI does
 mise run differential [--corpus crawl] [--only REGEXP]   # compare with Nokogiri::HTML5 (plan.md decision 6)
 mise run crawl:fetch      # download the pinned Common Crawl sample into tmp/crawl/
 mise run measure:html4 [suite ...]   # HTML4 users' suites with the HTML4 names on gumbo (plan.md decision 3)
-mise run measure:apps [app ...]      # app suites with Lobzique::Sanitizer as both sanitizer vendors (plan.md phase 3)
+mise run measure:apps [--mode seam|facade] [app ...]   # app suites on the seams and on the nokogiri facade (plan.md phases 3, 5)
 mise run measure:rails [suite ...]   # Rails components' suites on Nokogiri and on lobzique (plan.md phase 4)
 ```
 
