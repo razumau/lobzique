@@ -196,8 +196,8 @@ html5lib tokenizer inputs.
      set of rules parse it the same way (README, `known.yml`).
 
    - **Apps' suites.** Campfire, Fizzy and Loomio pass with the same
-     results on Nokogiri and on lobzique; Lobsters and DocuSeal wait for the
-     facade. Per-app results and the method are in `docs/app-suites.md`.
+     results on Nokogiri and on lobzique; Lobsters runs on the facade
+     (phase 5). Per-app results and the method are in `docs/app-suites.md`.
 
    Later:
    - a Rust scrubber for calls without an app scrubber (`PermitScrubber`
@@ -293,8 +293,14 @@ html5lib tokenizer inputs.
       (decision 4), and tests of libxml2's tree (the HTML 4.0 doctype,
       lowercased SVG names, the newline after `<pre>`, rails-dom-testing's
       tests of which parser runs) and rails/rails-dom-testing#136, which
-      fails on Nokogiri too. Still to do: `measure:apps` with a facade
-      mode (Lobsters, Fizzy, Campfire, DocuSeal), and the facade's README.
+      fails on Nokogiri too.
+   4. Apps and README. Done: `measure:apps` has a facade mode
+      (`docs/app-suites.md`). Lobsters and Fizzy give the same results as
+      on Nokogiri. Campfire has two new errors, from `assert_select` on an
+      SVG response, which Action Dispatch parses as XML (decision 4);
+      that is the first XML to weigh for the facade. DocuSeal doesn't run
+      outside its Linux image. `facade/README.md` says who the facade is
+      for and what differs.
    `<select>`: decided, the facade patches Loofah. Its `scrub!` ends with
    the vendor's `EscapeRawTextInSelect` (ARCHITECTURE.md, the nokogiri
    facade), and rails-html-sanitizer's `<select>` tests pass on it.
@@ -395,10 +401,10 @@ are in `inventory/raw/src`.
    Capybara: rack_test needs XPath 1.0 through the `xpath` gem and
    `Nokogiri::CSS.xpath_for`. It is test-only in all 16 apps that have it.
    - Seam mode: Capybara keeps using real Nokogiri.
-   - Facade mode: real Nokogiri can't sit next to the facade (same gem
-     name), so rack_test is unsupported for now. Those apps use a JS driver
-     or seam mode for tests. `CSS.xpath_for` is what is still missing;
-     revisit after phase 4.
+   - Facade mode: rack_test works. Lobsters' feature specs pass on the
+     facade (`docs/app-suites.md`): Capybara sends CSS to `Node#css` and
+     its own XPath to `Node#xpath`. `CSS.xpath_for` is missing, and only
+     the `xpath` gem's `css` expression calls it.
 3. **HTML4 entry points.** Decided: the HTML4 names use the HTML5 parser
    and serializer but libxml2's encoding handling. This is for facade mode
    only, and is built with the facade.
