@@ -1,4 +1,4 @@
-# Fuzzes each target in fuzz/fuzz_targets/ in turn, and the Ruby API (fuzz/ruby/)
+# Fuzzes each target in fuzz/fuzz_targets/ in its own job, and the Ruby API (fuzz/ruby/)
 name: Fuzz
 on:
   workflow_call:
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       seconds:
-        description: Seconds per target. The job is killed at 6 hours, build and minimization included.
+        description: Seconds per target. Each job is killed at 6 hours, build and minimization included.
         type: number
         default: 7200
       workers:
@@ -24,12 +24,33 @@ permissions:
   contents: read
 
 jobs:
-  fuzz:
-    name: Fuzz
+  targets:
     runs-on: ubuntu-latest
+    outputs:
+      names: ${{ steps.list.outputs.names }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - id: list
+        run: |
+          names=$(cargo metadata --no-deps --manifest-path fuzz/Cargo.toml --format-version 1 |
+            jq -c '[.packages[].targets[] | select(.kind == ["bin"]) | .name]')
+          echo "names=$names" >> "$GITHUB_OUTPUT"
+
+  # One job per target, so the 6-hour job limit applies to each target's run
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    needs: targets
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJSON(needs.targets.outputs.names) }}
     env:
       FUZZ_SECONDS: ${{ inputs.seconds }}
       FUZZ_WORKERS: ${{ inputs.workers }}
+      TARGET: ${{ matrix.target }}
       # The prebuilt cargo-fuzz is a musl binary and defaults to its own target, which ASan can't link
       FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu
     steps:
@@ -40,13 +61,17 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-fuzz
-      # Each run starts from the corpus the previous run grew, short or long
+      # Each run starts from the corpus the previous run grew, short or long.
+      # The fallback key restores the corpus all targets once shared; other
+      # targets' corpora are dropped below, so the cache saved holds this one's.
       - uses: actions/cache@v6
         with:
           path: fuzz/corpus
-          key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: fuzz-corpus-
-      - name: Fuzz each target for ${{ env.FUZZ_SECONDS }}s
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            fuzz-corpus-${{ matrix.target }}-
+            fuzz-corpus-
+      - name: Fuzz for ${{ env.FUZZ_SECONDS }}s
         # The parser and DOM targets start from the html5lib and WPT inputs (dom
         # reads each as markup with no operations), read-only after the
         # target's own corpus. Seed files are long, so inputs are capped; a slow
@@ -55,35 +80,31 @@ jobs:
         # html5_scaling counts work to catch slowness under the timeout. A
         # target's dictionary is fuzz/<target>.dict, or html5's for html5_scaling.
         run: |
-          for target in $(cargo fuzz list); do
-            seeds=()
-            if [ "$target" = html5 ] || [ "$target" = html5_in_context ] || [ "$target" = html5_round_trip ] || [ "$target" = dom ]; then
-              seeds=(test/fixtures/wpt-parsing/tree-construction test/fixtures/html5lib-tests/tokenizer)
-            fi
-            dict=()
-            if [ -f "fuzz/$target.dict" ]; then
-              dict=(-dict="$PWD/fuzz/$target.dict")
-            elif [ "$target" = html5_scaling ]; then
-              dict=(-dict="$PWD/fuzz/html5.dict")
-            fi
-            fork=()
-            if [ "$FUZZ_WORKERS" -gt 1 ]; then
-              fork=(-fork="$FUZZ_WORKERS")
-            fi
-            mkdir -p "fuzz/corpus/$target"
-            cargo fuzz run --target "$FUZZ_TARGET_TRIPLE" "$target" "fuzz/corpus/$target" "${seeds[@]}" -- \
-              -max_total_time="$FUZZ_SECONDS" -max_len=65536 -timeout=10 -malloc_limit_mb=512 "${dict[@]}" "${fork[@]}"
-          done
+          mkdir -p "fuzz/corpus/$TARGET"
+          find fuzz/corpus -mindepth 1 -maxdepth 1 ! -name "$TARGET" -exec rm -rf {} +
+          seeds=()
+          if [ "$TARGET" = html5 ] || [ "$TARGET" = html5_in_context ] || [ "$TARGET" = html5_round_trip ] || [ "$TARGET" = dom ]; then
+            seeds=(test/fixtures/wpt-parsing/tree-construction test/fixtures/html5lib-tests/tokenizer)
+          fi
+          dict=()
+          if [ -f "fuzz/$TARGET.dict" ]; then
+            dict=(-dict="$PWD/fuzz/$TARGET.dict")
+          elif [ "$TARGET" = html5_scaling ]; then
+            dict=(-dict="$PWD/fuzz/html5.dict")
+          fi
+          fork=()
+          if [ "$FUZZ_WORKERS" -gt 1 ]; then
+            fork=(-fork="$FUZZ_WORKERS")
+          fi
+          cargo fuzz run --target "$FUZZ_TARGET_TRIPLE" "$TARGET" "fuzz/corpus/$TARGET" "${seeds[@]}" -- \
+            -max_total_time="$FUZZ_SECONDS" -max_len=65536 -timeout=10 -malloc_limit_mb=512 "${dict[@]}" "${fork[@]}"
       - name: Minimize the corpus
-        run: |
-          for target in $(cargo fuzz list); do
-            cargo fuzz cmin --target "$FUZZ_TARGET_TRIPLE" "$target"
-          done
+        run: cargo fuzz cmin --target "$FUZZ_TARGET_TRIPLE" "$TARGET"
       - name: Upload crashing inputs
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: fuzz-artifacts
+          name: fuzz-artifacts-${{ matrix.target }}
           path: fuzz/artifacts/
 
   ruby:
