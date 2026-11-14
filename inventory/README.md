@@ -87,10 +87,9 @@ bundles, packages, traces, scans and the corpus, about 2 GB in total.
 
 | scope | entries | meaning |
 |---|---:|---|
-| `in` | 151 | the DOM below, plus the HTML4 entry points (10), `xpath`/`at_xpath` and the `Nokogiri::CSS` namespace |
+| `in` | 152 | the DOM below, plus the HTML4 entry points (10), `xpath`/`at_xpath`, the `Nokogiri::CSS` namespace and `CSS.xpath_for` (Capybara, through the xpath gem) |
 | `stub` | 5 | `VERSION`, `VersionInfo#libxml2?`, `jruby?`, `uses_gumbo?` |
 | `later:xml` | 2 | `XML::Document.parse`, `Nokogiri.XML`; XML comes after the HTML work |
-| `out:xpath` | 1 | `Nokogiri::CSS.xpath_for`, used only by Capybara through the xpath gem |
 | `out:xml` | 52 | used only by XML-domain gems |
 | `out:sax` | 7 | SAX; the only HTML user is truncato |
 | `noise` | 5 | name matches whose receivers aren't Nokogiri objects |

@@ -18,6 +18,8 @@ class TestClassTree < Minitest::Test
   # Ours, with no counterpart: compiled CSS, where Nokogiri has XPath
   # strings, and the error for XPath outside the subset
   OWN = ["Lobzique::CSS::Selector", "Lobzique::XML::XPath::UnsupportedError"]
+  # Ours with other ancestors: the core parses CSS, not a Racc::Parser
+  OWN_ANCESTORS = ["Lobzique::CSS::Parser"]
   # Ours with everything under it: the sanitizer vendor mirrors Loofah and
   # rails-html-sanitizer, not Nokogiri, and the seams patch Action Text and
   # rails-dom-testing
@@ -46,7 +48,9 @@ class TestClassTree < Minitest::Test
 
     define_method(test_name(path)) do
       theirs = Object.const_get(self.class.counterpart(path))
-      if value.is_a?(Module)
+      if OWN_ANCESTORS.include?(path)
+        assert_equal theirs.class, value.class
+      elsif value.is_a?(Module)
         assert_equal normalize(theirs.ancestors), normalize(value.ancestors)
       else
         assert_equal theirs, value

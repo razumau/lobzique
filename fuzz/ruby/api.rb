@@ -240,7 +240,10 @@ module RubyApiFuzz
       when 16 then a.content = text(y, flags)
       when 17 then keep(a.css(selector(y, flags), Handler.new(self)))
       when 18 then keep(a.xpath(xpath(y, flags), Handler.new(self)))
-      when 19 then a.matches?(selector(y, flags))
+      when 19
+        rule = selector(y, flags)
+        a.matches?(rule)
+        @impl.root::CSS.xpath_for(rule, cache: false)
       when 20 then keep(a.ancestors(selector(y, flags)))
       when 21 then keep(a.fragment(text(y, flags)))
       when 22 then keep(a.parse(text(y, flags)))

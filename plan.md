@@ -96,7 +96,7 @@ html5lib tokenizer inputs.
 0. Prepare test fixtures.
 1. Inventory the Nokogiri API used by Rails, Loofah, rails-dom-testing and the
    top ~50 gems; that list is the API contract. Done: `inventory/contract.yml`
-   (151 entries in scope), method and findings in `inventory/README.md`.
+   (152 entries in scope), method and findings in `inventory/README.md`.
    Tier 2 suites still have to run under the recorder.
 2. Core crate + gem: parse, DOM, select, serialize. Differential-test against
    Nokogiri::HTML5 on real HTML (output must match: apps have stored Action
@@ -403,8 +403,12 @@ are in `inventory/raw/src`.
    - Seam mode: Capybara keeps using real Nokogiri.
    - Facade mode: rack_test works. Lobsters' feature specs pass on the
      facade (`docs/app-suites.md`): Capybara sends CSS to `Node#css` and
-     its own XPath to `Node#xpath`. `CSS.xpath_for` is missing, and only
-     the `xpath` gem's `css` expression calls it.
+     its own XPath to `Node#xpath`. The `xpath` gem's `css` expression
+     calls `CSS.xpath_for`, which returns the strings Nokogiri's visitor
+     writes: the core has that visitor twice, building trees for `css`
+     and writing strings for `xpath_for`, and the `css` fuzz target holds
+     the two to the same meaning. `CSS::Parser#parse`, `CSS::Node` and
+     visitors with their own `visit_*` methods stay out.
 3. **HTML4 entry points.** Decided: the HTML4 names use the HTML5 parser
    and serializer but libxml2's encoding handling. This is for facade mode
    only, and is built with the facade.

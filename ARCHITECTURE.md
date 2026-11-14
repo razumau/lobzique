@@ -148,8 +148,8 @@ Nokogiri's path, a header naming it, `# lobzique:` on changes.
 On the facade nothing at boot says that Nokogiri isn't there, so what
 lobzique leaves out fails loudly at the first call:
 `facade/lib/nokogiri/unsupported.rb` defines Nokogiri's entry points to XML
-parsing, the Builder, SAX, XSLT, CSS-to-XPath and Slop (`Nokogiri::XML()`,
-`XML::Document.parse`, `CSS.xpath_for`, …) to raise `NotImplementedError`,
+parsing, the Builder, SAX, XSLT, the CSS syntax tree and Slop (`Nokogiri::XML()`,
+`XML::Document.parse`, `CSS.parse`, …) to raise `NotImplementedError`,
 and makes their constants (`XML::Builder`, `XML::SAX`, …) raise `NameError`
 from `const_missing`, both naming the facade and pointing to seam mode.
 `const_missing` keeps `defined?` false for them. `Nokogiri.parse`, `make`
@@ -345,6 +345,7 @@ returned in one call.
 | `XML::Namespace` | a node's namespace: `prefix`, `href` | same |
 | `XML::XPathContext` | `new(node)`, `node=`, `register_ns`, `register_variable`, `evaluate(path, handler)`: a `CSS::Selector` or an XPath string | same |
 | `CSS::Selector` | `new(rule, prefixes:, doctype:, namespaces:, builtins:, first:)`: a selector list compiled for the implied XPath contexts of the searching class, as Nokogiri's `XPathVisitor` is configured | none; Nokogiri translates CSS into XPath strings |
+| `CSS::Parser` | `xpath_for(selector, visitor)`: the XPath strings for a selector list, reading the visitor's `builtins`, `doctype`, `prefix` and `namespaces` | a Ruby class (racc), same method |
 
 ## Core (`crates/lobzique-core`)
 
@@ -370,7 +371,7 @@ assemble it.
 | `html5::parse` | html5ever `TreeSink` into the arena: documents, fragments with a context node (appended to a fragment, or unlinked for `in_context`, whose context the core finds from the node; a fragment is parsed in a scratch document and copied in), a chunk of input at a time (`DocumentParser`, `FragmentParser`), `max_tree_depth`/`max_attributes`, quirks mode, errors; adjacent text in one node, as gumbo collects it |
 | `html5::serialize` | `html_standard_serialize`, byte for byte with Nokogiri::HTML5 |
 | `xml::serialize` | `native_write_to`: libxml2's `xmlSaveTree` for XML and XHTML output, with its escaping, formatting, XHTML 1.0 appendix C rules and encoding switch; the binding transcodes the result |
-| `css` | Nokogiri's CSS front end, ported: `tokenizer` (rex rules in order), `parser` (racc's parse loop over `tables`, which `script/generate_css_tables` generates from Nokogiri's parser, and the grammar's actions), `translate` (`XPathVisitor`, building `xpath` trees where it writes strings) |
+| `css` | Nokogiri's CSS front end, ported: `tokenizer` (rex rules in order), `parser` (racc's parse loop over `tables`, which `script/generate_css_tables` generates from Nokogiri's parser, and the grammar's actions), `translate` (`XPathVisitor`, building `xpath` trees where it writes strings) and `write` (`XPathVisitor` again, writing the strings, for `CSS.xpath_for`) |
 | `xpath` | `ast` (expressions as trees, operators of one precedence as lists), `eval` (libxml2's evaluation: XPath 1.0 values, comparisons and functions, node sets in document order, positions per step, libxml2's evaluation errors, custom calls answered in rounds), `parse` (XPath strings read as libxml2 reads them, with its error codes); `XML::XPathContext` errors |
 | `work` | a count of nodes read, bytes escaped and parser calls, kept only under `cfg(fuzzing)`, so `html5_scaling` can check that work grows linearly |
 
@@ -399,7 +400,9 @@ assemble it.
 | `native_content=` with an entity reference other than the predefined five | an entity reference node, which `to_html` can't serialize | text, as written | no entity reference nodes; `content=` escapes `&`, so only a direct call reaches this |
 | `create_element` with an `xmlns` key | a namespace definition | `NotImplementedError` | adding namespace definitions is out of scope |
 | names that aren't UTF-8 | kept as bytes | `ArgumentError` | names are atoms shared with the parser and XPath engine; only `Node.new` can be given one |
-| CSS | Ruby parser → XPath string → libxml2 | the same parser and visitor in the core, building an XPath tree (`CSS::Selector`) that the core evaluates as libxml2 would; `Searchable#extract_params` takes a `CSS::Selector` for a query, not a handler | no XPath string parser for the visitor's output; `CSS.xpath_for` stays out of scope (decision 2) |
+| CSS | Ruby parser → XPath string → libxml2 | the same parser and visitor in the core, building an XPath tree (`CSS::Selector`) that the core evaluates as libxml2 would; `Searchable#extract_params` takes a `CSS::Selector` for a query, not a handler | searching skips writing an XPath string and parsing it again; the tree also knows which CSS rule to quote in errors |
+| `CSS.xpath_for` | `CSS::Parser` builds `CSS::Node`s, which an `XPathVisitor` walks; a subclass or any object with `accept` and `prefix` can write something else | the core parses and writes the strings; `XPathVisitor` only holds the configuration, and `CSS::Parser` has only `xpath_for`. No `CSS.parse`, `CSS::Node` or `CSS::Tokenizer` | one CSS parser, the core's; the callers in the inventory (the xpath gem) pass a selector and nothing else |
+| a `CSS::Node` pasted into XPath (`a:eq(@b)`) | `#<Nokogiri::CSS::Node:0x…>`, with the object's address | `#<Nokogiri::CSS::Node>` | there is no object; neither is XPath |
 | XPath's `namespace` axis | `XML::Namespace` objects in node sets | `XPath::UnsupportedError` (a `SyntaxError`, code 1207) | nothing in the inventory uses it (decision 2) |
 | XPath nesting | unlimited | predicates, parentheses and argument lists at most 32 deep, else `XPath::UnsupportedError` | as for CSS: each level costs stack to parse and evaluate |
 | XPath `id()` | libxml2's ID table: each `id` attribute (and `name` on `a`) as it was set, the first kept, unlinked nodes included | the first element with the ID in document order, in the document and then in the context node's tree | no ID table; the same for parsed documents |

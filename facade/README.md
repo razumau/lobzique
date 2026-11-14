@@ -27,9 +27,10 @@ that names the facade:
   `assert_dom` on a response whose media type ends in `xml` (an SVG, a
   feed, a sitemap) parse it as XML and raise too;
 - `Builder`, SAX, XSLT and `Slop`;
-- `Nokogiri::CSS.xpath_for`. Capybara's rack_test driver works without it
-  (Lobsters' feature specs pass), except for expressions built with the
-  xpath gem's `css`.
+- `Nokogiri::CSS.parse`, `CSS::Node` and `CSS::Tokenizer`: CSS is parsed
+  natively, so there is no syntax tree in Ruby. `CSS.xpath_for` works
+  (Capybara's rack_test driver and the xpath gem use it), but an
+  `XPathVisitor` subclass can't override how selectors are translated.
 
 `bundle exec ruby -e 'puts Gem.loaded_specs.values.select { |s|
 s.runtime_dependencies.any? { _1.name == "nokogiri" } }.map(&:name)'` lists the

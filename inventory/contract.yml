@@ -1084,8 +1084,8 @@ entries:
       - lib/roadie/inliner.rb:103
 - api: Nokogiri::CSS.xpath_for
   kind: singleton
-  scope: out:xpath
-  note: the xpath gem translates CSS to XPath for Capybara rack_test (test-time only); unsupported in facade mode (plan.md decision 2)
+  scope: in
+  note: the xpath gem translates CSS to XPath for Capybara rack_test (test-time only); the core writes the strings Nokogiri's visitor does (plan.md decision 2)
   usage: test
   domains:
   - html-test

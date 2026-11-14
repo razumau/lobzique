@@ -196,6 +196,9 @@ fn invalid_xpath_waits_for_evaluation() {
     assert!(invalid("// p"));
     assert!(invalid("p:not(.a:first-of-type)"));
     assert!(invalid("eq(1)"));
+    // a CSS::Node's #to_s
+    assert!(invalid("p:eq(@b)"));
+    assert!(!invalid("p:contains(@b)"));
     // pasted as written, quotes and all
     assert!(invalid(r"p:eq('a\'b')"));
     // a literal holds only XML characters: \b is U+000B
@@ -360,6 +363,111 @@ fn nth_with_a_zero_or_negative_step() {
     assert!(select(&document, "p:nth-child(-n+0)").is_empty());
     assert!(select(&document, "p:nth-child(-2n)").is_empty());
     assert_eq!(select(&document, "p:nth-child(-n+2)"), ["a", "b"]);
+}
+
+fn written(rule: &str, visitor: &Visitor) -> Vec<String> {
+    xpath_for(rule, visitor).unwrap()
+}
+
+fn visitor(builtins: bool, html5: bool) -> Visitor {
+    Visitor {
+        builtins,
+        html5,
+        default_namespace: false,
+        prefix: "//".into(),
+    }
+}
+
+#[test]
+fn xpath_for_writes_what_nokogiri_writes() {
+    let plain = visitor(false, false);
+    assert_eq!(
+        written("h1 + div, a ~ b > c d", &plain),
+        [
+            "//h1/following-sibling::*[1]/self::div",
+            "//a/following-sibling::b/c//d"
+        ]
+    );
+    assert_eq!(
+        written("a.b#c[d|=e]:first-of-type", &plain),
+        [
+            "//a[contains(concat(' ',normalize-space(@class),' '),' b ') and @id='c' and \
+          @d='e' or starts-with(@d,concat('e','-'))][position()=1]"
+        ]
+    );
+    assert_eq!(
+        written("a:nth-child(2n+1):not(b):has(> c)", &plain),
+        ["//a[((count(preceding-sibling::*)+1)>=1) and \
+          ((((count(preceding-sibling::*)+1)-1) mod 2)=0) and not(self::b) and ./c]"]
+    );
+    assert_eq!(
+        written(r#"[a="it's"], [b='"\'']"#, &plain),
+        [r#"//*[@a="it's"]"#, r#"//*[@b=concat('"',"'",'')]"#]
+    );
+    assert_eq!(
+        written("a:eq(@b)", &plain),
+        ["//a[position()=#<Nokogiri::CSS::Node>]"]
+    );
+    assert_eq!(
+        written("a.b, svg|a, *, a\\@b", &visitor(true, true)),
+        [
+            "//*:a[nokogiri-builtin:css-class(@class,'b')]",
+            "//svg:a",
+            "//*",
+            "//*[nokogiri-builtin:local-name-is('a@b')]"
+        ]
+    );
+    assert_eq!(
+        written("a", &visitor(false, true)),
+        ["//*[local-name()='a']"]
+    );
+    let namespaced = Visitor {
+        default_namespace: true,
+        prefix: "x/".into(),
+        ..plain
+    };
+    assert_eq!(written("a > *, |b", &namespaced), ["x/xmlns:a/*", "x/b"]);
+    assert_eq!(written("> c", &namespaced), ["./xmlns:c"]);
+    assert_eq!(written("// c", &namespaced), ["x///xmlns:c"]);
+}
+
+#[test]
+fn xpath_for_syntax_errors() {
+    let error = |rule| xpath_for(rule, &visitor(false, false)).unwrap_err().0;
+    assert_eq!(error(""), "empty CSS selector");
+    assert_eq!(error("a:-b"), "Invalid XPath function name '-b'");
+    assert_eq!(error(r"a\!b"), "Invalid element name 'a!b'");
+    assert_eq!(error(r"[a|b\!c]"), "Invalid attribute name 'a|b!c'");
+    assert!(error("a,").starts_with("unexpected '$'"));
+}
+
+/// The string and the compiled tree are two readings of one visitor.
+#[test]
+fn xpath_for_is_invalid_where_the_compiled_selector_is() {
+    let rules = [
+        "p",
+        "p.x:first",
+        "div > p:nth-child(2n)",
+        "p:has(b)",
+        "p + span, #c",
+        "p[class~=y]",
+        "a + text()",
+        "// p",
+        "p:not(.a:first-of-type)",
+        "eq(1)",
+        r"p:eq('a\'b')",
+        "p:eq(@b)",
+        "p:eq(2n+1)",
+        "p:self(@b)",
+        "p:contains()",
+        "p:nth-last-of-type(0)",
+    ];
+    for rule in rules {
+        let compiled = compile(rule, &options(&[Prefix::Global])).unwrap().query;
+        let paths = written(rule, &visitor(true, true)).join("|");
+        let parsed = crate::xpath::parse(paths.as_bytes());
+        assert_eq!(compiled.is_ok(), parsed.is_ok(), "{rule}: {paths}");
+    }
 }
 
 #[test]

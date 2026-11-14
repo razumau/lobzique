@@ -13,3 +13,6 @@ locked = Bundler::LockfileParser.new(Bundler.read_file(File.expand_path("../../G
 %w[rake minitest minitest-mock loofah rails-html-sanitizer actionview actiontext rails-dom-testing].each do |name|
   gem name, locked.fetch(name)
 end
+
+# Capybara's rack_test driver builds its queries with it
+gem "xpath", "~> 3.2"

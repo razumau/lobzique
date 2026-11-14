@@ -58,9 +58,9 @@ module Nokogiri
       stub_methods(xslt, Nokogiri, :XSLT)
       stub_constants(xslt, Nokogiri, :XSLT)
 
-      css_to_xpath = "no CSS-to-XPath translation (it compiles CSS natively)"
-      stub_methods(css_to_xpath, CSS, :xpath_for, :parse)
-      stub_constants(css_to_xpath, CSS, :Parser, :Tokenizer, :Node, :XPathVisitor, :SelectorCache)
+      css_tree = "no CSS syntax tree in Ruby (it parses CSS natively)"
+      stub_methods(css_tree, CSS, :parse)
+      stub_constants(css_tree, CSS, :Tokenizer, :Node)
 
       slop = "no Slop decorator"
       stub_methods(slop, Nokogiri, :Slop)

@@ -514,7 +514,7 @@ fn descendants(absolute: bool) -> Path {
     }
 }
 
-fn is_of_type(condition: &Condition) -> bool {
+pub(super) fn is_of_type(condition: &Condition) -> bool {
     let name = match condition {
         Condition::Pseudo(Pseudo::Ident(name)) => name,
         Condition::Pseudo(Pseudo::Function(function)) => &function.name,
@@ -582,7 +582,7 @@ fn nth(nth: &Nth, child: bool, last: bool) -> Result<Expr> {
     Ok(Expr::And(vec![bound, modulo_is_zero(offset, a.abs())]))
 }
 
-fn read_a_and_positive_b(nth: &Nth) -> Result<(i128, i128)> {
+pub(super) fn read_a_and_positive_b(nth: &Nth) -> std::result::Result<(i128, i128), SyntaxError> {
     let a = ruby_to_i(&nth.a);
     match nth.operator.trim() {
         "+" => Ok((a, ruby_to_i(&nth.b))),
@@ -590,8 +590,7 @@ fn read_a_and_positive_b(nth: &Nth) -> Result<(i128, i128)> {
         "-" => Ok((a, a - ruby_modulo(ruby_to_i(&nth.b), a))),
         operator => Err(SyntaxError(format!(
             "expected an+b node to have either + or - as the operator, but is {operator:?}"
-        ))
-        .into()),
+        ))),
     }
 }
 
@@ -634,13 +633,13 @@ fn ruby_to_i(text: &str) -> i128 {
 }
 
 /// `.to_i` on a function's first argument, as `:nth-child(3)` takes it.
-fn to_i(argument: Option<&Argument>) -> Result<i128> {
+pub(super) fn to_i(argument: Option<&Argument>) -> std::result::Result<i128, SyntaxError> {
     match argument {
         None => Ok(0),
         Some(Argument::Number(text) | Argument::String(text) | Argument::Ident(text)) => {
             Ok(ruby_to_i(text))
         }
-        Some(_) => Err(SyntaxError("undefined method 'to_i'".into()).into()),
+        Some(_) => Err(SyntaxError("undefined method 'to_i'".into())),
     }
 }
 
@@ -649,6 +648,7 @@ fn to_i(argument: Option<&Argument>) -> Result<i128> {
 fn function_argument(argument: Option<&Argument>) -> Result<Expr> {
     match argument {
         Some(Argument::String(string)) => literal(&unescape_string(&string[1..string.len() - 1])),
+        Some(Argument::Attribute(name)) => attribute_path(name),
         // The visitor has no `visit_nth`
         Some(Argument::Nth(_)) => Err(SyntaxError("undefined method 'visit_nth'".into()).into()),
         argument => token(argument),
@@ -679,9 +679,10 @@ fn token(argument: Option<&Argument>) -> Result<Expr> {
             )),
             None => child_path(ident),
         },
-        Some(Argument::Attribute(name)) => attribute_path(name),
-        // An NTH node's #to_s, or nothing at all
-        Some(Argument::Nth(_) | Argument::Selector(_)) | None => Err(Failure::Invalid),
+        // A node's #to_s, or nothing at all
+        Some(Argument::Nth(_) | Argument::Attribute(_) | Argument::Selector(_)) | None => {
+            Err(Failure::Invalid)
+        }
     }
 }
 
@@ -786,7 +787,7 @@ fn check_literal(text: &str) -> Result<()> {
 
 /// The visitor's `XPATH_NAME`: an NCName as far as ASCII goes, leaving
 /// other characters to the XPath parser.
-fn xpath_name(name: &str) -> bool {
+pub(super) fn xpath_name(name: &str) -> bool {
     let mut chars = name.chars();
     chars
         .next()

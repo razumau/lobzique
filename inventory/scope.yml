@@ -58,8 +58,8 @@ rules:
     scope: in
     note: namespace of CSS::SyntaxError
   - match: '\ANokogiri::CSS\.xpath_for\z'
-    scope: out:xpath
-    note: the xpath gem translates CSS to XPath for Capybara rack_test (test-time only); unsupported in facade mode (plan.md decision 2)
+    scope: in
+    note: the xpath gem translates CSS to XPath for Capybara rack_test (test-time only); the core writes the strings Nokogiri's visitor does (plan.md decision 2)
 
   # ------------------------------------------------- out of scope (before the HTML4 rule)
   - match: '\ANokogiri::(XML::SAX|HTML4::SAX)'

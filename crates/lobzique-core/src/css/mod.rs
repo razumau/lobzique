@@ -11,6 +11,7 @@ mod tables;
 mod tests;
 mod tokenizer;
 mod translate;
+mod write;
 
 use crate::xpath::{self, Expr, Query};
 use std::fmt;
@@ -111,4 +112,33 @@ pub fn compile(rule: &str, options: &Options) -> Result<Selector, SyntaxError> {
         Ok(Query::new(Expr::Union(paths), translator.functions))
     };
     Ok(Selector { query })
+}
+
+/// What Nokogiri's `XPathVisitor` is configured with when it writes XPath
+/// for `CSS.xpath_for`.
+#[derive(Clone, Debug)]
+pub struct Visitor {
+    /// Nokogiri's builtin functions for classes and HTML5 names.
+    pub builtins: bool,
+    /// Names without a prefix match in any namespace. Unlike
+    /// [`Options::html`], not for HTML4: Nokogiri's HTML4 documents have no
+    /// namespaces.
+    pub html5: bool,
+    /// The namespace bindings have an `xmlns` key.
+    pub default_namespace: bool,
+    /// Pasted before each selector, whatever it is.
+    pub prefix: String,
+}
+
+/// `CSS::Parser#xpath_for`: an XPath string for each selector of the list,
+/// as Nokogiri's visitor writes them.
+pub fn xpath_for(rule: &str, visitor: &Visitor) -> Result<Vec<String>, SyntaxError> {
+    if rule.is_empty() {
+        return Err(SyntaxError("empty CSS selector".into()));
+    }
+    let writer = write::Writer::new(visitor);
+    parser::parse(rule)?
+        .iter()
+        .map(|selector| writer.selector(selector))
+        .collect()
 }

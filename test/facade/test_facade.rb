@@ -3,6 +3,7 @@
 require_relative "facade_helper"
 require "open3"
 require "rbconfig"
+require "xpath"
 
 # What the facade adds to lobzique: the root's name, and the version
 # answers that Loofah and others read (plan.md decision 1).
@@ -100,7 +101,7 @@ class TestFacade < Minitest::Test
       ["Nokogiri::XML::Document.parse", -> { Nokogiri::XML::Document.parse("<a/>", nil, nil, 0) }],
       ["Nokogiri::XML::DocumentFragment.parse", -> { Nokogiri::XML::DocumentFragment.parse("<a/>") }],
       ["Nokogiri.XSLT", -> { Nokogiri::XSLT("<a/>") }],
-      ["Nokogiri::CSS.xpath_for", -> { Nokogiri::CSS.xpath_for("p") }],
+      ["Nokogiri::CSS.parse", -> { Nokogiri::CSS.parse("p") }],
       ["Nokogiri.Slop", -> { Nokogiri::Slop("<a/>") }],
       ["Nokogiri() with a block", -> { Nokogiri { p_ } }]
     ].each do |name, call|
@@ -123,11 +124,21 @@ class TestFacade < Minitest::Test
     assert_kind_of Nokogiri::HTML5::DocumentFragment, Nokogiri::HTML5::DocumentFragment.parse("<p>")
   end
 
+  # Capybara's rack_test driver finds elements with the xpath gem, whose
+  # `css` calls Nokogiri::CSS.xpath_for
+  def test_xpath_gem_expressions
+    doc = Nokogiri::HTML5("<div><p class=a>x</p><p>y</p></div><p class=a>z</p>")
+    assert_equal ["//p[contains(concat(' ',normalize-space(@class),' '),' a ')]"], Nokogiri::CSS.xpath_for("p.a")
+    assert_equal %w[x z], doc.xpath(XPath.css("p.a").to_s).map(&:text)
+    assert_equal %w[x], doc.xpath(XPath.descendant(:div).css("p.a, span").to_s).map(&:text)
+    assert_equal %w[y], doc.xpath(XPath.css("p")[XPath.string.n.is("y")].to_s).map(&:text)
+  end
+
   def test_unsupported_constants
     %w[
       Nokogiri::XML::Builder Nokogiri::HTML::Builder Nokogiri::HTML5::Builder
       Nokogiri::XML::SAX Nokogiri::HTML4::SAX Nokogiri::XML::Reader Nokogiri::XSLT
-      Nokogiri::CSS::Parser Nokogiri::HTML::NamedCharacters
+      Nokogiri::CSS::Node Nokogiri::HTML::NamedCharacters
     ].each do |name|
       error = assert_raises(NameError, name) { Object.const_get(name) }
       assert_match(/\A#{Regexp.escape(name.sub("::HTML::", "::HTML4::"))} isn't supported: the nokogiri facade is lobzique/, error.message)
