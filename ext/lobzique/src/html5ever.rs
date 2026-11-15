@@ -1,6 +1,6 @@
-//! `Html5ever`, Nokogiri's `Gumbo` (`ext/nokogiri/gumbo.c`): the HTML5
-//! parser's entry points behind `HTML5::Document.parse` and
-//! `HTML5::DocumentFragment#initialize`, and the parse behind
+//! `Html5ever`, the `Gumbo` of Nokogiri (`ext/nokogiri/gumbo.c`): the entry
+//! points of the HTML5 parser behind `HTML5::Document.parse`
+//! and `HTML5::DocumentFragment#initialize`, and the parse behind
 //! `Node#in_context`.
 
 use crate::support::{c_string, call_initialize, check_interrupts, check_string, string_bytes};
@@ -23,8 +23,8 @@ use magnus::{
 use std::sync::OnceLock;
 
 /// `Html5ever.parse(input, url, klass, **options)`: a document of `klass`,
-/// initialized with no arguments, then given `@url`, `@quirks_mode` and,
-/// if there were any, `@errors`.
+/// initialized with no arguments, then given `@url`, `@quirks_mode`
+/// and, if there were any, `@errors`.
 fn parse(ruby: &Ruby, args: &[Value]) -> Result<Value, Error> {
     let args = scan_args::<(Value, Value, Value), (), (), (), RHash, ()>(args)?;
     let (input, url, klass) = args.required;
@@ -44,9 +44,9 @@ fn parse(ruby: &Ruby, args: &[Value]) -> Result<Value, Error> {
     Ok(document)
 }
 
-/// `Html5ever.fragment(fragment, input, context, **options)`: parses
-/// `input` in `context` (nil, a name such as `"svg:path"`, or a node) and
-/// appends the result to `fragment`.
+/// `Html5ever.fragment(fragment, input, context, **options)`: parses `input`
+/// in `context` (nil, a name such as `"svg:path"`, or a node) and appends
+/// the result to `fragment`.
 fn fragment(ruby: &Ruby, args: &[Value]) -> Result<(), Error> {
     let args = scan_args::<(Value, Value, Value), (), (), (), RHash, ()>(args)?;
     let (fragment, input, context_arg) = args.required;
@@ -59,9 +59,9 @@ fn fragment(ruby: &Ruby, args: &[Value]) -> Result<(), Error> {
     let mut parser = FragmentParser::new(input, &context, &options);
     run(|| parser.step())?;
     let nodes = parser.finish().map_err(|error| limit_error(ruby, error))?;
-    // Nokogiri builds in the document `fragment.document` names; the nodes
-    // can only go into the arena the fragment itself is in, which another
-    // thread may have changed during the parse
+    // Nokogiri builds in the document that `fragment.document` names. The nodes
+    // can go only into the arena of the fragment itself, which another thread
+    // may have changed during the parse.
     let parsed = target.with_arena_mut(ruby, move |arena, id| nodes.append_to(arena, id))?;
     target.ivar_set("@quirks_mode", parsed.quirks_mode as u8)?;
     add_errors(
@@ -72,24 +72,24 @@ fn fragment(ruby: &Ruby, args: &[Value]) -> Result<(), Error> {
     )
 }
 
-/// `Node#in_context`'s parse: `input` as a fragment in the context
-/// `Context::for_node` finds for `node`. The top-level nodes come back
-/// unlinked, and the parse errors are added to the document's `@errors`.
+/// The parse of `Node#in_context`: `input` as a fragment in the context
+/// that `Context::for_node` finds for `node`. The top-level nodes come back
+/// unlinked. The parse errors go to the `@errors` of the document.
 pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error> {
     let input = input_bytes(ruby, input)?;
     let document_object = node.document(ruby)?;
     let parsed = !document_object
         .ivar_get::<_, Value>("@quirks_mode")?
         .is_nil();
-    // Parsed as the serializer will write it, as for fragments
+    // Parsed as the serializer will write it, as for fragments.
     let noscript_as_text = document_object
         .ivar_get::<_, Value>("@parse_noscript_content_as_text")?
         .to_bool();
     let options = Options {
-        // libxml2 keeps at most 100 errors a parse
+        // libxml2 keeps at most 100 errors for a parse.
         max_errors: Some(100),
         parse_noscript_content_as_text: noscript_as_text,
-        // libxml2's in-context parse, which takes no byte order mark
+        // The in-context parse of libxml2 takes no byte order mark.
         keep_bom: true,
         ..default_options(ruby)?
     };
@@ -98,8 +98,8 @@ pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error
     let mut parser = FragmentParser::new(input, &context, &options);
     run(|| parser.step())?;
     let nodes = parser.finish().map_err(|error| limit_error(ruby, error))?;
-    // The node's document now, which another thread may have changed
-    // during the parse
+    // The current document of the node. Another thread may have changed
+    // it during the parse.
     let document = node.document(ruby)?;
     let (ids, parsed) = document::with_arena_mut(ruby, document, move |arena| nodes.import(arena))?;
     let errors = document.ivar_get::<_, RArray>("@errors")?;
@@ -107,9 +107,9 @@ pub fn in_context(ruby: &Ruby, node: &Node, input: Value) -> Result<Value, Error
     node_set::wrap(ruby, document, ids)
 }
 
-/// Parses the input up to the end, so the parser's `finish` only ends the
-/// tree. Between chunks Ruby handles interrupts and may switch threads, as
-/// between Ruby calls; the parser borrows no document, so nothing is locked
+/// Parses the input up to the end, so that the `finish` of the parser only ends
+/// the tree. Between chunks, Ruby handles interrupts and can switch threads,
+/// as between Ruby calls. The parser borrows no document, so nothing is locked
 /// meanwhile.
 fn run(mut step: impl FnMut() -> bool) -> Result<(), Error> {
     while step() {
@@ -118,7 +118,6 @@ fn run(mut step: impl FnMut() -> bool) -> Result<(), Error> {
     Ok(())
 }
 
-/// The `Html5ever::DEFAULT_*` limits, which are constant once loaded.
 fn default_options(ruby: &Ruby) -> Result<Options, Error> {
     static DEFAULTS: OnceLock<Options> = OnceLock::new();
     if let Some(options) = DEFAULTS.get() {
@@ -136,7 +135,7 @@ fn default_options(ruby: &Ruby) -> Result<Options, Error> {
     Ok(DEFAULTS.get_or_init(|| options).clone())
 }
 
-/// Gumbo's options: three required keywords and one optional one, plus
+/// The options of gumbo: three required keywords and one optional keyword, plus
 /// `keep_bom` for the HTML4 names, which parse as libxml2 decodes.
 fn options(keywords: RHash) -> Result<Options, Error> {
     let keywords = get_kwargs::<_, (i32, i32, i32), (Option<Value>, Option<Value>), ()>(
@@ -155,12 +154,11 @@ fn options(keywords: RHash) -> Result<Options, Error> {
     })
 }
 
-/// A negative limit is no limit.
 fn limit(value: i32) -> Option<usize> {
     usize::try_from(value).ok()
 }
 
-/// The whole string, zero bytes included, as gumbo reads it.
+/// The whole string, with zero bytes, as gumbo reads it.
 fn input_bytes(ruby: &Ruby, input: Value) -> Result<Vec<u8>, Error> {
     check_string(ruby, input)?;
     let input = RString::from_value(input).expect("checked to be a String");
@@ -171,8 +169,8 @@ fn limit_error(ruby: &Ruby, error: LimitError) -> Error {
     Error::new(ruby.exception_arg_error(), error.to_string())
 }
 
-/// gumbo.c walks a node context through Ruby calls; lobzique reads the
-/// node's arena, so the context must be a lobzique node.
+/// gumbo.c walks a node context through Ruby calls. lobzique reads the arena
+/// of the node, so the context must be a lobzique node.
 fn context_for(ruby: &Ruby, context: Value, document: Value) -> Result<Context, Error> {
     if context.is_nil() {
         return Ok(Context::new(ContextNamespace::Html, "body"));
@@ -211,8 +209,8 @@ fn named_context(ruby: &Ruby, tag: &[u8]) -> Result<Context, Error> {
                 "html" => ContextNamespace::Html,
                 "math" => ContextNamespace::MathMl,
                 _ => {
-                    // gumbo.c's "%*s" pads to the prefix's length, so the
-                    // whole name is shown
+                    // The "%*s" of gumbo.c pads to the length of the prefix,
+                    // so the whole name is shown.
                     let message = format!("Invalid context namespace '{tag}'");
                     return Err(Error::new(ruby.exception_arg_error(), message));
                 }
@@ -227,21 +225,19 @@ fn named_context(ruby: &Ruby, tag: &[u8]) -> Result<Context, Error> {
     Ok(Context::new(namespace, name).with_form_ancestor(form))
 }
 
-/// For a node context: no quirks unless the fragment's document was
-/// parsed, then the quirks mode of its doctype.
+/// For a node context: no quirks mode, unless the document of the fragment was
+/// parsed. Then it is the quirks mode of its doctype.
 fn quirks_mode_for(ruby: &Ruby, document: Value) -> Result<QuirksMode, Error> {
     let document = document::unwrap(ruby, document)?;
-    let parsed = !document
-        .ivar_get::<_, Value>("@quirks_mode")?
-        .is_nil();
+    let parsed = !document.ivar_get::<_, Value>("@quirks_mode")?.is_nil();
     if !parsed {
         return Ok(QuirksMode::NoQuirks);
     }
     document::with_arena(ruby, document, html5::doctype_quirks_mode)
 }
 
-/// gumbo.c's `add_errors`: one `XML::SyntaxError` per parse error, set
-/// only if there were any.
+/// The `add_errors` of gumbo.c: one `XML::SyntaxError` for each parse error.
+/// Set only if there were any.
 fn add_errors(
     ruby: &Ruby,
     target: Obj<Node>,
@@ -254,8 +250,8 @@ fn add_errors(
     target.ivar_set("@errors", syntax_errors(ruby, errors, file)?)
 }
 
-/// html5ever's errors have neither gumbo's error code, which gumbo.c puts
-/// in `str1`, nor a column.
+/// The errors of html5ever have no gumbo error code (gumbo.c puts it in `str1`)
+/// and no column.
 fn syntax_errors(ruby: &Ruby, errors: Vec<ParseError>, file: Value) -> Result<RArray, Error> {
     let class: RClass = ruby.get_inner(&XML).const_get("SyntaxError")?;
     let array = ruby.ary_new_capa(errors.len());

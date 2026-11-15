@@ -27,7 +27,8 @@ targets = YAML.safe_load_file(File.join(root, "script/inventory/targets.yml"))
 targets = %w[tier1 tier2].map { |tier| targets.fetch(tier) }.reduce(:merge)
 nokogiri = File.read(File.join(root, "Gemfile.lock"))[/^    nokogiri \(([\d.]+)/, 1]
 
-# Pins the oracle's Nokogiri over whatever the checkout's Gemfile asks for.
+# Pins the Nokogiri of the oracle over the one that the Gemfile of the checkout
+# asks for.
 def pin_nokogiri(dir, version)
   gemfile = File.join(dir, "Gemfile")
   lines = File.readlines(gemfile).grep_v(/^\s*gem\s+["']nokogiri["']/)

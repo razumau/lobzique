@@ -11,8 +11,8 @@ module Lobzique
         end
       end
 
-      # lobzique: valid XPath outside the subset lobzique evaluates (plan.md
-      # decision 2); the message names the construct
+      # lobzique: valid XPath outside the subset that lobzique evaluates
+      # (plan.md decision 2). The message names the construct.
       class UnsupportedError < SyntaxError
       end
     end

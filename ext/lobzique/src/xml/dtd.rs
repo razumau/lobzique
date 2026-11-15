@@ -1,5 +1,3 @@
-//! `XML::DTD`: a document's doctype.
-
 use super::node::{utf8_string, Node, NODE};
 use crate::XML;
 use lobzique_core::dom::{Doctype, NodeKind};

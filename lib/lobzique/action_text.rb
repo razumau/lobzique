@@ -4,9 +4,10 @@
 #
 #   require "lobzique/action_text"
 #
-# Action Text memoizes its document classes in instance variables, which is
-# its own seam. Fragment.wrap knows only Nokogiri's fragment class, so without
-# the patch it would serialize a lobzique fragment and parse it again.
+# Action Text memoizes its document classes in instance variables,
+# which is its own seam. Fragment.wrap knows only the fragment class
+# of Nokogiri. Without the patch it would serialize a lobzique fragment
+# and parse it again.
 
 require "lobzique"
 require "action_text"

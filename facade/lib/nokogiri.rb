@@ -1,10 +1,10 @@
 # frozen_string_literal: true
 
 # Adapted from Nokogiri 1.19.7, lib/nokogiri.rb (MIT, see LICENSE-NOKOGIRI.md).
-# lobzique: Nokogiri's classes are lobzique's (plan.md decision 1). The module
-# is named Nokogiri first, so every class reports Nokogiri::…, and lobzique
-# reopens it through the Lobzique constant. What lobzique leaves out raises,
-# saying so (nokogiri/unsupported.rb).
+# lobzique: Nokogiri's classes are lobzique's classes (plan.md decision 1).
+# The module is named Nokogiri first, so every class reports Nokogiri::….
+# lobzique then reopens it through the Lobzique constant. What lobzique leaves
+# out raises an error that says so (nokogiri/unsupported.rb).
 
 module Nokogiri
   class << self

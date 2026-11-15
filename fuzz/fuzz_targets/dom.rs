@@ -1,14 +1,15 @@
 #![no_main]
 
-//! Random sequences of tree operations, across an HTML document parsed from
-//! the input and an XML document, must leave every link consistent, whether
-//! each operation succeeds or is refused, compare nodes consistently, and
-//! leave documents that serialize as XML and XHTML.
+//! Random sequences of tree operations must leave every link consistent,
+//! whether each operation succeeds or is refused. The operations run
+//! across an HTML document parsed from the input and an XML document. Node
+//! comparisons must be consistent, and the documents must serialize as XML
+//! and XHTML.
 //!
-//! The input is markup, then a zero byte, then operations of four bytes
-//! each. The markup is parsed into the HTML document, so namespaces and
-//! their definitions come from it, and slices of it give the names, text
-//! and fragments the operations use.
+//! The input is markup, a zero byte, and operations of four bytes
+//! each. The markup is parsed into the HTML document, so namespaces
+//! and their definitions come from it. Slices of it give the names, text
+//! and fragments for the operations.
 
 use libfuzzer_sys::fuzz_target;
 use lobzique_core::dom::{
@@ -29,7 +30,7 @@ fuzz_target!(|data: &[u8]| {
         Some(end) => (&data[..end], &data[end + 1..]),
         None => (data, &[][..]),
     };
-    // Nokogiri's defaults; without a depth limit, deep input is quadratic
+    // Nokogiri's defaults. Without a depth limit, deep input is quadratic.
     let options = Options {
         max_attributes: Some(400),
         max_errors: Some(0),
@@ -42,7 +43,6 @@ fuzz_target!(|data: &[u8]| {
         parsed.unwrap_or_else(|_| Document::new(DocumentKind::Html)),
         Document::new(DocumentKind::Xml),
     ];
-    // Up to 31 bytes of the markup, from where `at` points
     let bytes = |at: u8, length: u8| {
         let start = markup.len() * usize::from(at) / 256;
         let end = markup.len().min(start + usize::from(length % 32));
@@ -94,8 +94,8 @@ fuzz_target!(|data: &[u8]| {
             }
             17 => _ = doc.create_cdata(bytes(x, y).to_vec()),
             18 => {
-                // Enough comparisons to number the nodes, each checked
-                // against its reverse
+                // Enough comparisons to number the nodes. Each is checked
+                // against its reverse.
                 for id in doc.node_ids().collect::<Vec<_>>() {
                     let order = doc.document_order(a, id);
                     assert_eq!(

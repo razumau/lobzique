@@ -9,8 +9,8 @@ module Lobzique
     # Overrides prepended into every node class, active in HTML documents.
     module Node
       def inner_html(options = {})
-        # lobzique: Nokogiri checks for HTML5::Document; HTML4 documents use
-        # the HTML5 serializer too (plan.md decision 3)
+        # lobzique: Nokogiri checks for HTML5::Document. HTML4 documents use
+        # the HTML5 serializer too (plan.md decision 3).
         return super unless document.is_a?(HTML4::Document)
 
         result = (options[:preserve_newline] && prepend_newline?) ? +"\n" : +""
@@ -36,8 +36,8 @@ module Lobzique
         if config_options & (XML::Node::SaveOptions::AS_XML | XML::Node::SaveOptions::AS_XHTML) != 0
           native_write_to(io, encoding, indent_string, config_options)
         else
-          # lobzique: HTML4 documents have no parse_noscript_content_as_text
-          # and parse noscript content as markup
+          # lobzique: HTML4 documents have no parse_noscript_content_as_text.
+          # They parse noscript content as markup.
           scripting_enabled = document.is_a?(HTML5::Document) && document.parse_noscript_content_as_text
           html = html_standard_serialize(options[:preserve_newline] || false, scripting_enabled)
           encoding ||= document.encoding || Encoding::UTF_8

@@ -1,10 +1,10 @@
 use super::{Document, NamespaceRef, NodeId, NodeKind};
 
 impl Document {
-    /// libxml2's `xmlGetNodePath`, which Nokogiri's `Node#path` returns: a
-    /// step per ancestor, numbered when siblings share the step's name.
-    /// `None` where libxml2 gives up, at a doctype or a fragment, which
-    /// Nokogiri shows as `"?"`; nodes in a fragment have no path either.
+    /// libxml2's `xmlGetNodePath`, which Nokogiri's `Node#path` returns: a step
+    /// for each ancestor, numbered when siblings share the step name. `None`
+    /// where libxml2 gives up, at a doctype or a fragment. Nokogiri shows
+    /// it as `"?"`. Nodes in a fragment have no path either.
     pub fn path(&self, id: NodeId) -> Option<Vec<u8>> {
         let mut steps = Vec::new();
         let mut next = Some(id);
@@ -21,8 +21,8 @@ impl Document {
                             prefix: Some(prefix),
                             ..
                         }) => qualified(prefix, local),
-                        // libxml2 can't name an element in a default
-                        // namespace, so it counts every element as a match
+                        // libxml2 cannot name an element in a default
+                        // namespace, so it counts every element as a match.
                         Some(_) => b"*".to_vec(),
                         None => local.as_bytes().to_vec(),
                     };
@@ -90,7 +90,7 @@ impl Document {
         Some(path)
     }
 
-    /// The node's position among the siblings `same_step` accepts, or
+    /// The position of the node among the siblings that `same_step` accepts.
     /// `None` if it is the only one.
     fn position(&self, id: NodeId, same_step: impl Fn(NodeId) -> bool) -> Option<usize> {
         let mut before = 0;
@@ -109,7 +109,7 @@ fn qualified(prefix: &str, local: &str) -> Vec<u8> {
     truncated(format!("{prefix}:{local}").into_bytes())
 }
 
-/// libxml2 formats generated step names into a 100-byte buffer.
+/// libxml2 formats generated step names in a buffer of 100 bytes.
 fn truncated(mut name: Vec<u8>) -> Vec<u8> {
     name.truncate(98);
     name

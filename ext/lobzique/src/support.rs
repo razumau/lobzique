@@ -1,5 +1,5 @@
-//! Calls into Ruby that magnus has no direct helper for. The only module
-//! allowed `unsafe` and `rb_sys::protect` (see `lib.rs`).
+//! Calls into Ruby that magnus has no direct helper for. This is the only
+//! module that can use `unsafe` and `rb_sys::protect` (see `lib.rs`).
 #![allow(unsafe_code)]
 #![allow(clippy::disallowed_methods)]
 
@@ -11,8 +11,8 @@ use magnus::{
 use std::ffi::CString;
 
 /// `rb_thread_check_ints`: lets Ruby handle interrupts (`Timeout`,
-/// `Thread#raise`, signals), and switch threads if this one's time slice is
-/// over, as it does between Ruby calls. Nothing here runs without the GVL.
+/// `Thread#raise`, signals) and switch threads if the time slice of this thread
+/// is over, as it does between Ruby calls. Nothing here runs without the GVL.
 pub fn check_interrupts() -> Result<(), Error> {
     // SAFETY: `protect` turns what an interrupt raises into an `Err`.
     protect(|| unsafe {
@@ -23,7 +23,7 @@ pub fn check_interrupts() -> Result<(), Error> {
 }
 
 /// Ruby's `rb_obj_call_init`: runs `initialize` with the arguments and block
-/// the native constructor was called with, as Nokogiri's constructors do.
+/// that the native constructor received, as the constructors of Nokogiri do.
 pub fn call_initialize(object: Value, args: &[Value]) -> Result<(), Error> {
     let argc = i32::try_from(args.len()).expect("argument count fits in an int");
     let argv = args.as_ptr().cast::<rb_sys::VALUE>();
@@ -36,9 +36,10 @@ pub fn call_initialize(object: Value, args: &[Value]) -> Result<(), Error> {
     Ok(())
 }
 
-/// Ruby's `rb_apply`: calls `method` on `receiver`, private or not, as
-/// `rb_funcall2` does, with the elements of `arguments`. An Array keeps the
-/// arguments where the GC sees them; magnus has no call that takes one.
+/// Ruby's `rb_apply`: calls `method` on `receiver`, private
+/// or not, as `rb_funcall2` does, with the elements of `arguments`. An Array
+/// keeps the arguments where the GC sees them. magnus has no call that takes
+/// one.
 pub fn apply(
     ruby: &Ruby,
     receiver: Value,
@@ -54,7 +55,6 @@ pub fn apply(
     Ok(unsafe { Value::from_raw(result) })
 }
 
-/// Yields the new object to the constructor's block, if it was given one.
 pub fn yield_to_block(ruby: &Ruby, object: Value) -> Result<(), Error> {
     if ruby.block_given() {
         ruby.yield_value::<_, Value>(object)?;
@@ -62,10 +62,10 @@ pub fn yield_to_block(ruby: &Ruby, object: Value) -> Result<(), Error> {
     Ok(())
 }
 
-/// Nokogiri's `NOKO_WARN_DEPRECATION`: printed only when `$VERBOSE` is true
-/// and `Warning[:deprecated]` is on, prefixed with the caller's location.
+/// Nokogiri's `NOKO_WARN_DEPRECATION`: prints only when `$VERBOSE` is true
+/// and `Warning[:deprecated]` is on, with the location of the caller as prefix.
 pub fn warn_deprecated(message: &str) -> Result<(), Error> {
-    // %s stops at a zero byte, as it does for Nokogiri's C strings
+    // %s stops at a zero byte, as it does for the C strings of Nokogiri.
     let message = message.split('\0').next().unwrap_or_default();
     let message = CString::new(message).expect("no zero bytes left");
     // SAFETY: the format takes one C string, and `protect` turns what a
@@ -81,22 +81,21 @@ pub fn warn_deprecated(message: &str) -> Result<(), Error> {
     Ok(())
 }
 
-/// Optional positional argument `index`, `nil` when absent.
 pub fn optional_arg(ruby: &Ruby, args: &[Value], index: usize) -> Value {
     args.get(index)
         .copied()
         .unwrap_or_else(|| ruby.qnil().as_value())
 }
 
-/// `rb_obj_class`: the class without singleton classes, which every
-/// decorated node has.
+/// `rb_obj_class`: the class without singleton classes. Every decorated node
+/// has one.
 pub fn obj_class(value: Value) -> RClass {
     // SAFETY: `rb_obj_class` takes any object and returns a class.
     let class = unsafe { Value::from_raw(rb_sys::rb_obj_class(value.as_raw())) };
     RClass::from_value(class).expect("rb_obj_class returns a class")
 }
 
-/// How Ruby's own type errors (`Check_Type`, `TypedData_Get_Struct`) name
+/// How the type errors of Ruby (`Check_Type`, `TypedData_Get_Struct`) name
 /// the class of a wrong argument.
 pub fn displayed_class(value: Value) -> String {
     let raw = value.as_raw();
@@ -111,7 +110,6 @@ pub fn displayed_class(value: Value) -> String {
     }
 }
 
-/// `Check_Type(value, T_STRING)`: no `to_str` conversion.
 pub fn check_string(ruby: &Ruby, value: Value) -> Result<(), Error> {
     if RString::from_value(value).is_some() {
         return Ok(());
@@ -123,10 +121,10 @@ pub fn check_string(ruby: &Ruby, value: Value) -> Result<(), Error> {
     Err(Error::new(ruby.exception_type_error(), message))
 }
 
-/// A string as Nokogiri hands it to libxml2 through `StringValueCStr`:
-/// converted with `to_str`, refused with `ArgumentError` if it contains a
-/// NUL character, then read as a C string, up to the first zero byte. The
-/// bytes are kept in whatever encoding they are in.
+/// A string as Nokogiri gives it to libxml2 through `StringValueCStr`:
+/// converted with `to_str`, refused with `ArgumentError` if it has a NUL
+/// character, then read as a C string up to the first zero byte. The bytes keep
+/// their encoding.
 pub fn c_string(value: Value) -> Result<Vec<u8>, Error> {
     let mut bytes = c_string_with_length(value)?;
     if let Some(end) = bytes.iter().position(|&byte| byte == 0) {
@@ -135,12 +133,12 @@ pub fn c_string(value: Value) -> Result<Vec<u8>, Error> {
     Ok(bytes)
 }
 
-/// Like [`c_string`], but read with the string's own length, as
-/// `xmlNewCDataBlock` reads it. Zero bytes stay, as in UTF-16.
+/// Like [`c_string`], but read with the length of the string,
+/// as `xmlNewCDataBlock` reads it. Zero bytes stay, as in UTF-16.
 pub fn c_string_with_length(value: Value) -> Result<Vec<u8>, Error> {
     let mut raw = value.as_raw();
-    // SAFETY: `raw` is a live value on the stack; `protect` turns the
-    // TypeError or ArgumentError `rb_string_value_cstr` raises into an `Err`.
+    // SAFETY: `raw` is a live value on the stack. `protect` turns the TypeError
+    // or ArgumentError that `rb_string_value_cstr` raises into an `Err`.
     // It replaces `raw` with the converted string.
     let string = protect(|| unsafe {
         rb_sys::rb_string_value_cstr(&mut raw);
@@ -152,7 +150,6 @@ pub fn c_string_with_length(value: Value) -> Result<Vec<u8>, Error> {
     Ok(string_bytes(string))
 }
 
-/// A copy of the string's bytes.
 pub fn string_bytes(string: RString) -> Vec<u8> {
     // SAFETY: the bytes are copied before any Ruby code could change them.
     unsafe { string.as_slice() }.to_vec()

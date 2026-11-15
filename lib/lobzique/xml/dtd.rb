@@ -10,9 +10,9 @@ module Lobzique
       undef_method :content
       undef_method :namespace
       undef_method :namespace_definitions
-      # lobzique: Nokogiri also undefines line, which isn't defined yet, and
-      # defines keys and each over the DTD's attribute declarations, which
-      # are out of scope
+      # lobzique: Nokogiri also undefines line, which is not defined yet,
+      # and defines keys and each over the attribute declarations of the DTD,
+      # which are out of scope.
 
       def html_dtd?
         name.casecmp("html").zero?

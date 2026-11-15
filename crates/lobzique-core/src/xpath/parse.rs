@@ -1,9 +1,9 @@
-//! XPath strings, parsed into the trees [`evaluate`](super::evaluate) runs.
+//! Parses XPath strings into the trees that [`evaluate`](super::evaluate) runs.
 //!
-//! The parser reads XPath 1.0 as libxml2 reads it, so an expression libxml2
-//! rejects fails with libxml2's error. Two things libxml2 accepts fail with
-//! [`ParseError::Unsupported`] instead: the `namespace` axis, and brackets
-//! nested deeper than [`MAX_NESTING`].
+//! The parser reads XPath 1.0 as libxml2 does. An expression that libxml2
+//! rejects fails with the error of libxml2. libxml2 accepts two things
+//! that fail here with [`ParseError::Unsupported`]: the `namespace` axis,
+//! and brackets nested deeper than [`MAX_NESTING`].
 
 use super::ast::{
     Arithmetic, Axis, Comparison, Expr, Filter, Function, NodeTest, Operator, Path, QName, Step,
@@ -14,9 +14,9 @@ use super::{Error, FunctionName, Query};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ParseError {
-    /// libxml2 can't compile it either.
+    /// libxml2 cannot compile it either.
     Syntax(Error),
-    /// Valid XPath that lobzique leaves out: the construct it uses.
+    /// Valid XPath that lobzique leaves out. Holds the construct it uses.
     Unsupported(String),
 }
 
@@ -26,8 +26,8 @@ impl From<Error> for ParseError {
     }
 }
 
-/// Predicates, parentheses and argument lists nest at most this deep, as
-/// CSS does: each level costs stack to parse and evaluate.
+/// Maximum nesting of predicates, parentheses and argument lists, as in CSS.
+/// Each level uses stack to parse and evaluate.
 pub const MAX_NESTING: usize = 32;
 
 pub fn parse(expression: &[u8]) -> Result<Query> {
@@ -56,14 +56,14 @@ struct Parser<'a> {
     input: &'a [u8],
     at: usize,
     depth: usize,
-    /// The first construct left out, in reading order. Parsing carries on,
-    /// so a syntax error later still wins, as libxml2 would raise it.
+    /// The first construct left out, in reading order. Parsing continues,
+    /// so a later syntax error wins, as libxml2 raises it.
     unsupported: Option<String>,
-    /// The name of each call to a function that isn't XPath 1.0's, by site.
+    /// The name of each call to a function that is not in XPath 1.0, by site.
     functions: Vec<FunctionName>,
 }
 
-/// What stands in for a construct left out. It is never evaluated.
+/// Stands in for a construct that is left out. It is never evaluated.
 const PLACEHOLDER: Expr = Expr::Number(0.0);
 
 impl Parser<'_> {
@@ -79,7 +79,6 @@ impl Parser<'_> {
         &self.input[self.at..]
     }
 
-    /// libxml2's `SKIP_BLANKS`
     fn skip_blanks(&mut self) {
         while self.peek().is_some_and(is_blank) {
             self.at += 1;
@@ -98,10 +97,10 @@ impl Parser<'_> {
         self.unsupported.get_or_insert_with(|| construct.into());
     }
 
-    /// Called past an opening bracket: whether to parse what it holds. Past
-    /// [`MAX_NESTING`], it skips to the matching bracket instead, so the
-    /// stack stays bounded and an unclosed bracket or literal still raises
-    /// libxml2's error. Other syntax errors in what it skips go unreported.
+    /// Called after an opening bracket: whether to parse what it holds. Past
+    /// [`MAX_NESTING`], it skips to the matching bracket. The stack then stays
+    /// bounded, and an unclosed bracket or literal still raises the error
+    /// of libxml2. Other syntax errors in the skipped text are not reported.
     fn nest(&mut self) -> Result<bool> {
         if self.depth == MAX_NESTING {
             self.unsupported(format!("nesting deeper than {MAX_NESTING}"));
@@ -139,7 +138,7 @@ impl Parser<'_> {
     fn expr(&mut self) -> Result<Expr> {
         let first = self.and_expr()?;
         let mut rest = Vec::new();
-        // libxml2 matches operator names without looking past them
+        // libxml2 matches operator names without looking past them.
         while self.skip_operator(b"or") {
             rest.push(self.and_expr()?);
         }
@@ -155,7 +154,6 @@ impl Parser<'_> {
         Ok(list(first, rest, Expr::And))
     }
 
-    /// Skips blanks, and `operator` if it comes next.
     fn skip_operator(&mut self, operator: &[u8]) -> bool {
         self.skip_blanks();
         let found = self.eat(operator);
@@ -163,8 +161,6 @@ impl Parser<'_> {
         found
     }
 
-    /// One precedence of binary operators: operands that `operand` reads,
-    /// between the first of `operators` that comes next each time.
     fn operation(
         &mut self,
         operators: &[(&[u8], Operator)],
@@ -238,9 +234,9 @@ impl Parser<'_> {
         )
     }
 
-    /// libxml2's `xmlXPathCompUnaryExpr`: an odd number of minus signs
-    /// negates, an even number converts to a number. Before a number, they
-    /// are part of it.
+    /// libxml2's `xmlXPathCompUnaryExpr`: an odd number of minus signs negates.
+    /// An even number converts to a number. Before a number, the signs are part
+    /// of it.
     fn unary_expr(&mut self) -> Result<Expr> {
         self.skip_blanks();
         let mut negative = false;
@@ -276,7 +272,7 @@ impl Parser<'_> {
     }
 
     /// libxml2's `xmlXPathCompPathExpr`: a location path, or a primary
-    /// expression with optional predicates and path after it.
+    /// expression with optional predicates and a path after it.
     fn path_expr(&mut self) -> Result<Expr> {
         self.skip_blanks();
         let starts_primary = match self.peek() {
@@ -305,8 +301,6 @@ impl Parser<'_> {
         Ok(filter(primary, predicates, steps))
     }
 
-    /// Whether a function call starts here: a QName, other than a node
-    /// type, followed by `(`.
     fn function_name_ahead(&mut self) -> Result<bool> {
         let start = self.at;
         let ahead = (|| {
@@ -355,12 +349,12 @@ impl Parser<'_> {
         }
     }
 
-    /// A call to XPath 1.0's function, or to one the caller has to find,
-    /// as libxml2 looks those up when it evaluates the call.
+    /// A call to a function of XPath 1.0, or to one that the caller must find.
+    /// libxml2 looks up the second kind when it evaluates the call.
     fn function_call(&mut self) -> Result<Expr> {
         let name = self.qname()?.ok_or(Error::InvalidExpression)?;
         self.skip_blanks();
-        self.at += 1; // `(`, as function_name_ahead saw
+        self.at += 1;
         if !self.nest()? {
             return Ok(PLACEHOLDER);
         }
@@ -396,8 +390,8 @@ impl Parser<'_> {
         Ok(Expr::Custom { site, arguments })
     }
 
-    /// libxml2's `xmlXPathCompLocationPath`, which reads `/` again after a
-    /// `/` that no step follows: `/ /p` is `/p`.
+    /// libxml2's `xmlXPathCompLocationPath`. It reads `/` again after
+    /// a `/` that no step follows: `/ /p` is `/p`.
     fn location_path(&mut self) -> Result<Path> {
         if self.peek() != Some(b'/') {
             return Ok(Path::relative(self.relative_path(Vec::new())?));
@@ -422,7 +416,7 @@ impl Parser<'_> {
         })
     }
 
-    /// Whether libxml2 reads a step after `/`, from the byte alone.
+    /// Whether libxml2 reads a step after `/`. It decides from the byte alone.
     fn step_ahead(&self) -> bool {
         self.peek().is_some_and(|b| {
             b.is_ascii_alphabetic() || b >= 0x80 || matches!(b, b'_' | b'.' | b'@' | b'*')
@@ -443,8 +437,8 @@ impl Parser<'_> {
         }
     }
 
-    /// libxml2's `xmlXPathCompStep`. `.` is no step at all, rather than
-    /// `self::node()`, which a fragment doesn't pass.
+    /// libxml2's `xmlXPathCompStep`. `.` is no step at all, not `self::node()`,
+    /// because a fragment does not pass `self::node()`.
     fn step(&mut self) -> Result<Option<Step>> {
         if self.eat(b"..") {
             return Ok(Some(Step::new(Axis::Parent, NodeTest::Node)));
@@ -478,7 +472,6 @@ impl Parser<'_> {
         }
     }
 
-    /// The axis `name::` names.
     fn axis(&mut self, name: &str) -> Result<Axis> {
         Ok(match name {
             "ancestor" => Axis::Ancestor,
@@ -501,16 +494,16 @@ impl Parser<'_> {
         })
     }
 
-    /// libxml2's `xmlXPathCompNodeTest`, after `name` and the blanks after
-    /// it if the step already read them. Blanks may come before the colon
-    /// of a QName, which libxml2 skips while looking for `::`, but not
-    /// after it.
+    /// libxml2's `xmlXPathCompNodeTest`, after `name` and, if the step already
+    /// read them, the blanks after it. Blanks can come before the colon
+    /// of a QName. libxml2 skips them while it looks for `::`. It does not skip
+    /// them after the colon.
     fn node_test(&mut self, name: Option<String>) -> Result<NodeTest> {
         let name = match name {
             Some(name) => name,
             None => {
                 if self.eat(b"*") {
-                    // Nokogiri's patch: `*:name` is the name in any namespace
+                    // Nokogiri's patch: `*:name` is the name in any namespace.
                     if !self.eat(b":") {
                         return Ok(NodeTest::Any);
                     }
@@ -544,7 +537,6 @@ impl Parser<'_> {
         }))
     }
 
-    /// The node test `name(`, after the parenthesis.
     fn node_type(&mut self, name: &str) -> Result<NodeTest> {
         self.skip_blanks();
         let test = match name {
@@ -570,7 +562,7 @@ impl Parser<'_> {
     }
 
     fn predicate(&mut self) -> Result<Expr> {
-        self.at += 1; // `[`
+        self.at += 1;
         if !self.nest()? {
             return Ok(PLACEHOLDER);
         }
@@ -584,9 +576,9 @@ impl Parser<'_> {
         Ok(expr)
     }
 
-    /// libxml2's `xmlXPathParseLiteral`: no escapes, any XML character,
-    /// checked as it reads, so a bad one before the end is reported
-    /// rather than the missing quote.
+    /// libxml2's `xmlXPathParseLiteral`: no escapes, any XML character.
+    /// It checks characters while it reads, so a bad character before the end
+    /// is reported, not the missing quote.
     fn literal(&mut self) -> Result<Vec<u8>> {
         let quote = self.input[self.at];
         self.at += 1;
@@ -595,8 +587,8 @@ impl Parser<'_> {
             match self.peek() {
                 None => return Err(Error::UnfinishedLiteral.into()),
                 Some(b) if b == quote => break,
-                // `xmlGetUTF8Char`, which unlike `xmlXPathCurrentChar`
-                // rejects these leads and overlong forms
+                // `xmlGetUTF8Char` rejects these leads and overlong forms.
+                // `xmlXPathCurrentChar` does not.
                 Some(0x80..=0xC1) => return Err(Error::InvalidChar.into()),
                 Some(_) => {}
             }
@@ -613,14 +605,12 @@ impl Parser<'_> {
         Ok(content)
     }
 
-    /// libxml2's `xmlXPathCompNumber`, at a digit or at a `.` before one.
     fn number(&mut self) -> f64 {
         let (n, length) = scan_number(self.rest()).expect("a digit");
         self.at += length;
         n
     }
 
-    /// libxml2's `xmlXPathParseQName`: None if either part is missing.
     fn qname(&mut self) -> Result<Option<QName>> {
         let Some(name) = self.ncname()? else {
             return Ok(None);
@@ -642,8 +632,8 @@ impl Parser<'_> {
         Ok(self.scan_ncname(|c| name.push(c))?.then_some(name))
     }
 
-    /// Reads an NCName, if one starts here, passing on each character as
-    /// decoded: an overlong form is the character it encodes.
+    /// Reads an NCName, if one starts here, and passes each decoded character
+    /// on. An overlong form is the character it encodes.
     fn scan_ncname(&mut self, mut each: impl FnMut(char)) -> Result<bool> {
         let Some((first, length)) = self.char_here()? else {
             return Ok(false);
@@ -664,9 +654,9 @@ impl Parser<'_> {
     }
 
     /// libxml2's `xmlXPathCurrentChar`: the character here and its length
-    /// in bytes. Bytes that don't form a sequence are an encoding error; a
-    /// sequence that isn't an XML `Char`, an overlong `NUL` or a surrogate
-    /// say, is an invalid character.
+    /// in bytes. Bytes that form no sequence are an encoding error. A sequence
+    /// that is not an XML `Char`, for example an overlong `NUL` or a surrogate,
+    /// is an invalid character.
     fn char_here(&self) -> Result<Option<(char, usize)>> {
         let rest = self.rest();
         match rest.first() {
@@ -683,9 +673,9 @@ impl Parser<'_> {
     }
 }
 
-/// The code point and length of the UTF-8 sequence that starts `bytes`, as
-/// libxml2 reads one: the lead byte sets the length, and the value isn't
-/// checked. None if a continuation byte is missing.
+/// The code point and length of the UTF-8 sequence at the start of `bytes`,
+/// as libxml2 reads it: the lead byte sets the length, and the value
+/// is not checked. None if a continuation byte is missing.
 fn decode(bytes: &[u8]) -> Option<(u32, usize)> {
     let lead = bytes[0];
     let length = match lead {
@@ -706,7 +696,6 @@ fn decode(bytes: &[u8]) -> Option<(u32, usize)> {
     Some((value, length))
 }
 
-/// `first`, or a list of it and `rest`.
 fn list(first: Expr, mut rest: Vec<Expr>, make: fn(Vec<Expr>) -> Expr) -> Expr {
     if rest.is_empty() {
         return first;

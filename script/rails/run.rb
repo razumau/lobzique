@@ -25,7 +25,7 @@ SUITES = {
 MODES = %w[baseline html5 lobzique].freeze
 
 # Database adapters, cloud storage, job and cable backends, linters and docs
-# need services or native libraries these suites don't use.
+# need services or native libraries that these suites do not use.
 WITHOUT = "db:job:cable:storage:rubocop:mdl:doc"
 
 APP_REQUIRES = <<~RUBY
@@ -63,14 +63,15 @@ tmp = File.join(root, "tmp/rails")
 dir = File.join(tmp, "src/rails")
 lock = File.read(File.join(root, "Gemfile.lock"))
 ref = "v" + lock[/^    actiontext \(([\d.]+)\)/, 1]
-# Every mode gets the sanitizer gems lobzique is tested with: the tag's lock
-# may predate the versions Lobzique::Sanitizer accepts.
+# Every mode gets the sanitizer gems that lobzique is tested with. The lock
+# of the tag can be older than the versions that Lobzique::Sanitizer accepts.
 PINS = %w[loofah rails-html-sanitizer rails-dom-testing].map { %(gem "#{_1}", "#{lock[/^    #{_1} \(([\d.]+)\)/, 1]}"\n) }.join
 env = {"LANG" => "C.UTF-8", "BUNDLE_WITHOUT" => WITHOUT}
 
 def modes(options) = options[:app] ? MODES - ["html5"] : MODES
 
-# Rails' Gemfile evaluates a .Gemfile beside it, so its own stays as it is.
+# The Gemfile of Rails evaluates a .Gemfile beside it, so its own stays
+# as it is.
 def configure(mode, dir, suite, options, root)
   helper = File.join(dir, suite, options[:helper])
   case mode
@@ -96,8 +97,8 @@ def failures(log)
 end
 
 names = ARGV.empty? ? SUITES.keys : ARGV
-# A path gem's extension isn't built by Bundler; lib/ holds whichever Ruby's
-# build ran last.
+# Bundler does not build the extension of a path gem. lib/ holds the build
+# of whichever Ruby ran last.
 SuiteRunner.run(env.except("BUNDLE_WITHOUT"), "bundle", "exec", "rake", "compile", chdir: root)
 results = names.map do |name|
   options = SUITES.fetch(name)

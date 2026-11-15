@@ -1,9 +1,9 @@
 use super::{Document, NodeId, NodeKind};
 
 impl Document {
-    /// libxml2's `xmlNodeGetContent`, which Nokogiri's `Node#content`
-    /// returns: the text and CDATA in an element, fragment or document, a
-    /// character node's own text, and nothing for a doctype.
+    /// libxml2's `xmlNodeGetContent`, which Nokogiri's `Node#content` returns:
+    /// the text and CDATA in an element, fragment or document, the own text
+    /// of a character node, and nothing for a doctype.
     pub fn content(&self, id: NodeId) -> Option<Vec<u8>> {
         match self.node_kind(id) {
             NodeKind::Text(text) | NodeKind::CData(text) | NodeKind::Comment(text) => {
@@ -25,8 +25,8 @@ impl Document {
         }
     }
 
-    /// libxml2's `xmlIsBlankNode`: a text or CDATA node of nothing but
-    /// spaces, tabs and line breaks.
+    /// libxml2's `xmlIsBlankNode`: a text or CDATA node of only spaces, tabs
+    /// and line breaks.
     pub fn is_blank(&self, id: NodeId) -> bool {
         match self.node_kind(id) {
             NodeKind::Text(text) | NodeKind::CData(text) => text
@@ -36,10 +36,10 @@ impl Document {
         }
     }
 
-    /// Nokogiri's `native_content=`, `xmlNodeSetContent` after unlinking
-    /// the children: elements, fragments and attributes get the content
-    /// with its character references decoded, character data and
-    /// processing instructions get it as is, and other nodes get nothing.
+    /// Nokogiri's `native_content=`: `xmlNodeSetContent` after the children
+    /// are unlinked. Elements, fragments and attributes get the content
+    /// with its character references decoded. Character data and processing
+    /// instructions get it as is. Other nodes get nothing.
     pub fn set_content(&mut self, id: NodeId, content: Vec<u8>) {
         while let Some(child) = self.first_child(id) {
             self.detach(child);
@@ -69,7 +69,6 @@ impl Document {
         }
     }
 
-    /// The bytes of a text, CDATA or comment node, to change in place.
     pub fn character_data_mut(&mut self, id: NodeId) -> Option<&mut Vec<u8>> {
         match &mut self.node_mut(id).kind {
             NodeKind::Text(text) | NodeKind::CData(text) | NodeKind::Comment(text) => Some(text),
@@ -78,17 +77,17 @@ impl Document {
     }
 }
 
-/// What libxml2's `xmlNodeSetContent` decodes: the predefined entities and
-/// character references, which covers everything
-/// [`encode_special_chars`] writes. libxml2 makes any other entity
-/// reference a node of its own; here it stays text.
+/// What libxml2's `xmlNodeSetContent` decodes: the predefined entities
+/// and character references. This covers everything [`encode_special_chars`]
+/// writes. libxml2 makes any other entity reference a node of its own. Here
+/// it stays text.
 fn decode_references(input: &[u8]) -> Vec<u8> {
     let mut decoded = Vec::with_capacity(input.len());
     let mut rest = input;
     while let Some(start) = rest.iter().position(|&byte| byte == b'&') {
         decoded.extend_from_slice(&rest[..start]);
         rest = &rest[start..];
-        // A name never holds `&`, so stopping there keeps decoding linear
+        // A name never holds `&`, so stopping there keeps decoding linear.
         let reference = rest
             .iter()
             .skip(1)
@@ -111,7 +110,6 @@ fn decode_references(input: &[u8]) -> Vec<u8> {
     decoded
 }
 
-/// The character `&name;` stands for, given `name`.
 fn decode_reference(name: &[u8]) -> Option<char> {
     let number = |digits: &[u8], radix| {
         let digits = std::str::from_utf8(digits).ok()?;
@@ -151,8 +149,8 @@ pub fn encode_special_chars(input: &[u8]) -> Vec<u8> {
     encoded
 }
 
-/// libxml2 holds text as C strings, so what it writes ends at the first
-/// zero byte.
+/// libxml2 holds text as C strings, so what it writes ends at the first zero
+/// byte.
 pub fn c_string(bytes: &[u8]) -> &[u8] {
     match bytes.iter().position(|&byte| byte == 0) {
         Some(end) => &bytes[..end],

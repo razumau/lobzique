@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-# Adapted from Nokogiri 1.19.7, lib/nokogiri/html4/encoding_reader.rb (MIT, see LICENSE-NOKOGIRI.md).
-# lobzique: plus EncodingReader.decode, which decodes input as libxml2 2.13
-# does before the HTML5 parser reads it (plan.md decision 3).
+# Adapted from Nokogiri 1.19.7, lib/nokogiri/html4/encoding_reader.rb (MIT, see
+# LICENSE-NOKOGIRI.md). lobzique: adds EncodingReader.decode. It decodes input
+# as libxml2 2.13 does before the HTML5 parser reads it (plan.md decision 3).
 
 module Lobzique
   module HTML4
@@ -25,22 +25,22 @@ module Lobzique
         end
       end
 
-      # lobzique: SAXHandler and JumpSAXHandler are left out with SAX;
+      # lobzique: SAXHandler and JumpSAXHandler are left out with SAX.
       # meta_charset reads what SAXHandler#start_element records.
 
       def self.detect_encoding(chunk)
-        # lobzique: Nokogiri reads the declaration with Nokogiri.XML, which
-        # is out of scope (plan.md decision 4)
+        # lobzique: Nokogiri reads the declaration with Nokogiri.XML,
+        # which is out of scope (plan.md decision 4).
         (m = chunk.match(/\A(<\?xml[ \t\r\n][^>]*>)/)) &&
           (return m[1].match(/[ \t\r\n]encoding[ \t\r\n]*=[ \t\r\n]*(?:"([^"]*)"|'([^']*)')/)&.captures&.compact&.first)
 
         meta_charset(chunk)
       end
 
-      # lobzique: Nokogiri pushes the chunk through libxml2's HTML4 SAX
-      # parser and keeps the charset of the last <meta> that has one. This
-      # parses it with the HTML5 parser, read as ISO-8859-1 so any bytes do,
-      # and walks the <meta> elements in document order.
+      # lobzique: Nokogiri pushes the chunk through the HTML4 SAX parser
+      # of libxml2 and keeps the charset of the last <meta> that has one.
+      # This code parses it with the HTML5 parser, read as ISO-8859-1
+      # so that any bytes work, and walks the <meta> elements in document order.
       def self.meta_charset(chunk)
         return unless chunk.b.match?(/<meta/i)
 
@@ -75,7 +75,7 @@ module Lobzique
       attr_reader :encoding_found
 
       def read(len)
-        # no support for a call without len
+        # No support for a call without len.
 
         unless @firstchunk
           (@firstchunk = @io.read(len)) || return
@@ -103,13 +103,13 @@ module Lobzique
 
       # lobzique: from here on, lobzique's own.
 
-      # What becomes of bytes that are invalid in the input's encoding:
-      # :replacement (U+FFFD) or :latin1 (each byte read as ISO-8859-1).
-      # Open, see docs/html4-invalid-bytes.md.
+      # What happens to bytes that are invalid in the encoding of the input:
+      # :replacement (U+FFFD) or :latin1 (each byte read as ISO-8859-1). Open,
+      # see docs/html4-invalid-bytes.md.
       INVALID_BYTES = :replacement
 
-      # libxml2's built-in decoders, which give document.encoding their own
-      # names; iconv's keep the name as given.
+      # The built-in decoders of libxml2. They give document.encoding their own
+      # names. The names of iconv stay as given.
       BUILT_IN = {
         "UTF-16LE" => Encoding::UTF_16LE,
         "UTF-16BE" => Encoding::UTF_16BE,
@@ -119,8 +119,8 @@ module Lobzique
         "US-ASCII" => Encoding::US_ASCII
       }.freeze
 
-      # xmlParseCharEncoding's canonical names, the fallback for a name
-      # neither a built-in decoder nor iconv takes.
+      # The canonical names of xmlParseCharEncoding. This is the fallback
+      # for a name that neither a built-in decoder nor iconv takes.
       CANONICAL = {
         "ISO-LATIN-1" => "ISO-8859-1", "ISO LATIN 1" => "ISO-8859-1",
         "ISO-LATIN-2" => "ISO-8859-2", "ISO LATIN 2" => "ISO-8859-2",
@@ -128,7 +128,7 @@ module Lobzique
         "ISO-10646-UCS-4" => "UCS-4", "UCS4" => "UCS-4"
       }.freeze
 
-      # Names iconv knows and Ruby doesn't, in their usual spellings.
+      # Names that iconv knows and Ruby does not, in their usual spellings.
       ICONV = {
         /\AISO[_-]?8859[_-](\d+)(?::\d+)?\z/i => ->(m) { "ISO-8859-#{m[1]}" },
         /\ALATIN-?([1-9]|10)\z/i => ->(m) { "ISO-8859-#{%w[1 2 3 4 9 10 13 14 15 16][m[1].to_i - 1]}" },
@@ -138,8 +138,8 @@ module Lobzique
         /\A(?:MAC|MACINTOSH|MACROMAN)\z/i => ->(_) { "macRoman" },
         /\A(?:SHIFT-JIS|MS_KANJI|CSSHIFTJIS)\z/i => ->(_) { "Shift_JIS" },
         /\AWINDOWS-?(\d+)\z/i => ->(m) { "Windows-#{m[1]}" },
-        # libiconv's is the bare KS X 1001 set; pages that declare it are
-        # EUC-KR or its superset, as browsers read them
+        # The iconv of libiconv is the bare KS X 1001 set. Pages that declare
+        # it are EUC-KR or its superset, as browsers read them.
         /\A(?:KS_C_5601-198[79]|KSC_5601|CSKSC56011987)\z/i => ->(_) { "CP949" }
       }.freeze
 
@@ -151,16 +151,17 @@ module Lobzique
         "\x00\x3C\x00\x3F".b => [Encoding::UTF_16BE, 0]
       }.freeze
 
-      # Names Encoding.find resolves to whatever the process is set up with.
+      # Names that Encoding.find resolves to whatever the process is set up
+      # with.
       RUBY_ONLY = %w[locale external internal filesystem].freeze
 
       private_constant :INVALID_BYTES, :BUILT_IN, :CANONICAL, :ICONV, :BOMS, :RUBY_ONLY
 
       class << self
-        # Input bytes as libxml2's HTML parser decodes them with +encoding+
+        # Input bytes as the HTML parser of libxml2 decodes them with +encoding+
         # (a name, or nil): [UTF-8 string, document.encoding, errors]. Input
         # read from an IO in +chunk+-sized reads is only partly buffered
-        # when libxml2 guesses. Input that isn't +at_start+ of what libxml2
+        # when libxml2 guesses. Input that is not +at_start+ of what libxml2
         # parses has no byte order mark.
         def decode(input, encoding, chunk: nil, at_start: true)
           bytes = input.to_str.b
@@ -176,11 +177,11 @@ module Lobzique
 
         private
 
-        # No encoding: a byte order mark; UTF-8 if the input starts with an
-        # XML declaration; a <meta> the parser meets before any non-ASCII
-        # byte; else at the first non-ASCII byte an http-equiv charset
-        # anywhere after it (htmlFindEncoding), or ISO-8859-1. ASCII input
-        # has no encoding.
+        # No encoding: a byte order mark; UTF-8 if the input starts with an XML
+        # declaration; a <meta> that the parser meets before any non-ASCII byte;
+        # else, at the first non-ASCII byte, an http-equiv charset anywhere
+        # after it (htmlFindEncoding), or ISO-8859-1. ASCII input has no
+        # encoding.
         def guess(bytes, errors, chunk, at_start)
           bom = BOMS.keys.find { |mark| bytes.start_with?(mark) } if at_start && bytes.bytesize >= 4
           if bom
@@ -204,14 +205,14 @@ module Lobzique
 
           line, column = position(bytes, first)
           errors << syntax_error("Unsupported encoding: #{declared}", domain: 1, code: 32, level: 1, str1: declared, line:, column:)
-          # libxml2 has stopped guessing, so the input is UTF-8
+          # libxml2 has stopped guessing, so the input is UTF-8.
           decode_with(bytes, Encoding::UTF_8, "UTF-8", errors, at_start)
         end
 
-        # htmlCheckMeta, which EncodingReader misses when its regexp doesn't
-        # match or the <meta> is past an IO's first chunk: the first
-        # supported declaration before the first non-ASCII byte decodes the
-        # input, and document.encoding is the last one declared, as written.
+        # htmlCheckMeta, which EncodingReader misses when its regexp does
+        # not match or the <meta> is after the first chunk of an IO. The first
+        # supported declaration before the first non-ASCII byte decodes
+        # the input. document.encoding is the last one declared, as written.
         def declared_while_parsing(bytes, first, errors, at_start)
           prefix = first ? bytes.byteslice(0, first) : bytes
           return unless prefix.match?(/<meta/ni)
@@ -229,8 +230,8 @@ module Lobzique
           decode_with(bytes, switch.first, declared.last, errors, at_start)
         end
 
-        # What htmlCheckMeta declares, meta by meta: a charset attribute's
-        # value, then an http-equiv Content-Type's charset.
+        # What htmlCheckMeta declares, meta by meta: the value of a charset
+        # attribute, then the charset of an http-equiv Content-Type.
         def declarations(bytes)
           metas(bytes).flat_map do |meta|
             http_equiv = content = nil
@@ -247,13 +248,14 @@ module Lobzique
               end
             end
             charset = http_equiv && content && charset_in_content(content)
-            # back to the input's bytes; a character reference's are lost
+            # Back to the bytes of the input. A character reference loses
+            # its bytes.
             (charset ? charsets << charset : charsets).map { _1.encode(Encoding::ISO_8859_1, undef: :replace).b }
           end
         end
 
-        # htmlCheckEncoding: everything after the "=" that follows
-        # "charset", or after the first "=" if a blank follows "charset".
+        # htmlCheckEncoding: everything after the "=" that follows "charset",
+        # or after the first "=" if a blank follows "charset".
         def charset_in_content(content)
           at = content.index(/charset/i) or return
           at += 7
@@ -261,9 +263,9 @@ module Lobzique
           content[(at + 1)..] if at && content[at] == "="
         end
 
-        # htmlFindEncoding: a case-insensitive search of the raw bytes up to
-        # the first NUL, comments and text included, as far as they're
-        # buffered: htmlCurrentChar keeps INPUT_CHUNK (250) bytes ahead.
+        # htmlFindEncoding: a case-insensitive search of the raw bytes up
+        # to the first NUL, comments and text included, as far as they
+        # are buffered: htmlCurrentChar keeps INPUT_CHUNK (250) bytes ahead.
         def find_encoding(bytes, from, chunk)
           rest = chunk ? bytes.byteslice(from...((from + 250).fdiv(chunk).ceil * chunk)) : bytes.byteslice(from..)
           rest = rest.byteslice(0, rest.index("\0")) if rest.include?("\0")
@@ -275,7 +277,7 @@ module Lobzique
 
         def decode_with(bytes, ruby_encoding, name, errors, at_start)
           string = transcode(bytes.dup.force_encoding(ruby_encoding), bytes, errors)
-          # xmlDetectEncoding skips a UTF-8 BOM even when the encoding is set
+          # xmlDetectEncoding skips a UTF-8 BOM even when the encoding is set.
           string = string.byteslice(3..) if at_start && string.start_with?("\uFEFF")
           [string, name, errors]
         end
@@ -283,8 +285,8 @@ module Lobzique
         def transcode(string, bytes, errors)
           invalid_bytes(bytes, string, errors) unless string.valid_encoding?
           if string.encoding != Encoding::UTF_8
-            # invalid: always, as a stateful encoding's string (ISO-2022-JP)
-            # is valid_encoding? whatever its bytes
+            # invalid: always, as the string of a stateful encoding
+            # (ISO-2022-JP) is valid_encoding? whatever its bytes.
             string.encode(Encoding::UTF_8, invalid: :replace, undef: :replace)
           elsif INVALID_BYTES == :latin1
             string.scrub { |b| b.unpack("C*").pack("U*") }
@@ -304,8 +306,8 @@ module Lobzique
           [before.count("\n") + 1, offset - (before.rindex("\n") || -1)]
         end
 
-        # xmlOpenCharEncodingHandler: [Ruby encoding, document.encoding], or
-        # nil for a name libxml2 doesn't support.
+        # xmlOpenCharEncodingHandler: [Ruby encoding, document.encoding], or nil
+        # for a name that libxml2 does not support.
         def open_decoder(name)
           return [Encoding::UTF_8, "UTF-8"] if name.casecmp?("UTF-8") || name.casecmp?("UTF8")
 
@@ -322,8 +324,8 @@ module Lobzique
           open_decoder(canonical)
         end
 
-        # A decoder iconv would open, if Ruby can transcode from it. Ruby's
-        # other names for UTF-8 aren't iconv's.
+        # A decoder that iconv would open, if Ruby can transcode
+        # from it. The other names of Ruby for UTF-8 are not names of iconv.
         def iconv(name)
           name = glibc_name(name)
           return Encoding::UTF_8 if name.casecmp?("UTF-8") || name.casecmp?("UTF8")
@@ -342,12 +344,12 @@ module Lobzique
           nil
         end
 
-        # The name glibc's iconv_open looks up (gconv_parse_code and strip
+        # The name that iconv_open of glibc looks up (gconv_parse_code and strip
         # in gconv_charset.c): without suffixes after a second "/", trailing
-        # blanks, "," and "/", and any character but letters, digits and
-        # "_-.,:/", so `"utf-8"` is UTF-8. Nokogiri uses GNU libiconv on
-        # macOS and Windows, which takes the name as given. An empty name is
-        # the locale's encoding in glibc; it's unsupported here.
+        # blanks, "," and "/", and any character except letters, digits
+        # and "_-.,:/", so `"utf-8"` is UTF-8. Nokogiri uses GNU libiconv
+        # on macOS and Windows, which takes the name as given. An empty name
+        # is the encoding of the locale in glibc. It is unsupported here.
         def glibc_name(name)
           code = name.b
           loop do

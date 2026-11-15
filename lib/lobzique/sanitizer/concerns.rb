@@ -8,14 +8,14 @@ module Lobzique
       module Node # :nodoc:
         def scrub!(scrubber)
           scrubber = ScrubBehavior.resolve_scrubber(scrubber)
-          # lobzique: Loofah's case names Nokogiri's classes, so lobzique
-          # documents and fragments would fall through to the else branch
+          # lobzique: the case of Loofah names the classes of Nokogiri,
+          # so lobzique documents and fragments would fall through to else.
           case self
           when XML::Document
             scrubber.traverse(root) if root
           when XML::DocumentFragment
-            # lobzique: traversed here, not by children.scrub!, so the
-            # fragment is escaped once
+            # lobzique: traversed here, not by children.scrub!, so the fragment
+            # is escaped once.
             children.each { |node| scrubber.traverse(node) }
           else
             scrubber.traverse(self)
@@ -36,7 +36,7 @@ module Lobzique
       class << self
         def resolve_scrubber(scrubber) # :nodoc:
           # lobzique: the Loofah scrubbers that build Nokogiri nodes, by name
-          # or by instance, resolve to ports (scrubbers.rb)
+          # or by instance, resolve to ports (scrubbers.rb).
           klass = Scrubbers::MAP[scrubber] || Loofah::Scrubbers::MAP[scrubber] || Scrubbers::PORTS[scrubber.class]
           scrubber = klass.new if klass
           unless scrubber.is_a?(Loofah::Scrubber)
@@ -48,8 +48,8 @@ module Lobzique
       end
     end
 
-    # lobzique: TextBehavior (text, to_text) isn't ported yet; Rails'
-    # sanitizers don't call it.
+    # lobzique: TextBehavior (text, to_text) is not ported yet. The sanitizers
+    # of Rails do not call it.
 
     module DocumentDecorator # :nodoc:
       def initialize(*args, &block)
@@ -61,7 +61,8 @@ module Lobzique
 
     module HtmlDocumentBehavior # :nodoc:
       # lobzique: ClassMethods#parse, which removes comments before the html
-      # element, isn't ported yet; Rails' sanitizers parse only fragments.
+      # element, is not ported yet. The sanitizers of Rails parse only
+      # fragments.
 
       def serialize_root
         at_xpath("/html/body")

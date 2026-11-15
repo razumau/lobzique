@@ -4,14 +4,15 @@
 #
 #   require "lobzique/rails_dom_testing"
 #
-# Wherever rails-dom-testing picks Nokogiri::HTML5's classes, it gets
-# lobzique's instead: assert_dom, assert_dom_equal, Action View's `rendered`
-# and Action Dispatch's html_document and parsed_body. :html4 stays on
-# Nokogiri (decision 3).
+# Wherever rails-dom-testing picks the classes of Nokogiri::HTML5, it gets
+# the classes of lobzique instead: assert_dom, assert_dom_equal, `rendered`
+# of Action View, and html_document and parsed_body of Action Dispatch. :html4
+# stays on Nokogiri (decision 3).
 #
-# HTMLSelector#filter and SelectorAssertions#nodeset build Nokogiri node
-# sets, so for lobzique nodes they build lobzique's (filter is ported from
-# rails-dom-testing 2.3.0); Nokogiri's still take the original code.
+# HTMLSelector#filter and SelectorAssertions#nodeset build Nokogiri node sets.
+# For lobzique nodes they build lobzique node sets (filter is ported
+# from rails-dom-testing 2.3.0). The node sets of Nokogiri still use
+# the original code.
 
 require "lobzique"
 require "rails-dom-testing"
@@ -19,7 +20,7 @@ require "rails/dom/testing/version"
 
 module Lobzique
   module RailsDomTesting
-    # filter is a private method whose code changed in 2.3.0
+    # filter is a private method whose code changed in 2.3.0.
     REQUIREMENT = Gem::Requirement.new(">= 2.3.0", "< 2.4")
 
     unless REQUIREMENT.satisfied_by?(Gem::Version.new(Rails::Dom::Testing::VERSION))
@@ -82,7 +83,7 @@ module Lobzique
         end
 
         @message ||= content_mismatch if remaining.empty?
-        # lobzique: lobzique's NodeSet, not Nokogiri::XML::NodeSet
+        # lobzique: the NodeSet of lobzique, not Nokogiri::XML::NodeSet.
         XML::NodeSet.new(matches.document, remaining)
       end
     end

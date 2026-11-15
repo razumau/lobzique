@@ -1,5 +1,3 @@
-//! `XML::Text`.
-
 use super::node::{document_for_new_node, finish_new, NODE};
 use super::{document, CHARACTER_DATA};
 use crate::support::{c_string, check_string, obj_class};

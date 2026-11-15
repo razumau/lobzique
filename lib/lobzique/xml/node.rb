@@ -35,8 +35,8 @@ module Lobzique
       XINCLUDE_END = 20
       DOCB_DOCUMENT_NODE = 21
 
-      # Runs after the native `Node.new` has made the node, so subclasses can
-      # override it; intentionally empty.
+      # Runs after the native `Node.new` has made the node, so that subclasses
+      # can override it. Intentionally empty.
       def initialize(name, document)
       end
 
@@ -186,8 +186,8 @@ module Lobzique
         parent_node.add_child(self)
       end
 
-      # lobzique: default_namespace=, namespace= and do_xinclude need
-      # namespace definitions and XInclude, which are out of scope
+      # lobzique: default_namespace=, namespace= and do_xinclude need namespace
+      # definitions and XInclude, which are out of scope.
 
       alias_method :next, :next_sibling
       alias_method :previous, :previous_sibling
@@ -329,8 +329,8 @@ module Lobzique
 
         return NodeSet.new(document) if contents.empty?
 
-        # lobzique: in_context parses HTML only; XML parsing is out of scope
-        # (plan.md decision 4)
+        # lobzique: in_context parses HTML only. XML parsing is out of scope
+        # (plan.md decision 4).
         raise NotImplementedError, "#{XML::Document}.parse isn't supported" unless document.html?
 
         error_count = document.errors.length
@@ -339,9 +339,9 @@ module Lobzique
         if document.errors.length > error_count
           raise document.errors[error_count] unless options.recover?
 
-          # lobzique: Nokogiri's fallback to a fragment parsed without the
-          # context is dropped: it emulates recovery for libxml2 < 2.13,
-          # and the HTML5 parser always recovers
+          # lobzique: the fallback of Nokogiri to a fragment parsed
+          # without the context is dropped. It emulates recovery for libxml2
+          # < 2.13, and the HTML5 parser always recovers.
         end
 
         node_set

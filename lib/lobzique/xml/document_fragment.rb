@@ -8,8 +8,8 @@ module Lobzique
       attr_reader :parse_options
 
       class << self
-        # The native node is made, wrapped and decorated first, then filled
-        # in by `initialize`, which is what subclasses override.
+        # The native node is made, wrapped and decorated first. `initialize`
+        # then fills it. Subclasses override `initialize`.
         def new(document, ...) # :nodoc:
           instance = native_new(document)
           instance.send(:initialize, document, ...)
@@ -31,7 +31,7 @@ module Lobzique
         children = if context
           context.parse(tags, options)
         else
-          # lobzique: XML parsing is out of scope (plan.md decision 4)
+          # lobzique: XML parsing is out of scope (plan.md decision 4).
           raise NotImplementedError, "#{XML::Document}.parse isn't supported"
         end
         children.each { |child| child.parent = self }

@@ -1,6 +1,6 @@
-//! Finding attributes by name, as the libxml2 functions behind Nokogiri's
-//! attribute readers do. Names are compared as bytes, since Ruby hands them
-//! over in any encoding.
+//! Finds attributes by name, as the libxml2 functions behind the attribute
+//! readers of Nokogiri do. Names are compared as bytes, because Ruby passes
+//! them in any encoding.
 
 use super::namespace::split_qualified_name;
 use super::{Attribute, Document, NodeId, NodeKind, QualName};
@@ -8,8 +8,8 @@ use html5ever::{ns, LocalName, Namespace, Prefix};
 use std::iter;
 
 impl Document {
-    /// The first attribute with this local name, in any namespace:
-    /// libxml2's `xmlHasProp`.
+    /// The first attribute with this local name in any namespace: libxml2's
+    /// `xmlHasProp`.
     pub fn attribute_named(&self, element: NodeId, name: &[u8]) -> Option<NodeId> {
         self.find_attribute(element, |attribute| attribute.name.local.as_bytes() == name)
     }
@@ -32,10 +32,10 @@ impl Document {
         })
     }
 
-    /// Nokogiri's `Node#[]`. A name with a colon is `prefix:local` when the
-    /// prefix is in scope, and otherwise matches an attribute with that
-    /// whole name in any namespace; a name without one matches attributes in
-    /// no namespace only.
+    /// Nokogiri's `Node#[]`. A name with a colon is `prefix:local`
+    /// when the prefix is in scope. Otherwise it matches an attribute
+    /// with that whole name in any namespace. A name without a colon matches
+    /// only attributes in no namespace.
     pub fn attribute_value(&self, element: NodeId, name: &[u8]) -> Option<&[u8]> {
         let attribute = match name.iter().position(|&byte| byte == b':') {
             Some(colon) => match self.search_namespace(element, &name[..colon]) {
@@ -52,7 +52,7 @@ impl Document {
     }
 
     /// The nearest `xml:lang` on the node or an ancestor: libxml2's
-    /// `xmlNodeGetLang`. A `lang` attribute doesn't count.
+    /// `xmlNodeGetLang`. A `lang` attribute does not count.
     pub fn lang(&self, id: NodeId) -> Option<&[u8]> {
         let href = ns!(xml);
         iter::once(id)
@@ -61,9 +61,9 @@ impl Document {
             .and_then(|attribute| self.value_of(attribute))
     }
 
-    /// Nokogiri's `Node#[]=`, libxml2's `xmlSetProp`: a name with a colon
-    /// is `prefix:local` when the prefix is in scope and neither side is
-    /// empty, and otherwise the whole name of an attribute in no namespace.
+    /// Nokogiri's `Node#[]=`, libxml2's `xmlSetProp`. A name with a colon
+    /// is `prefix:local` when the prefix is in scope and neither side is empty.
+    /// Otherwise it is the whole name of an attribute in no namespace.
     /// An existing attribute keeps its node and gets the new value. `None`
     /// for anything but an element.
     pub fn set_attribute(&mut self, element: NodeId, name: &str, value: Vec<u8>) -> Option<NodeId> {
@@ -83,10 +83,10 @@ impl Document {
         Some(self.set_attribute_name(element, name, value))
     }
 
-    /// `Attr#value=`. Nokogiri escapes the value with
-    /// `xmlEncodeEntitiesReentrant` and libxml2 unescapes it again, so it is
-    /// stored as given, except the C0 controls the escaping drops: all but
-    /// tab, LF and CR.
+    /// `Attr#value=`. Nokogiri escapes the value
+    /// with `xmlEncodeEntitiesReentrant` and libxml2 unescapes it again.
+    /// The value is therefore stored as given, except for the C0 controls
+    /// that the escaping drops: all but tab, LF and CR.
     pub fn set_attribute_value(&mut self, attribute: NodeId, mut value: Vec<u8>) {
         value.retain(|&byte| byte >= 0x20 || matches!(byte, b'\t' | b'\n' | b'\r'));
         if let NodeKind::Attribute(attribute) = &mut self.node_mut(attribute).kind {
@@ -94,7 +94,6 @@ impl Document {
         }
     }
 
-    /// libxml2's `xmlNodeSetLang`: sets `xml:lang` on an element.
     pub fn set_lang(&mut self, id: NodeId, lang: Vec<u8>) {
         if matches!(self.node_kind(id), NodeKind::Element(_)) {
             let name = QualName::new(Some(Prefix::from("xml")), ns!(xml), LocalName::from("lang"));
@@ -102,7 +101,6 @@ impl Document {
         }
     }
 
-    /// libxml2's `xmlSetNsProp`.
     fn set_attribute_name(&mut self, element: NodeId, name: QualName, value: Vec<u8>) -> NodeId {
         let href = (name.ns != ns!()).then(|| name.ns.clone());
         let existing = self.attribute_in_namespace(

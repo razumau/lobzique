@@ -240,8 +240,8 @@ fn long_selectors_cost_no_stack() {
 
 #[test]
 fn nesting_stays_within_a_ruby_thread_stack() {
-    // Ruby threads get 1 MB; a debug build takes about four times the
-    // stack per level that a release build does
+    // Ruby threads get 1 MB. A debug build uses about four times the stack
+    // per level that a release build uses.
     let run = || {
         let document = parse("<p class=a>x</p>");
         let depth = parser::MAX_NESTING;

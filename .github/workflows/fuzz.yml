@@ -38,7 +38,8 @@ jobs:
             jq -c '[.packages[].targets[] | select(.kind == ["bin"]) | .name]')
           echo "names=$names" >> "$GITHUB_OUTPUT"
 
-  # One job per target, so the 6-hour job limit applies to each target's run
+  # One job per target, so the 6-hour job limit applies to the run
+  # of each target.
   fuzz:
     name: Fuzz ${{ matrix.target }}
     needs: targets
@@ -51,7 +52,8 @@ jobs:
       FUZZ_SECONDS: ${{ inputs.seconds }}
       FUZZ_WORKERS: ${{ inputs.workers }}
       TARGET: ${{ matrix.target }}
-      # The prebuilt cargo-fuzz is a musl binary and defaults to its own target, which ASan can't link
+      # The prebuilt cargo-fuzz is a musl binary and defaults to its own target,
+      # which ASan cannot link.
       FUZZ_TARGET_TRIPLE: x86_64-unknown-linux-gnu
     steps:
       - uses: actions/checkout@v7
@@ -61,9 +63,10 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-fuzz
-      # Each run starts from the corpus the previous run grew, short or long.
-      # The fallback key restores the corpus all targets once shared; other
-      # targets' corpora are dropped below, so the cache saved holds this one's.
+      # Each run starts from the corpus that the previous run grew, short
+      # or long. The fallback key restores the corpus that all targets once
+      # shared. The corpora of other targets are dropped below, so the saved
+      # cache has only this one.
       - uses: actions/cache@v6
         with:
           path: fuzz/corpus
@@ -73,12 +76,13 @@ jobs:
             fuzz-corpus-
       - name: Fuzz for ${{ env.FUZZ_SECONDS }}s
         # The parser and DOM targets start from the html5lib and WPT inputs (dom
-        # reads each as markup with no operations), read-only after the
-        # target's own corpus. Seed files are long, so inputs are capped; a slow
-        # input fails rather than stalling the run, and so does a single
+        # reads each as markup with no operations), read-only after the own
+        # corpus of the target. Seed files are long, so inputs have a size cap.
+        # A slow input fails and does not stall the run. So does a single
         # allocation of more than 512 MB, well under the 2 GB RSS limit.
-        # html5_scaling counts work to catch slowness under the timeout. A
-        # target's dictionary is fuzz/<target>.dict, or html5's for html5_scaling.
+        # html5_scaling counts work to catch slowness under the timeout.
+        # The dictionary of a target is fuzz/<target>.dict, or the one of html5
+        # for html5_scaling.
         run: |
           mkdir -p "fuzz/corpus/$TARGET"
           find fuzz/corpus -mindepth 1 -maxdepth 1 ! -name "$TARGET" -exec rm -rf {} +
@@ -118,11 +122,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # Ruzzy builds its ASan runtime from clang's
+      # Ruzzy builds its ASan runtime from clang.
       - name: Install clang's sanitizer runtimes
         run: sudo apt-get update && sudo apt-get install -y libclang-rt-18-dev
       - uses: ruby/setup-ruby@v1
-        # Ruzzy's extension links libFuzzer, so it builds with clang
+        # The extension of Ruzzy links libFuzzer, so it builds with clang.
         env:
           CC: clang
           CXX: clang++

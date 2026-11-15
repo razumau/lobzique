@@ -105,7 +105,7 @@ fn descendants_are_in_document_order_without_the_root() {
 
 #[test]
 fn deep_trees_cost_no_stack() {
-    // Deep enough to overflow a recursive walk; Miri is too slow for more
+    // Deep enough to overflow a recursive walk. Miri is too slow for more.
     let depth = if cfg!(miri) { 1_000 } else { 100_000 };
     let mut doc = html();
     let mut parent = NodeId::DOCUMENT;
@@ -243,7 +243,7 @@ fn heap_size_counts_nodes_and_their_content() {
 
 #[test]
 fn invariants_hold_on_a_wide_tree_in_linear_time() {
-    // Quadratic checks would take minutes here
+    // Quadratic checks would take minutes here.
     let width = if cfg!(miri) { 1_000 } else { 200_000 };
     let mut doc = html();
     let parent = doc.create_element(html_name("ul"));
@@ -274,7 +274,7 @@ fn invariants_catch_broken_links() {
     let error = corrupted(|doc, [a, b, _]| doc.node_mut(a).last_child = Some(b));
     assert!(error.contains("wrong last child"), "{error}");
 
-    // Children whose parent has lost them
+    // Children that their parent has lost.
     let error = corrupted(|doc, [a, _, _]| {
         let a = doc.node_mut(a);
         a.first_child = None;
@@ -918,7 +918,7 @@ fn names_with_an_empty_side_of_the_colon_are_not_qualified() {
 
 #[test]
 fn decoding_references_is_linear() {
-    // Quadratic decoding would take minutes here
+    // Quadratic decoding would take minutes here.
     let length = if cfg!(miri) { 1_000 } else { 1_000_000 };
     let mut doc = html();
     let p = doc.create_element(html_name("p"));
@@ -973,7 +973,7 @@ fn document_order_from_walking_and_numbering_agree() {
 
 #[test]
 fn sorting_siblings_in_document_order_is_not_quadratic() {
-    // Comparing by walking siblings alone would take minutes here
+    // Comparing by walking siblings alone would take minutes here.
     let width = if cfg!(miri) { 300 } else { 200_000 };
     let mut doc = html();
     let parent = doc.create_element(html_name("ul"));
@@ -983,7 +983,7 @@ fn sorting_siblings_in_document_order_is_not_quadratic() {
         doc.append_child(parent, child).unwrap();
     }
     let in_order: Vec<_> = doc.children(parent).collect();
-    // A permutation, since 99991 is a prime that doesn't divide the width
+    // A permutation, because 99991 is a prime that does not divide the width.
     let mut items: Vec<_> = (0..width).map(|i| in_order[i * 99_991 % width]).collect();
     items.sort_by(|&a, &b| doc.document_order(a, b).unwrap());
     assert_eq!(items, in_order);
@@ -999,7 +999,7 @@ fn sorting_siblings_in_document_order_is_not_quadratic() {
 fn invariants_catch_stale_document_order() {
     let error = corrupted(|doc, [a, b, c]| {
         doc.order.get_or_init(|| doc.number_nodes());
-        // Swapped without going through link, which would drop the numbers
+        // Swapped without link, which would drop the numbers.
         doc.node_mut(a).first_child = Some(c);
         doc.node_mut(a).last_child = Some(b);
         doc.node_mut(c).previous_sibling = None;

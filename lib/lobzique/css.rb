@@ -1,14 +1,15 @@
 # frozen_string_literal: true
 
-# Adapted from Nokogiri 1.19.7, lib/nokogiri/css.rb (MIT, see LICENSE-NOKOGIRI.md).
-# Searchable doesn't come through here: it compiles selectors into
-# CSS::Selector (ARCHITECTURE.md). xpath_for is for callers that want the
-# XPath strings, which the core writes as Nokogiri's visitor does.
+# Adapted from Nokogiri 1.19.7, lib/nokogiri/css.rb (MIT, see
+# LICENSE-NOKOGIRI.md). Searchable does not use this module: it compiles
+# selectors to CSS::Selector (ARCHITECTURE.md). xpath_for is for callers
+# that want the XPath strings, which the core writes as the visitor of Nokogiri
+# does.
 
 module Lobzique
   module CSS
     class << self
-      # lobzique: no CSS.parse, which is deprecated and returns CSS::Nodes
+      # lobzique: no CSS.parse. It is deprecated and returns CSS::Nodes.
 
       def xpath_for(
         selector, options = nil,

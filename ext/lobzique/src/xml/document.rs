@@ -1,5 +1,3 @@
-//! `XML::Document`: the node object that owns its document's arena.
-
 use super::node::{utf8_string, wrap, Node, NODE};
 use super::ELEMENT;
 use crate::support::{c_string, call_initialize, displayed_class, obj_class, optional_arg};
@@ -16,8 +14,8 @@ pub static DOCUMENT: Lazy<RClass> = Lazy::new(|ruby| {
         .unwrap()
 });
 
-/// A document object of `class` that owns `arena`, before `initialize` has
-/// run: Nokogiri's `noko_xml_document_wrap`.
+/// A document object of `class` that owns `arena`, before `initialize` has run:
+/// `noko_xml_document_wrap` of Nokogiri.
 pub fn wrap_document(ruby: &Ruby, class: RClass, arena: dom::Document) -> Result<Value, Error> {
     let document = ruby.obj_wrap_as(Node::new_document(arena), class);
     Node::complete_document(ruby, document);
@@ -41,9 +39,9 @@ fn new(ruby: &Ruby, class: RClass, args: &[Value]) -> Result<Value, Error> {
     Ok(document)
 }
 
-/// A document object given by Ruby code; raises the way
-/// `noko_xml_document_unwrap` does. Nodes keep their document in this form,
-/// so only arguments need the check.
+/// A document object that Ruby code gave. Raises as `noko_xml_document_unwrap`
+/// does. Nodes keep their document in this form, so only arguments need
+/// the check.
 pub fn unwrap(ruby: &Ruby, document: Value) -> Result<Obj<Node>, Error> {
     let class = ruby.get_inner(&DOCUMENT);
     if !document.is_kind_of(class) {
@@ -57,12 +55,12 @@ pub fn unwrap(ruby: &Ruby, document: Value) -> Result<Obj<Node>, Error> {
     Obj::try_convert(document)
 }
 
-/// Runs `f` on the document's arena; the borrow ends when `f` returns.
+/// Runs `f` on the arena of the document. The borrow ends when `f` returns.
 ///
-/// `f` must be `Send`, which Ruby handles and values aren't, so it can
-/// neither call Ruby nor return a Ruby object (ARCHITECTURE.md, "Memory
-/// model"). What it needs from Ruby is copied in beforehand, and what Ruby
-/// needs from the arena is copied out.
+/// `f` must be `Send`. Ruby handles are not `Send`, so `f` can neither call
+/// Ruby nor return a Ruby object (ARCHITECTURE.md, "Memory model"). Copy
+/// in beforehand what `f` needs from Ruby. Copy out what Ruby needs
+/// from the arena.
 pub fn with_arena<R: Send>(
     ruby: &Ruby,
     document: Obj<Node>,
@@ -97,7 +95,8 @@ pub fn with_arenas_mut<R: Send>(
     Ok(f(&mut first, &mut second))
 }
 
-// Unreachable while no borrow outlives a call into Ruby; a guard, not a feature
+// Unreachable while no borrow outlives a call into Ruby. A guard,
+// not a feature.
 fn busy(ruby: &Ruby) -> Error {
     Error::new(
         ruby.exception_runtime_error(),
@@ -105,7 +104,6 @@ fn busy(ruby: &Ruby) -> Error {
     )
 }
 
-/// libxml2's `xmlDocGetRootElement`: the first element child.
 fn root(ruby: &Ruby, rb_self: Obj<Node>) -> Result<Option<Value>, Error> {
     let root = with_arena(ruby, rb_self, |arena| {
         arena.element_children(NodeId::DOCUMENT).next()
@@ -113,8 +111,8 @@ fn root(ruby: &Ruby, rb_self: Obj<Node>) -> Result<Option<Value>, Error> {
     root.map(|id| wrap(ruby, rb_self, id)).transpose()
 }
 
-/// `Document#root=`. A root from another document is copied, and the
-/// argument returned as given, still in its own document.
+/// `Document#root=`. A root from another document is copied. The argument
+/// is returned as given, still in its own document.
 fn set_root(ruby: &Ruby, rb_self: Obj<Node>, new_root: Value) -> Result<Value, Error> {
     if new_root.is_nil() {
         with_arena_mut(ruby, rb_self, |arena| arena.set_root(None))?
@@ -148,9 +146,9 @@ fn set_root(ruby: &Ruby, rb_self: Obj<Node>, new_root: Value) -> Result<Value, E
     Ok(new_root)
 }
 
-/// `Document#initialize_copy_with_args(other, level)`, after `Object#dup`
-/// has allocated the copy and copied the instance variables: the arena is
-/// copied, as `xmlCopyDoc` copies the document, with a new node cache.
+/// `Document#initialize_copy_with_args(other, level)`, after `Object#dup` has
+/// allocated the copy and copied the instance variables. The arena is copied,
+/// as `xmlCopyDoc` copies the document, with a new node cache.
 fn initialize_copy_with_args(
     ruby: &Ruby,
     rb_self: Obj<Node>,

@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-# Adapted from Nokogiri 1.19.7, lib/nokogiri/html4.rb (MIT, see LICENSE-NOKOGIRI.md).
-# The HTML4 names keep Nokogiri's hierarchy but parse and serialize with the
-# HTML5 parser (plan.md decision 3).
+# Adapted from Nokogiri 1.19.7, lib/nokogiri/html4.rb (MIT, see
+# LICENSE-NOKOGIRI.md). The HTML4 names keep the hierarchy of Nokogiri but parse
+# and serialize with the HTML5 parser (plan.md decision 3).
 
 module Lobzique
   class << self
@@ -26,7 +26,7 @@ module Lobzique
     end
 
     # lobzique: NamedCharacters (EntityLookup), SAX and ElementDescription
-    # are left out: they read libxml2's HTML4 tables, or are SAX
+    # are left out: they read the HTML4 tables of libxml2, or are SAX.
   end
 end
 

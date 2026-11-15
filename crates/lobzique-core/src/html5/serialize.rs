@@ -1,11 +1,10 @@
-//! Nokogiri's `html_standard_serialize` (`ext/nokogiri/xml_node.c`), which
-//! writes the HTML standard's serialization of a node, the node included.
+//! Nokogiri's `html_standard_serialize` (`ext/nokogiri/xml_node.c`). It writes
+//! the HTML standard serialization of a node, the node included.
 
 use super::{is_html, VOID_ELEMENTS};
 use crate::dom::{c_string, Attribute, Document, NodeId, NodeKind, QualName};
 use html5ever::ns;
 
-/// Elements whose text is written as is.
 const RAW_TEXT_ELEMENTS: &[&str] = &[
     "style",
     "script",
@@ -16,11 +15,11 @@ const RAW_TEXT_ELEMENTS: &[&str] = &[
     "plaintext",
 ];
 
-/// The node's HTML. With `preserve_newline`, a newline that starts a `pre`,
-/// `textarea` or `listing` is written twice, so that parsing the output
-/// keeps it. `scripting_enabled` writes `noscript` text as is, as for a
-/// document parsed with `parse_noscript_content_as_text`. Walks the tree
-/// without recursion, so depth costs no stack.
+/// The HTML of the node. With `preserve_newline`, a newline that starts
+/// a `pre`, `textarea` or `listing` is written twice, so that parsing
+/// the output keeps it. `scripting_enabled` writes `noscript` text
+/// as is, as for a document parsed with `parse_noscript_content_as_text`. Walks
+/// the tree without recursion, so depth uses no stack.
 pub fn serialize(
     document: &Document,
     id: NodeId,
@@ -92,7 +91,8 @@ pub fn serialize(
                 write_all(&mut out, &[b"<!--", c_string(text), b"-->"]);
                 false
             }
-            // libxml2 keeps a processing instruction's data as its content
+            // libxml2 keeps the data of a processing instruction
+            // as its content.
             NodeKind::ProcessingInstruction(pi) => {
                 write_all(&mut out, &[b"<?", c_string(&pi.data), b">"]);
                 false
@@ -112,8 +112,8 @@ pub fn serialize(
     out
 }
 
-/// Whether a `pre`, `textarea` or `listing` starts with a newline, which
-/// Nokogiri's `prepend_newline?` reports. It checks the name only.
+/// Whether a `pre`, `textarea` or `listing` starts with a newline,
+/// as `prepend_newline?` of Nokogiri reports. It checks the name only.
 pub fn prepend_newline(document: &Document, id: NodeId) -> bool {
     let NodeKind::Element(element) = document.node_kind(id) else {
         return false;
@@ -124,7 +124,6 @@ pub fn prepend_newline(document: &Document, id: NodeId) -> bool {
         })
 }
 
-/// HTML, SVG and MathML elements are written without a prefix.
 fn write_tag_name(out: &mut Vec<u8>, name: &QualName) {
     let foreign = ![ns!(), ns!(html), ns!(svg), ns!(mathml)].contains(&name.ns);
     if let (true, Some(prefix)) = (foreign, &name.prefix) {

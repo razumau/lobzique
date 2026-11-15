@@ -1,27 +1,27 @@
 # frozen_string_literal: true
 
-# Fuzzes lobzique through its Ruby API, so the extension's bindings, the
-# object model and the ported Ruby layer run on fuzzed input, under ASan
-# with GC and compaction in between (README, "Safety checks"). Run it with
-# `rake fuzz:ruby`, which builds the extension for it.
+# Fuzzes lobzique through its Ruby API. The bindings of the extension,
+# the object model and the ported Ruby layer then run on fuzzed input,
+# under ASan, with GC and compaction in between (README, "Safety checks"). Run
+# it with `rake fuzz:ruby`, which builds the extension for it.
 #
-# The input is a byte of options, markup, a NUL, then operations of four
-# bytes each, as in fuzz/fuzz_targets/dom.rs. The markup is parsed into a
-# sanitizer document and into a fragment, and slices of it give the names,
-# text, markup and queries the operations use. The operations edit, copy,
-# search, scrub and serialize nodes from a pool, drop nodes from it,
-# collect garbage and compact, and run XPath functions that edit the tree.
+# The input is a byte of options, markup, a NUL, then operations of four bytes
+# each, as in fuzz/fuzz_targets/dom.rs. The markup is parsed into a sanitizer
+# document and into a fragment. Slices of it give the names, text, markup
+# and queries for the operations. The operations edit, copy, search, scrub
+# and serialize nodes from a pool, drop nodes from it, collect garbage
+# and compact, and run XPath functions that edit the tree.
 #
-# Besides crashes, ASan reports and panics (which Ruby gets as `fatal`), it
-# fails on:
-# - an exception outside EXPECTED that Nokogiri doesn't raise when it runs
+# Crashes, ASan reports and panics (which Ruby gets as `fatal`) fail the run.
+# These also fail it:
+# - an exception outside EXPECTED that Nokogiri does not raise when it runs
 #   the same operations from the same state;
-# - sanitized output that changes when sanitized again or parsed again,
-#   where Rails::HTML5's doesn't (plan.md, "Sanitizer properties"), and a
-#   sanitizer that raises where Rails::HTML5's doesn't.
+# - sanitized output that changes when it is sanitized again or parsed again,
+#   where the output of Rails::HTML5 does not (plan.md, "Sanitizer properties"),
+#   and a sanitizer that raises where Rails::HTML5 does not.
 #
-# Nokogiri runs only to judge such an input, in a child process: it can
-# loop forever or crash on the trees the operations make.
+# Nokogiri runs only to judge such an input, in a child process: it can loop
+# forever or crash on the trees that the operations make.
 
 require "fiddle"
 require "ruzzy"
@@ -37,10 +37,10 @@ module RubyApiFuzz
   XPATHS = Differential::Harness::XPATHS
   ROOT_NAME = Differential::Harness::ROOT_NAME
   POOL_LIMIT = 256
-  # Deeper than 64 operations can nest
+  # Deeper than 64 operations can nest.
   ANCESTRY_LIMIT = 10_000
-  # For all of an input's oracles, well below libFuzzer's -timeout (rake
-  # fuzz:ruby)
+  # For all oracles of an input. Well below the -timeout of libFuzzer (rake
+  # fuzz:ruby).
   ORACLE_SECONDS = 3
   ENCODINGS = %w[UTF-8 ISO-8859-1 US-ASCII UTF-16LE Shift_JIS].freeze
   SCRUBBERS = %i[strip prune escape whitewash unprintable targetblank noopener noreferrer].freeze
@@ -50,10 +50,10 @@ module RubyApiFuzz
   REPARENTING_TO_B = 6
   SCRUBBING = 24
 
-  # Raised, with their subclasses, for bad arguments, as Nokogiri raises
-  # them, or for what lobzique leaves out (ARCHITECTURE.md, "Departures from
-  # Nokogiri": XPath::UnsupportedError is an XPath::SyntaxError), so they
-  # aren't replayed on Nokogiri
+  # Raised, with their subclasses, for bad arguments, as Nokogiri raises them,
+  # or for what lobzique leaves out (ARCHITECTURE.md, "Departures
+  # from Nokogiri": XPath::UnsupportedError is an XPath::SyntaxError). They
+  # are not replayed on Nokogiri.
   EXPECTED = %w[
     ArgumentError TypeError RangeError EncodingError NotImplementedError
     XML::SyntaxError CSS::SyntaxError
@@ -73,11 +73,12 @@ module RubyApiFuzz
     fragment: Loofah::HTML5::DocumentFragment, vendor: Rails::HTML5::Sanitizer
   )
 
-  # XPath functions the fuzzed queries can call, one Handler a query. The
-  # first call with something to edit edits the tree, as a handler may
-  # (ARCHITECTURE.md, "XPath and CSS handlers"); only one does, since
-  # lobzique evaluates again on the edited tree, and an edit that adds a
-  # node on every call (reparented text is a copy) never lets it finish.
+  # XPath functions that the fuzzed queries can call, one Handler
+  # for each query. The first call with something to edit edits the tree,
+  # as a handler may (ARCHITECTURE.md, "XPath and CSS handlers"). Only one call
+  # does, because lobzique evaluates again on the edited tree, and an edit
+  # that adds a node on every call (reparented text is a copy) would never let
+  # it finish.
   class Handler
     def initialize(run)
       @run = run
@@ -155,10 +156,10 @@ module RubyApiFuzz
       @pool.empty? ? nil : @pool[byte % @pool.length]
     end
 
-    # A node moved to another document is copied, and its object points at
-    # the copy; the original keeps the object as its node's, so a node left
-    # under the original can be its own ancestor (as in Nokogiri), and
-    # walking up never ends
+    # A node that moves to another document is copied, and its object points
+    # at the copy. The original keeps the object as its node's object. A node
+    # left under the original can then be its own ancestor (as in Nokogiri),
+    # and walking up never ends.
     def own_ancestor?(node)
       ancestor = node
       ANCESTRY_LIMIT.times do
@@ -500,9 +501,9 @@ module RubyApiFuzz
   end
 end
 
-# Ruby traps these, and libFuzzer only installs its handlers for signals
-# nothing handles: with them, -timeout works inside native code, and a
-# SIGTERM ends the run cleanly
+# Ruby traps these, and libFuzzer installs its handlers only for signals
+# that nothing handles. With them, -timeout works inside native code,
+# and a SIGTERM ends the run cleanly.
 %w[ALRM TERM].each { |signal| Signal.trap(signal, "SYSTEM_DEFAULT") }
 
 Ruzzy.fuzz(->(data) { RubyApiFuzz.test_one_input(data) })

@@ -34,7 +34,7 @@ module HTML4Shim
     doc.is_a?(Nokogiri::HTML4::Document) && !doc.is_a?(Nokogiri::HTML5::Document)
   end
 
-  # Gumbo wraps the tree as `klass` without calling #initialize.
+  # Gumbo wraps the tree as `klass` and does not call #initialize.
   def self.parse(klass, input, url, encoding)
     string = Nokogiri::HTML5.read_and_encode(input, encoding)
     doc = Nokogiri::Gumbo.parse(string, url, klass, **GUMBO_OPTIONS)
@@ -73,7 +73,7 @@ module HTML4Shim
   Nokogiri::HTML4::Document.singleton_class.prepend(DocumentClass)
 
   module Document
-    # HTML4 passes the root element as context; HTML5 passes none.
+    # HTML4 passes the root element as context. HTML5 passes none.
     def fragment(tags = nil)
       Nokogiri::HTML4::DocumentFragment.new(self, tags)
     end
@@ -126,7 +126,7 @@ module HTML4Shim
   end
   Nokogiri::XML::Node.prepend(Node)
 
-  # HTML5::Node's serializer overrides, for HTML4 documents too.
+  # The serializer overrides of HTML5::Node, for HTML4 documents too.
   module Serializer
     def inner_html(options = {})
       return super unless HTML4Shim.html4_only?(self)

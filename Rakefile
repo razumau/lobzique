@@ -4,8 +4,8 @@ require "bundler/gem_tasks"
 require "minitest/test_task"
 
 test_task = Minitest::TestTask.create do |t|
-  # test/fixtures/ holds upstream test files kept as data, not tests to run;
-  # test/facade/ runs in its own bundle (test:facade)
+  # test/fixtures/ has upstream test files that are data, not tests to run.
+  # test/facade/ runs in its own bundle (test:facade).
   t.test_globs = FileList["test/**/{test_*,*_test}.rb"].exclude("test/fixtures/**/*", "test/facade/**/*")
 end
 
@@ -31,13 +31,14 @@ extension = RbSys::ExtensionTask.new("lobzique", GEMSPEC) do |ext|
   ext.lib_dir = "lib/lobzique"
 end
 
-# Rake's default CLEAN globs **/*~ and **/*.bak, which match upstream files kept as data
+# The default CLEAN globs **/*~ and **/*.bak match upstream files that are data.
 CLEAN.exclude("test/fixtures/**/*", "inventory/raw/**/*")
 
 task default: %i[compile test standard]
 
-# make copies the profile's library over this only when the library is newer,
-# so after a build with the other profile, a compile keeps the old binary
+# make copies the library of the profile over this only when the library
+# is newer. After a build with the other profile, compile would keep the old
+# binary.
 built_binary = File.join(extension.tmp_dir, extension.platform, extension.name, RUBY_VERSION, extension.binary(extension.platform))
 
 namespace :test do
@@ -46,10 +47,10 @@ namespace :test do
   task :stress do
     require "etc"
     require "open3"
-    # Every stressed allocation runs a full GC, whose cost grows with the
-    # heap: a file runs alone so it doesn't mark the Rails libraries another
-    # loads, and without Bundler, whose code is half of a small heap. The
-    # slow Rails files start first.
+    # Each stressed allocation runs a full GC. Its cost grows with the heap.
+    # So each file runs alone, to not mark the Rails libraries that another file
+    # loads, and without Bundler, whose code is half of a small heap. The slow
+    # Rails files start first.
     rails, rest = test_task.test_globs.partition { _1.start_with?("test/sanitizer/", "test/action_text/", "test/rails_dom_testing/") }
     env = Bundler.unbundled_env.merge(
       "RUBYLIB" => $LOAD_PATH.join(File::PATH_SEPARATOR),
@@ -87,7 +88,8 @@ namespace :test do
   end
 end
 
-# cargo-fuzz's instrumentation, so libFuzzer sees the extension's coverage
+# Instrumentation of cargo-fuzz, so that libFuzzer sees the coverage
+# of the extension.
 RUBY_FUZZ_RUSTFLAGS = %w[
   -Zsanitizer=address -Cpasses=sancov-module -Cllvm-args=-sanitizer-coverage-level=4
   -Cllvm-args=-sanitizer-coverage-inline-8bit-counters -Cllvm-args=-sanitizer-coverage-pc-table
@@ -105,7 +107,8 @@ namespace :fuzz do
       abort "fuzz:ruby needs Ruzzy: `bundle config set --local with fuzz`, then bundle install with clang (README)"
     end
     ENV["RUSTUP_TOOLCHAIN"] = "nightly"
-    # An explicit target keeps the instrumentation out of build scripts and proc macros
+    # An explicit target keeps the instrumentation out of build scripts and proc
+    # macros.
     ENV["CARGO_BUILD_TARGET"] = `rustc -vV`[/^host: (.+)$/, 1]
     ENV["RB_SYS_EXTRA_CARGO_ARGS"] = "-Zbuild-std"
     ENV["RUSTFLAGS"] = RUBY_FUZZ_RUSTFLAGS.join(" ")
@@ -113,13 +116,14 @@ namespace :fuzz do
 
     corpus, artifacts = "fuzz/corpus/ruby_api", "fuzz/artifacts/ruby_api/"
     mkdir_p [corpus, artifacts]
-    # The extension's ASan needs a runtime in the process, and Ruby's
-    # stack overflow handling its own signal stack
+    # ASan of the extension needs a runtime in the process. Ruby handles stack
+    # overflow on its own signal stack.
     env = {
       "LD_PRELOAD" => Ruzzy::ASAN_PATH,
       "ASAN_OPTIONS" => "allocator_may_return_null=1:detect_leaks=0:use_sigaltstack=0"
     }
-    # Read-only seeds after the corpus, as the Rust targets have them (fuzz.yml)
+    # Read-only seeds after the corpus, as the Rust targets have them
+    # (fuzz.yml).
     seeds = %w[test/fixtures/wpt-parsing/tree-construction test/fixtures/html5lib-tests/tokenizer]
     sh env, "fuzz/ruby/trace.rb", corpus, *seeds, "-dict=fuzz/dom.dict", "-max_len=4096", "-timeout=10",
       "-artifact_prefix=#{artifacts}", *ENV.fetch("FUZZOPTS", "").split

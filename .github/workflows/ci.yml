@@ -23,8 +23,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # Ruby version comes from .ruby-version; Rust for clippy, which
-      # builds the extension's dependencies against Ruby's headers
+      # The Ruby version comes from .ruby-version. Rust is for clippy,
+      # which builds the dependencies of the extension against the headers
+      # of Ruby.
       - uses: oxidize-rb/actions/setup-ruby-and-rust@v1
         with:
           bundler-cache: true
@@ -37,7 +38,8 @@ jobs:
           git diff --exit-code crates/lobzique-core/src/css/tables.rs
       - name: Lint
         run: bundle exec rake standard
-      # Enforces what code borrowing an arena may call (ext/lobzique/clippy.toml)
+      # Enforces what code that borrows an arena can call
+      # (ext/lobzique/clippy.toml).
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
@@ -80,7 +82,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Oldest and newest Ruby in CI: GC internals differ between them
+        # The oldest and newest Ruby in CI: GC internals differ between them.
         ruby:
           - '3.3'
           - '4.0'
@@ -102,7 +104,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      # tendril (html5ever's strings) casts integers to pointers
+      # tendril (the strings of html5ever) casts integers to pointers.
       MIRIFLAGS: -Zmiri-permissive-provenance
     steps:
       - uses: actions/checkout@v7
@@ -111,7 +113,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri, rust-src
-      # The extension crate calls into libruby, which Miri can't run
+      # The extension crate calls into libruby, which Miri cannot run.
       - name: Test the core crate under Miri
         run: cargo miri test -p lobzique-core
 
@@ -121,13 +123,14 @@ jobs:
       fail-fast: false
       matrix:
         gc-stress: [false, true]
-    # asan-release (latest stable Ruby built with ASan) is only built for ubuntu-24.04 x64
+    # asan-release (the latest stable Ruby built with ASan) is built only
+    # for ubuntu-24.04 x64.
     runs-on: ubuntu-24.04
     env:
-      # An explicit target keeps ASan out of build scripts and proc macros
+      # An explicit target keeps ASan out of build scripts and proc macros.
       CARGO_BUILD_TARGET: x86_64-unknown-linux-gnu
       RUSTFLAGS: -Zsanitizer=address
-      # Ruby doesn't free everything at exit
+      # Ruby does not free everything at exit.
       ASAN_OPTIONS: detect_leaks=0:suppressions=${{ github.workspace }}/.github/asan.supp
     steps:
       - uses: actions/checkout@v7
@@ -153,7 +156,8 @@ jobs:
       - name: Run the tests
         if: ${{ !matrix.gc-stress }}
         run: bundle exec rake test
-      # A Ruby object freed while Rust still uses it is reported here, not left to crash later
+      # A Ruby object that is freed while Rust still uses it is reported here,
+      # not left to crash later.
       - name: Run the tests under GC.stress
         if: matrix.gc-stress
         run: bundle exec rake test:stress
@@ -187,7 +191,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: ruby/setup-ruby@v1
-      # Not `rake build`: it compiles the extension first, which a source gem doesn't ship
+      # Not `rake build`: it compiles the extension first, which a source gem
+      # does not ship.
       - name: Build gem
         run: gem build lobzique.gemspec
       - uses: actions/upload-artifact@v7

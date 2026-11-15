@@ -1,15 +1,15 @@
-//! Evaluation as libxml2 does it: XPath 1.0's value types and comparisons,
-//! node sets in document order, positions along each step's axis, and
-//! errors where libxml2 raises them.
+//! Evaluation as libxml2 does it: XPath 1.0 value types and comparisons, node
+//! sets in document order, positions along the axis of each step, and errors
+//! where libxml2 raises them.
 //!
-//! Custom functions are Ruby methods, which can't run while the arena is
-//! borrowed. [`evaluate`] answers each call it reaches from `answers`, and
-//! when one is missing it notes the call, counts it as an empty node set and
-//! carries on; the caller runs the noted calls with the borrow released and
-//! evaluates again, until nothing is missing. An answer may be the error
-//! the call raises, such as a function the handler doesn't have: raised
-//! only once an evaluation with every answer reaches it, since the empty
-//! node sets standing in can lead to calls libxml2 never makes.
+//! Custom functions are Ruby methods. They cannot run while the arena
+//! is borrowed. [`evaluate`] takes the result of each call from `answers`.
+//! If a result is missing, it records the call, uses an empty node set
+//! and continues. The caller then runs the recorded calls with the borrow
+//! released and evaluates again, until no result is missing. A result can
+//! be the error that the call raises, for example when the handler has no such
+//! function. That error is raised only when an evaluation with all results
+//! reaches it. The empty node sets can cause calls that libxml2 never makes.
 
 use super::ast::{
     Arithmetic, Axis, Comparison, Expr, Filter, Function, NodeTest, Operator, Path, QName, Step,
@@ -42,12 +42,11 @@ impl Value<'_> {
     }
 }
 
-/// What a custom call returned, or the error it raises.
 pub type Answer = Result<Value<'static>, Error>;
 
-/// A custom function call the caller has to make, and the key its answer
-/// is found by: the same node can reach a site with different arguments,
-/// such as `position()` from different starting nodes.
+/// A custom function call that the caller must make. It has a key
+/// for its result: the same node can reach a call site with different
+/// arguments, for example `position()` from different start nodes.
 #[derive(Clone, Debug)]
 pub struct Call {
     pub site: usize,
@@ -56,9 +55,9 @@ pub struct Call {
 }
 
 impl Call {
-    /// Numbers compare by bit pattern, so `NaN` finds its answer and 0 and
-    /// -0 stay apart. Every `NaN` is one key: arithmetic leaves a `NaN`'s
-    /// sign and payload unspecified, so `0 div 0` can differ between runs.
+    /// Numbers compare by bit pattern, so `NaN` finds its result and 0 and -0
+    /// stay apart. All `NaN`s are one key: arithmetic does not specify the sign
+    /// and payload of a `NaN`, so `0 div 0` can differ between runs.
     fn key(&self) -> (usize, NodeId, impl Iterator<Item = ArgumentKey<'_>>) {
         let arguments = self.arguments.iter().map(|value| match value {
             Value::NodeSet(nodes) => ArgumentKey::NodeSet(nodes),
@@ -102,13 +101,12 @@ impl Hash for Call {
 #[derive(Debug, PartialEq)]
 pub enum Outcome {
     Value(Value<'static>),
-    /// Calls to answer before evaluating again.
     Calls(Vec<Call>),
 }
 
-/// Evaluates `query` at `context`. `namespaces` binds prefixes beyond the
-/// ones Nokogiri always binds, and `variables` names, as strings;
-/// `answers` holds the custom calls made so far.
+/// Evaluates `query` at `context`. `namespaces` binds prefixes in addition
+/// to the ones Nokogiri always binds. `variables` has the variable values
+/// as strings. `answers` has the results of the custom calls made so far.
 pub fn evaluate(
     document: &Document,
     query: &Query,
@@ -117,8 +115,8 @@ pub fn evaluate(
     variables: &HashMap<String, Vec<u8>>,
     answers: &HashMap<Call, Answer>,
 ) -> Result<Outcome, Error> {
-    // libxml2 resolves a prefix when it evaluates the step; resolving them
-    // all first differs only when that step is never reached
+    // libxml2 resolves a prefix when it evaluates the step. Resolving
+    // all prefixes first differs only when libxml2 never reaches that step.
     check_prefixes(&query.expr, namespaces)?;
     let evaluator = Evaluator {
         document,
@@ -139,7 +137,7 @@ pub fn evaluate(
             size: 1,
         },
     );
-    // libxml2 makes the calls it reaches before an error
+    // libxml2 makes the calls it reaches before an error.
     let calls = evaluator.calls.into_inner();
     if !calls.is_empty() {
         return Ok(Outcome::Calls(calls));
@@ -149,8 +147,6 @@ pub fn evaluate(
 
 const XML_NAMESPACE: &str = "http://www.w3.org/XML/1998/namespace";
 
-/// The namespace `prefix` names: one the caller binds, or one libxml2 or
-/// Nokogiri binds in every context.
 fn lookup<'n>(namespaces: &'n HashMap<String, String>, prefix: &str) -> Option<&'n str> {
     if let Some(href) = namespaces.get(prefix) {
         return Some(href);
@@ -198,10 +194,10 @@ struct Evaluator<'a> {
     answers: &'a HashMap<Call, Answer>,
     calls: RefCell<Vec<Call>>,
     noted: RefCell<HashSet<Call>>,
-    /// The root of the context node's tree, which `id()` searches after the
-    /// document.
+    /// Root of the tree of the context node. `id()` searches it after
+    /// the document.
     root: NodeId,
-    /// The element each ID names, built when `id()` first needs it.
+    /// The element of each ID. Built when `id()` first needs it.
     ids: RefCell<Option<HashMap<Vec<u8>, NodeId>>>,
 }
 
@@ -239,7 +235,7 @@ impl<'a> Evaluator<'a> {
                                 Arithmetic::Subtract => left - right,
                                 Arithmetic::Multiply => left * right,
                                 Arithmetic::Divide => left / right,
-                                // C's fmod, as in libxml2
+                                // Same as C's fmod.
                                 Arithmetic::Modulo => left % right,
                             })
                         }
@@ -260,7 +256,7 @@ impl<'a> Evaluator<'a> {
     }
 
     fn variable(&self, name: &QName) -> Eval<Value<'static>> {
-        // Nokogiri binds variables without a namespace
+        // Nokogiri binds variables without a namespace.
         if let Some(prefix) = &name.prefix {
             self.resolve(prefix)?;
             return Err(Error::UndefinedVariable);
@@ -276,8 +272,8 @@ impl<'a> Evaluator<'a> {
         lookup(self.namespaces, prefix).ok_or(Error::UndefinedNamespacePrefix)
     }
 
-    /// libxml2 merges each operand into the ones before it, checking that
-    /// both are node sets once it has evaluated the second.
+    /// libxml2 merges each operand into the previous ones. It checks
+    /// that both are node sets after it evaluates the second.
     fn union<'q>(&self, list: &'q [Expr], context: Context) -> Eval<Value<'q>> {
         let Some((first, rest)) = list.split_first() else {
             return Ok(Value::NodeSet(Vec::new()));
@@ -309,15 +305,15 @@ impl<'a> Evaluator<'a> {
         self.steps(&filter.steps, nodes)
     }
 
-    /// libxml2 evaluates the arguments, then checks how many there are,
-    /// then their types.
+    /// libxml2 evaluates the arguments, then checks their number, then
+    /// their types.
     fn call<'q>(
         &self,
         function: Function,
         arguments: &'q [Expr],
         context: Context,
     ) -> Eval<Value<'q>> {
-        // whether a path finds a node needs only the first
+        // To know if a path finds a node, only the first is necessary.
         if let (Function::Not, [Expr::Path(path)]) = (function, arguments) {
             return Ok(Value::Boolean(!self.exists(path, context.node)?));
         }
@@ -379,7 +375,7 @@ impl<'a> Evaluator<'a> {
         if !arity {
             return Err(Error::InvalidArity);
         }
-        // The context node stands in for a missing argument
+        // A missing argument becomes the context node.
         let node_or_context = |values: Vec<Value<'q>>| match values.into_iter().next() {
             None => Ok(Some(context.node)),
             Some(Value::NodeSet(nodes)) => Ok(nodes.first().copied()),
@@ -490,7 +486,7 @@ impl<'a> Evaluator<'a> {
                     nodes
                         .iter()
                         .map(|&node| string_to_number(&self.string_value(node)))
-                        // `sum` of no floats is -0
+                        // `sum` of no floats is -0.
                         .fold(0.0, |sum, n| sum + n),
                 ),
                 _ => return Err(Error::InvalidType),
@@ -514,8 +510,9 @@ impl<'a> Evaluator<'a> {
         })
     }
 
-    /// libxml2's `xmlXPathIdFunction`: the elements whose IDs are among the
-    /// blank-separated tokens of the argument, or of each node's string.
+    /// libxml2's `xmlXPathIdFunction`: the elements with an ID
+    /// in the blank-separated tokens of the argument, or of the string
+    /// of each node.
     fn id(&self, argument: Value<'_>) -> Vec<NodeId> {
         let strings = match argument {
             Value::NodeSet(nodes) => nodes.iter().map(|&node| self.string_value(node)).collect(),
@@ -532,11 +529,11 @@ impl<'a> Evaluator<'a> {
         found
     }
 
-    /// libxml2 keeps the first element registered under each ID: as
-    /// lobzique approximates it, the first in document order, in the
-    /// document and then in the context node's tree. `xmlIsID` makes `id`
-    /// attributes IDs in HTML documents, and `name` on `a` elements;
-    /// otherwise only `xml:id`.
+    /// libxml2 keeps the first element registered for each ID. Here
+    /// this is the first in document order: first in the document, then
+    /// in the tree of the context node. `xmlIsID` makes `id` attributes IDs
+    /// in HTML documents, and `name` on `a` elements. In other documents only
+    /// `xml:id` is an ID.
     fn collect_ids(&self) -> HashMap<Vec<u8>, NodeId> {
         let document = self.document;
         let html = document.kind() == DocumentKind::Html;
@@ -567,9 +564,9 @@ impl<'a> Evaluator<'a> {
         ids
     }
 
-    /// libxml2's `xmlXPathLangFunction`: the `xml:lang` of the nearest
-    /// element that has one, compared ignoring ASCII case up to the end or
-    /// a hyphen.
+    /// libxml2's `xmlXPathLangFunction`: the `xml:lang` of the nearest element
+    /// that has one. The comparison ignores ASCII case and stops at the end
+    /// or at a hyphen.
     fn lang(&self, node: NodeId, lang: &[u8]) -> bool {
         let document = self.document;
         let found = std::iter::once(node)
@@ -594,8 +591,6 @@ impl<'a> Evaluator<'a> {
             && matches!(found.get(lang.len()), None | Some(b'-'))
     }
 
-    /// `local-name()`: an element's or attribute's local name, a processing
-    /// instruction's target, or nothing.
     fn local_name_of(&self, node: NodeId) -> Vec<u8> {
         match self.document.node_kind(node) {
             NodeKind::Element(_) | NodeKind::Attribute(_) => {
@@ -606,7 +601,6 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// `name()`: the local name after the namespace's prefix, if it has one.
     fn qualified_name(&self, node: NodeId) -> Vec<u8> {
         match self.document.node_kind(node) {
             NodeKind::Element(_) | NodeKind::Attribute(_) => {
@@ -652,13 +646,12 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// libxml2's `xmlXPathCastNodeToString`, which is `xmlNodeGetContent`.
+    /// libxml2's `xmlXPathCastNodeToString`, which uses `xmlNodeGetContent`.
     fn string_value(&self, node: NodeId) -> Vec<u8> {
         self.document.content(node).unwrap_or_default()
     }
 
-    /// XPath 1.0's comparison rules: a node set compares as each of its
-    /// nodes in turn.
+    /// XPath 1.0 comparison rules. A node set compares as each of its nodes.
     fn compare(&self, comparison: Comparison, left: &Value<'_>, right: &Value<'_>) -> bool {
         use Value::{Boolean, NodeSet, Number, String};
         let equality = matches!(comparison, Comparison::Equal | Comparison::NotEqual);
@@ -723,7 +716,6 @@ impl<'a> Evaluator<'a> {
         self.steps(&path.steps, vec![start])
     }
 
-    /// `steps` in turn from `nodes`, which are in document order.
     fn steps(&self, steps: &[Step], nodes: Vec<NodeId>) -> Eval<Vec<NodeId>> {
         match steps.split_last() {
             Some((last, init)) => {
@@ -734,7 +726,6 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// `steps` that have a step after them.
     fn steps_before(&self, steps: &[Step], mut nodes: Vec<NodeId>) -> Eval<Vec<NodeId>> {
         for step in steps {
             if nodes.is_empty() {
@@ -745,9 +736,9 @@ impl<'a> Evaluator<'a> {
         Ok(nodes)
     }
 
-    /// Whether `path` finds a node from `context`. The last step stops at
-    /// the first node that passes, unless its predicates read positions,
-    /// which `:has(…)` and `[@attr]` don't.
+    /// Whether `path` finds a node from `context`. The last step stops
+    /// at the first node that passes, unless its predicates read positions.
+    /// `:has(…)` and `[@attr]` do not.
     fn exists(&self, path: &Path, context: NodeId) -> Eval<bool> {
         let Some((last, init)) = path.steps.split_last() else {
             return Ok(true);
@@ -785,24 +776,23 @@ impl<'a> Evaluator<'a> {
         Ok(false)
     }
 
-    /// One step from each node of `input`, which is in document order.
-    /// `inner` steps have a step after them.
     fn step(&self, step: &Step, input: &[NodeId], inner: bool) -> Eval<Vec<NodeId>> {
         let document = self.document;
-        // libxml2's `node()` doesn't pass a fragment, so `.//p[@id]` from
-        // one skips its children, though `.//p`, which libxml2 rewrites as
-        // `descendant::p`, has them. Here `//` goes on from a fragment.
+        // libxml2's `node()` does not pass a fragment. So `.//p[@id]`
+        // from a fragment skips its children, but `.//p` has them,
+        // because libxml2 rewrites it as `descendant::p`. Here `//` continues
+        // from a fragment.
         let from_fragment = inner
             && step.axis == Axis::DescendantOrSelf
             && step.test == NodeTest::Node
             && step.predicates.is_empty();
-        // Descendants of a node already searched are found again from it,
-        // unless positions differ by starting point
+        // The search finds the descendants of a searched node again
+        // from it, unless the positions depend on the start node.
         let subsumes = matches!(step.axis, Axis::Descendant | Axis::DescendantOrSelf)
             && !step.predicates.iter().any(Expr::is_positional)
             && !input.iter().any(|&node| self.is_attribute(node));
-        // `[k]` keeps the k-th candidate at most, so the axis is walked no
-        // further, as libxml2 does for `following-sibling::*[1]` (`a + b`)
+        // `[k]` keeps at most the k-th candidate, so the walk of the axis stops
+        // there. libxml2 does the same for `following-sibling::*[1]` (`a + b`).
         let limit = match step.predicates.first() {
             Some(&Expr::Number(k)) if k >= 1.0 && k.fract() == 0.0 => k as usize,
             Some(Expr::Number(_)) => 0,
@@ -822,10 +812,7 @@ impl<'a> Evaluator<'a> {
                 .filter(|&candidate| {
                     self.passes(&step.test, step.axis, candidate)
                         || (from_fragment
-                            && matches!(
-                                document.node_kind(candidate),
-                                NodeKind::DocumentFragment
-                            ))
+                            && matches!(document.node_kind(candidate), NodeKind::DocumentFragment))
                 })
                 .take(limit)
                 .collect();
@@ -866,7 +853,6 @@ impl<'a> Evaluator<'a> {
         Ok(kept)
     }
 
-    /// The nodes on `axis` from `node`, in the axis's order.
     fn axis(&self, axis: Axis, node: NodeId) -> Box<dyn Iterator<Item = NodeId> + 'a> {
         let document = self.document;
         let not_doctype = |&id: &NodeId| !matches!(document.node_kind(id), NodeKind::Doctype(_));
@@ -881,7 +867,7 @@ impl<'a> Evaluator<'a> {
                 Box::new(std::iter::empty())
             }
             Axis::Child => Box::new(document.children(node)),
-            // libxml2 walks past doctypes here, though `child::` has them
+            // libxml2 walks past doctypes here, but `child::` has them.
             Axis::Descendant => Box::new(document.descendants(node).filter(not_doctype)),
             Axis::DescendantOrSelf if is_attribute => Box::new(std::iter::once(node)),
             Axis::DescendantOrSelf => Box::new(
@@ -896,8 +882,8 @@ impl<'a> Evaluator<'a> {
             Axis::PrecedingSibling => Box::new(siblings(Document::previous_sibling)),
             Axis::Following => {
                 let mut nodes = Vec::new();
-                // libxml2 starts after an attribute's element, skipping
-                // what is inside it
+                // libxml2 starts after the element of an attribute and skips
+                // its content.
                 let start = match (is_attribute, document.parent(node)) {
                     (true, Some(element)) => element,
                     _ => node,
@@ -945,7 +931,7 @@ impl<'a> Evaluator<'a> {
         };
         let href = |node| self.document.namespace(node).map(|ns| ns.href);
         match test {
-            // libxml2's `node()` passes neither doctypes nor fragments
+            // libxml2's `node()` passes no doctypes and no fragments.
             NodeTest::Node => !matches!(kind, NodeKind::Doctype(_) | NodeKind::DocumentFragment),
             NodeTest::Text => matches!(kind, NodeKind::Text(_) | NodeKind::CData(_)),
             NodeTest::Comment => matches!(kind, NodeKind::Comment(_)),
@@ -957,7 +943,7 @@ impl<'a> Evaluator<'a> {
             },
             NodeTest::Any => principal,
             NodeTest::AnyIn(prefix) => principal && href(node) == Some(self.prefixed(prefix)),
-            // Nokogiri's patch covers elements only: `@*:id` finds nothing
+            // Nokogiri's patch covers elements only: `@*:id` finds nothing.
             NodeTest::LocalName(local) => {
                 matches!(kind, NodeKind::Element(_)) && self.local_name(node) == local.as_str()
             }
@@ -977,14 +963,11 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// The namespace of a node test's prefix, which [`check_prefixes`] has
-    /// found bound.
     fn prefixed(&self, prefix: &str) -> &str {
         lookup(self.namespaces, prefix).expect("prefixes are checked before evaluation")
     }
 }
 
-/// The two values of a function that takes two.
 fn two<T>(values: Vec<T>) -> [T; 2] {
     values
         .try_into()
@@ -1002,12 +985,11 @@ fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window == needle)
 }
 
-/// libxml2's `xmlUTF8Strlen`: the characters, counted by their lead bytes.
+/// libxml2's `xmlUTF8Strlen`: counts characters by their lead bytes.
 fn utf8_length(string: &[u8]) -> usize {
     string.iter().filter(|&&b| b & 0xC0 != 0x80).count()
 }
 
-/// The characters of `string`, each as its bytes.
 fn utf8_chars(string: &[u8]) -> impl Iterator<Item = &[u8]> {
     let mut rest = string;
     std::iter::from_fn(move || {
@@ -1020,8 +1002,8 @@ fn utf8_chars(string: &[u8]) -> impl Iterator<Item = &[u8]> {
     })
 }
 
-/// libxml2's `xmlXPathSubstringFunction`, which rounds the start and the
-/// end, clamped to C's `int`, and counts characters from 1.
+/// libxml2's `xmlXPathSubstringFunction`. It rounds the start and the end,
+/// clamps them to C's `int`, and counts characters from 1.
 fn substring(string: &[u8], start: f64, length: Option<f64>) -> Vec<u8> {
     const INT_MAX: f64 = i32::MAX as f64;
     let round_half_up = |n: f64| {
@@ -1033,7 +1015,7 @@ fn substring(string: &[u8], start: f64, length: Option<f64>) -> Vec<u8> {
         }
     };
     let mut first: i64 = 1;
-    // NaN goes to the end, as in libxml2's `!(in < INT_MAX)`
+    // NaN goes to the end, as in libxml2's `!(in < INT_MAX)`.
     if start.is_nan() || start >= INT_MAX {
         first = i64::from(i32::MAX);
     } else if start >= 1.0 {
@@ -1060,8 +1042,8 @@ fn substring(string: &[u8], start: f64, length: Option<f64>) -> Vec<u8> {
         .collect()
 }
 
-/// libxml2's `xmlXPathTranslateFunction`: each character of `string` that
-/// `from` has becomes the one at the same place in `to`, or goes.
+/// libxml2's `xmlXPathTranslateFunction`: each character of `string`
+/// in `from` becomes the character at the same position in `to`, or is removed.
 fn translate(string: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
     let mut to = utf8_chars(to);
     let mut replacements: HashMap<&[u8], Option<&[u8]>> = HashMap::new();
@@ -1079,8 +1061,8 @@ fn translate(string: &[u8], from: &[u8], to: &[u8]) -> Vec<u8> {
     translated
 }
 
-/// libxml2's `xmlXPathRoundFunction`: halves round up, and what rounds to
-/// zero keeps its sign.
+/// libxml2's `xmlXPathRoundFunction`: halves round up. A value that rounds
+/// to zero keeps its sign.
 fn round(n: f64) -> f64 {
     if (-0.5..0.5).contains(&n) {
         return n * 0.0;
@@ -1093,7 +1075,6 @@ fn round(n: f64) -> f64 {
     }
 }
 
-/// libxml2's `xmlXPathEscapeUriFunction`
 fn escape_uri(string: &[u8], escape_reserved: bool) -> Vec<u8> {
     let mut escaped = Vec::with_capacity(string.len());
     for (i, &b) in string.iter().enumerate() {
@@ -1114,7 +1095,7 @@ fn escape_uri(string: &[u8], escape_reserved: bool) -> Vec<u8> {
     escaped
 }
 
-/// The `name` libxml2 gives a node, which `local-name-is` compares.
+/// The `name` that libxml2 gives a node. `local-name-is` compares it.
 fn libxml2_name(document: &Document, node: NodeId) -> Option<&[u8]> {
     match document.node_kind(node) {
         NodeKind::Element(element) => Some(element.name.local.as_bytes()),
@@ -1127,8 +1108,8 @@ fn libxml2_name(document: &Document, node: NodeId) -> Option<&[u8]> {
     }
 }
 
-/// Nokogiri's `css-class` builtin: `needle` starts a word of `haystack` and
-/// ends at a blank or the end. An empty needle is always there.
+/// Nokogiri's `css-class` builtin: `needle` starts a word of `haystack`
+/// and ends at a blank or at the end. An empty needle is always found.
 fn css_class(haystack: &[u8], needle: &[u8]) -> bool {
     if needle.is_empty() {
         return true;
@@ -1168,8 +1149,8 @@ fn compare_numbers(comparison: Comparison, a: f64, b: f64) -> bool {
     }
 }
 
-/// libxml2's `xmlXPathStringEvalNumber`: blanks, an optional minus, a
-/// number as [`scan_number`] reads it, blanks; anything else is NaN.
+/// libxml2's `xmlXPathStringEvalNumber`: blanks, an optional minus, a number
+/// as [`scan_number`] reads it, blanks. Anything else is NaN.
 pub fn string_to_number(s: &[u8]) -> f64 {
     let start = s.iter().position(|&b| !is_blank(b)).unwrap_or(s.len());
     let mut rest = &s[start..];
@@ -1196,12 +1177,12 @@ pub fn string_to_number(s: &[u8]) -> f64 {
     }
 }
 
-/// libxml2's number reading, shared by `xmlXPathCompNumber` and
-/// `xmlXPathStringEvalNumber`: digits accumulated as a double, at most 20
-/// fraction digits past its leading zeros, and an exponent whose digits
-/// may be missing, applied with `pow`. Not correctly rounded, so long
-/// numbers come out as libxml2's do. The value and the bytes read, or None
-/// for a `.` with no digit on either side.
+/// libxml2's number reader, used by `xmlXPathCompNumber`
+/// and `xmlXPathStringEvalNumber`. It accumulates the digits as a double, reads
+/// at most 20 fraction digits after the leading zeros, and applies the exponent
+/// with `pow`. The exponent digits can be missing. The result is not correctly
+/// rounded, so long numbers match libxml2. It returns the value and the bytes
+/// read, or None for a `.` with no digit on either side.
 pub(super) fn scan_number(s: &[u8]) -> Option<(f64, usize)> {
     const MAX_FRAC: i32 = 20;
     let digit = |at: usize| {
@@ -1260,8 +1241,8 @@ pub(super) fn scan_number(s: &[u8]) -> Option<(f64, usize)> {
 }
 
 /// 10^exponent, correctly rounded, as C's `pow(10, n)` gives it to libxml2.
-/// Rust's `powf` promises no precision (Miri makes it inexact on purpose);
-/// its float parsing is correctly rounded, and powers to 22 are exact.
+/// Rust's `powf` has no precision guarantee (Miri makes it inexact on purpose).
+/// Rust float parsing is correctly rounded, and powers up to 22 are exact.
 fn power_of_ten(exponent: i32) -> f64 {
     const EXACT: [f64; 23] = [
         1e0, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16,
@@ -1273,9 +1254,10 @@ fn power_of_ten(exponent: i32) -> f64 {
     }
 }
 
-/// libxml2's `xmlXPathFormatNumber`: integers strictly inside C's `int`
-/// range as they are, others below 1e-5 or above 1e9 as `%.14e`, the rest
-/// as `%f` with 15 significant digits; trailing zeros of the fraction go.
+/// libxml2's `xmlXPathFormatNumber`: integers strictly inside the range of C's
+/// `int` stay as they are. Other values below 1e-5 or above 1e9 use `%.14e`.
+/// The rest use `%f` with 15 significant digits. Trailing zeros of the fraction
+/// are removed.
 pub fn number_to_string(n: f64) -> String {
     const INT_MIN: f64 = i32::MIN as f64;
     const INT_MAX: f64 = i32::MAX as f64;
@@ -1293,7 +1275,7 @@ pub fn number_to_string(n: f64) -> String {
     }
     let absolute = n.abs();
     if !(1e-5..=1e9).contains(&absolute) {
-        // Rust writes `1.5e9` where C writes `1.5e+09`
+        // Rust writes `1.5e9`, C writes `1.5e+09`.
         let formatted = format!("{n:.14e}");
         let (mantissa, exponent) = formatted.split_once('e').expect("an exponent");
         let exponent: i32 = exponent.parse().expect("a decimal exponent");

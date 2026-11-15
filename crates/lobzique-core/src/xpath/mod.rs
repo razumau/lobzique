@@ -1,6 +1,6 @@
-//! The XPath engine. Nokogiri's CSS compiles to XPath and libxml2 runs it,
-//! so CSS semantics are XPath semantics: the CSS front end (`crate::css`)
-//! builds the [`Expr`]s that Nokogiri's visitor would write as strings, and
+//! The XPath engine. The CSS of Nokogiri compiles to XPath and libxml2 runs
+//! it, so CSS semantics are XPath semantics. The CSS front end (`crate::css`)
+//! builds the [`Expr`]s that the visitor of Nokogiri would write as strings.
 //! [`evaluate`] runs them as libxml2 would. [`parse`] builds the same trees
 //! from XPath strings (plan.md decision 2).
 
@@ -20,21 +20,16 @@ pub use parse::{parse, ParseError, MAX_NESTING};
 
 use std::fmt;
 
-/// Nokogiri's namespace for the functions of custom handlers.
 pub const NOKOGIRI_URI: &str = "http://www.nokogiri.org/default_ns/ruby/extensions_functions";
-/// Nokogiri's namespace for the functions it defines itself.
 pub const NOKOGIRI_BUILTIN_URI: &str = "https://www.nokogiri.org/default_ns/ruby/builtins";
-/// The namespace of libxml2's `escape-uri`.
 pub const XQUERY_FUNCTIONS_URI: &str = "http://www.w3.org/2002/08/xquery-functions";
 
-/// An expression ready to evaluate: Nokogiri's XPath string, compiled.
 #[derive(Debug)]
 pub struct Query {
     pub(crate) expr: Expr,
     functions: Vec<FunctionName>,
 }
 
-/// The name a call to a function outside XPath 1.0 gives.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FunctionName {
     pub prefix: Option<String>,
@@ -42,8 +37,8 @@ pub struct FunctionName {
 }
 
 impl Query {
-    /// A query compiled from CSS. `functions` names each custom call, by
-    /// its `site`, as Nokogiri's visitor writes `nokogiri:name(…)`.
+    /// A query compiled from CSS. `functions` names each custom call
+    /// by its `site`, as the visitor of Nokogiri writes `nokogiri:name(…)`.
     pub fn new(mut expr: Expr, functions: Vec<String>) -> Query {
         expr.merge_descendant_steps(Merge::UnlessPositional);
         let functions = functions
@@ -56,7 +51,6 @@ impl Query {
         Query { expr, functions }
     }
 
-    /// A query parsed from an XPath string.
     fn xpath(mut expr: Expr, functions: Vec<FunctionName>) -> Query {
         expr.merge_descendant_steps(Merge::WithoutPredicates);
         Query { expr, functions }
@@ -67,7 +61,7 @@ impl Query {
     }
 }
 
-/// libxml2's XPath errors that Nokogiri raises as `XPath::SyntaxError`,
+/// The XPath errors of libxml2 that Nokogiri raises as `XPath::SyntaxError`,
 /// numbered as libxml2's `xmlXPathError`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Error {
@@ -88,13 +82,12 @@ pub enum Error {
 }
 
 impl Error {
-    /// The `xmlError` code: `XML_XPATH_EXPRESSION_OK` (1200) plus the
-    /// XPath error number.
+    /// The `xmlError` code: `XML_XPATH_EXPRESSION_OK` (1200) plus the number
+    /// of the XPath error.
     pub fn code(self) -> i32 {
         1200 + self as i32
     }
 
-    /// The message libxml2 gives it.
     pub fn message(self) -> &'static str {
         match self {
             Error::UnfinishedLiteral => "Unfinished literal",
@@ -103,7 +96,7 @@ impl Error {
             Error::UndefinedVariable => "Undefined variable",
             Error::InvalidPredicate => "Invalid predicate",
             Error::InvalidExpression => "Invalid expression",
-            // sic: libxml2's message for a missing `)`
+            // Sic: this is the message of libxml2 for a missing `)`.
             Error::Unclosed => "Missing closing curly brace",
             Error::UnregisteredFunction => "Unregistered function",
             Error::InvalidType => "Invalid type",

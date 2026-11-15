@@ -1,7 +1,8 @@
 name: Differential (crawl)
 
-# Compares lobzique with Nokogiri::HTML5, parsing and sanitizing, on the pinned Common Crawl sample
-# (test/differential/crawl.yml). Too slow to download for every push.
+# Compares lobzique with Nokogiri::HTML5, for parsing and sanitizing,
+# on the pinned Common Crawl sample (test/differential/crawl.yml). Too slow
+# to download for every push.
 
 on:
   schedule:
@@ -25,7 +26,7 @@ jobs:
           ruby-version: "3.3"
           bundler-cache: true
           cargo-cache: true
-      # The pin changes rarely; the download is ~120 MB
+      # The pin changes rarely. The download is about 120 MB.
       - uses: actions/cache@v6
         with:
           path: tmp/crawl

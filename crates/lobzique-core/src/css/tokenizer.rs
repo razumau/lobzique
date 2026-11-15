@@ -1,12 +1,12 @@
-//! Nokogiri's CSS tokenizer (lib/nokogiri/css/tokenizer.rex), rule for rule:
-//! the first rule that matches at the current position wins, as in the
-//! generated scanner, not the longest.
+//! Nokogiri's CSS tokenizer (lib/nokogiri/css/tokenizer.rex), rule for rule.
+//! The first rule that matches at the current position wins,
+//! as in the generated scanner. The longest match does not win.
 
 use super::tables as t;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Token<'a> {
-    /// The racc token number, [`t::ERROR`] for a character no rule names.
+    /// The racc token number. [`t::ERROR`] for a character that no rule names.
     pub kind: i16,
     pub text: &'a str,
 }
@@ -54,8 +54,8 @@ impl<'a> Iterator for Tokenizer<'a> {
 
 type Rule = fn(&str) -> Option<usize>;
 
-// `U\+[0-9a-f?]{1,6}…` (UNICODE_RANGE) is left out: IDENT, earlier, always
-// takes the `U`
+// `U\+[0-9a-f?]{1,6}…` (UNICODE_RANGE) is left out: IDENT, which comes earlier,
+// always takes the `U`.
 const RULES: [(i16, Rule); 24] = [
     (t::HAS, |s| after(s, "has(").map(|n| n + spaces(&s[n..]))),
     (t::FUNCTION, |s| {
@@ -96,7 +96,6 @@ const RULES: [(i16, Rule); 24] = [
     (t::STRING, string),
 ];
 
-/// Ruby's `[\s]`, which includes the vertical tab.
 fn is_space(c: char) -> bool {
     matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r')
 }
@@ -177,8 +176,8 @@ fn ident(s: &str) -> Option<usize> {
     Some(n + repeat(&s[n..], nmchar))
 }
 
-/// `-?([0-9]+|[0-9]*\.[0-9]+)`, whose first alternative wins when it
-/// matches at all: `1.5` is the number `1`.
+/// `-?([0-9]+|[0-9]*\.[0-9]+)`. The first alternative wins when it matches
+/// at all: `1.5` is the number `1`.
 fn number(s: &str) -> Option<usize> {
     let sign = usize::from(s.starts_with('-'));
     let rest = &s[sign..];
@@ -191,8 +190,8 @@ fn number(s: &str) -> Option<usize> {
     (fraction > 0).then_some(sign + 1 + fraction)
 }
 
-/// `"(?>[^\n\r\f"\\]|\\?{nl}|{nonascii}|{escape})*"` and its single-quoted
-/// twin.
+/// `"(?>[^\n\r\f"\\]|\\?{nl}|{nonascii}|{escape})*"` and its twin with single
+/// quotes.
 fn string(s: &str) -> Option<usize> {
     let quote = first(s).filter(|&c| c == '"' || c == '\'')?;
     let unit = |s: &str| -> Option<usize> {

@@ -45,9 +45,9 @@ module Lobzique
 
       private
 
-      # A binary string's encoding comes from its byte order mark, the
-      # content type, or a `<meta charset>` in its first 1024 bytes, falling
-      # back to ISO-8859-1.
+      # The encoding of a binary string comes from its byte order mark,
+      # the content type, or a `<meta charset>` in its first 1024 bytes.
+      # The fallback is ISO-8859-1.
       def reencode(body, content_type = nil)
         if body.encoding == Encoding::ASCII_8BIT
           encoding = nil
@@ -82,7 +82,7 @@ module Lobzique
           end
         end
 
-        # lobzique: Nokogiri raises on a byte the encoding doesn't have
+        # lobzique: Nokogiri raises on a byte that the encoding does not have.
         body.encode(Encoding::UTF_8, invalid: :replace, undef: :replace)
       end
     end

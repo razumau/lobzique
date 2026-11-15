@@ -1,5 +1,3 @@
-//! `XML::Comment`.
-
 use super::document;
 use super::node::{finish_new, NODE};
 use super::CHARACTER_DATA;

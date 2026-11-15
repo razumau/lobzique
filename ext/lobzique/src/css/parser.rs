@@ -1,6 +1,6 @@
-//! `CSS::Parser#xpath_for`, which in Nokogiri parses the selector into
-//! `CSS::Node`s for the visitor to walk. Here the core does both, so the
-//! visitor only configures it (ARCHITECTURE.md).
+//! `CSS::Parser#xpath_for`. In Nokogiri it parses the selector
+//! into `CSS::Node`s for the visitor to walk. Here the core does
+//! both, so the visitor only configures it (ARCHITECTURE.md).
 
 use crate::CSS;
 use lobzique_core::css::{self, Visitor};
@@ -19,7 +19,7 @@ fn xpath_for(
     let prefix: RString = visitor.funcall("prefix", ())?;
     let namespaces: Value = visitor.funcall("namespaces", ())?;
     let visitor = Visitor {
-        // OPTIMAL asks Nokogiri.uses_libxml?, and lobzique has the builtins
+        // OPTIMAL asks Nokogiri.uses_libxml?, and lobzique has the builtins.
         builtins: builtins.name()? != "never",
         html5: doctype.name()? == "html5",
         default_namespace: !namespaces.is_nil()

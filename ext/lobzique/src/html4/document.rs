@@ -1,5 +1,3 @@
-//! `HTML4::Document`.
-
 use crate::support::{c_string, call_initialize, optional_arg};
 use crate::xml::document::{wrap_document, DOCUMENT};
 use crate::HTML4;
@@ -12,8 +10,9 @@ pub static HTML4_DOCUMENT: Lazy<RClass> = Lazy::new(|ruby| {
         .unwrap()
 });
 
-/// `HTML4::Document.new(uri = nil, external_id = nil, *rest)`, which starts
-/// with libxml2's default HTML 4.0 doctype; `HTML5::Document.new` inherits it.
+/// `HTML4::Document.new(uri = nil, external_id = nil, *rest)`. It starts
+/// with the default HTML 4.0 doctype of libxml2. `HTML5::Document.new` inherits
+/// it.
 fn new(ruby: &Ruby, class: RClass, args: &[Value]) -> Result<Value, Error> {
     let truthy_string = |index| -> Result<Option<Vec<u8>>, Error> {
         let value = optional_arg(ruby, args, index);

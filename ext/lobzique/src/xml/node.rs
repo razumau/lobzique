@@ -1,4 +1,4 @@
-//! `XML::Node`, and the wrapper every node object shares, documents included.
+//! `XML::Node` and the wrapper that all node objects share, documents included.
 
 use super::ELEMENT;
 use super::{
@@ -31,31 +31,36 @@ pub static NODE: Lazy<RClass> = Lazy::new(|ruby| {
         .unwrap()
 });
 
-/// The data behind every node object. A node is its document plus its id in
-/// that document's arena; both change when the node moves to another
-/// document. A document is the node that owns the arena, so `Document <
-/// Node` works without a second data type.
+/// The data behind every node object. A node is its document plus its id
+/// in the arena of that document. Both change when the node moves to another
+/// document. A document is the node that owns the arena, so `Document < Node`
+/// works without a second data type.
 ///
-/// Its objects are write-barrier protected, so that a minor GC doesn't mark
-/// every node object of every live document. The two Ruby references are
-/// therefore stored only by `complete_document` and `repoint`, which tell
-/// the GC.
+/// Its objects are write-barrier protected, so that a minor GC does not mark
+/// every node object of every live document. Only `complete_document`
+/// and `repoint` store the two Ruby references, and they tell the GC.
 #[derive(Default, TypedData)]
-#[magnus(class = "Lobzique::XML::Node", mark, compact, size, free_immediately, wb_protected)]
+#[magnus(
+    class = "Lobzique::XML::Node",
+    mark,
+    compact,
+    size,
+    free_immediately,
+    wb_protected
+)]
 pub struct Node {
     /// `None` only on an object made with `allocate` and never initialized.
     /// Typed, so that reaching the arena from a node needs no check.
     document: Cell<Option<Opaque<Obj<Node>>>>,
     id: Cell<Option<NodeId>>,
-    /// Boxed so that the other nodes' objects don't carry an empty one.
+    /// Boxed, so that the objects of other nodes do not carry an empty one.
     owned: OnceCell<Box<Owned>>,
 }
 
-/// What only a document's object has.
 struct Owned {
     arena: RefCell<dom::Document>,
-    /// Node objects by node id: Nokogiri's `@node_cache`. `None` until the
-    /// document's own object exists.
+    /// Node objects by node id: the `@node_cache` of Nokogiri. `None`
+    /// until the own object of the document exists.
     cache: Cell<Option<Opaque<RArray>>>,
 }
 
@@ -84,12 +89,14 @@ impl DataTypeFunctions for Node {
         }
     }
 
-    /// A document reports its arena, which holds all of its nodes.
     fn size(&self) -> usize {
         let Some(owned) = self.owned.get() else {
             return size_of::<Self>();
         };
-        let heap = owned.arena.try_borrow().map_or(0, |arena| arena.heap_size());
+        let heap = owned
+            .arena
+            .try_borrow()
+            .map_or(0, |arena| arena.heap_size());
         size_of::<Self>() + size_of::<Owned>() + heap
     }
 }
@@ -103,8 +110,8 @@ impl Node {
         }
     }
 
-    /// The document node's own data, which owns the arena. It isn't usable
-    /// before [`Node::complete_document`].
+    /// The data of the document node itself, which owns the arena.
+    /// It is not usable before [`Node::complete_document`].
     pub fn new_document(arena: dom::Document) -> Node {
         Node {
             document: Cell::new(None),
@@ -113,8 +120,8 @@ impl Node {
         }
     }
 
-    /// Gives an allocated, empty object the arena it is the document of;
-    /// `false` if it has one already.
+    /// Gives an allocated, empty object the arena that it is the document
+    /// of. `false` if it has one already.
     pub fn adopt_arena(&self, arena: dom::Document) -> bool {
         if self.owned.set(Owned::new(arena)).is_err() {
             return false;
@@ -123,8 +130,8 @@ impl Node {
         true
     }
 
-    /// Once a document's Ruby object exists: it is its own document, and
-    /// starts with an empty node cache.
+    /// Called once the Ruby object of a document exists. It is its own document
+    /// and starts with an empty node cache.
     pub fn complete_document(ruby: &Ruby, document: Obj<Node>) {
         document.document.set(Some(document.into()));
         if let Some(owned) = document.owned.get() {
@@ -134,8 +141,8 @@ impl Node {
         }
     }
 
-    /// Points the object at another node, possibly in another document, as
-    /// Nokogiri resets `DATA_PTR` after copying or merging a node.
+    /// Points the object at another node, possibly in another document,
+    /// as Nokogiri resets `DATA_PTR` after it copies or merges a node.
     fn repoint(node: Obj<Node>, document: Obj<Node>, id: NodeId) {
         node.document.set(Some(document.into()));
         node.id.set(Some(id));
@@ -151,12 +158,10 @@ impl Node {
         })
     }
 
-    /// A document's arena.
     pub fn arena(&self, ruby: &Ruby) -> Result<&RefCell<dom::Document>, Error> {
         Ok(&self.owned(ruby)?.arena)
     }
 
-    /// A document's node cache.
     fn cache(&self, ruby: &Ruby) -> Result<RArray, Error> {
         let cache = self.owned(ruby)?.cache.get();
         Ok(ruby.get_inner(cache.expect("a document object has a node cache")))
@@ -173,8 +178,8 @@ impl Node {
         self.id.get().ok_or_else(|| uninitialized(ruby))
     }
 
-    /// Runs `f` on the node's arena, under the rules of
-    /// [`document::with_arena`] (plan.md decision 5).
+    /// Runs `f` on the arena of the node, under the rules
+    /// of [`document::with_arena`] (plan.md decision 5).
     pub fn with_arena<R: Send>(
         &self,
         ruby: &Ruby,
@@ -201,7 +206,6 @@ impl Node {
         rb_self.document(ruby)
     }
 
-    /// The node object for the node `f` finds from this one, if any.
     fn wrap_found(
         &self,
         ruby: &Ruby,
@@ -296,7 +300,6 @@ impl Node {
         })
     }
 
-    /// `Node#[]`'s native half.
     fn get(ruby: &Ruby, rb_self: &Self, name: Value) -> Result<Option<RString>, Error> {
         let Some(name) = optional_c_string(name)? else {
             return Ok(None);
@@ -321,17 +324,17 @@ impl Node {
         Ok(utf8_string(ruby, path.as_deref().unwrap_or(b"?")))
     }
 
-    /// Unique among live nodes, as libxml2's node address is: the address
-    /// of the document's data, which doesn't move, and the node's id.
+    /// Unique among live nodes, as the address of a libxml2 node
+    /// is: the address of the data of the document, which does not move,
+    /// and the id of the node.
     fn pointer_id(ruby: &Ruby, rb_self: &Self) -> Result<u128, Error> {
         let document = rb_self.document(ruby)?;
         let address = &*document as *const Node as usize;
         Ok((address as u128) << 32 | rb_self.id(ruby)?.index() as u128)
     }
 
-    /// `xmlXPathCmpNodes(other, self)`: 1 if this node comes after `other`,
-    /// -1 if before, 0 if they are the same, -2 if they are in different
-    /// trees.
+    /// `xmlXPathCmpNodes(other, self)`: 1 if this node comes after `other`, -1
+    /// if before, 0 if they are the same, -2 if they are in different trees.
     fn compare(ruby: &Ruby, rb_self: &Self, other: Value) -> Result<i8, Error> {
         let other = <&Node>::try_convert(other)?;
         let document = rb_self.document(ruby)?;
@@ -400,8 +403,8 @@ impl Node {
         Ok(utf8_string(ruby, html))
     }
 
-    /// libxml2's XML and XHTML output of the node, transcoded and written to
-    /// `io`.
+    /// The XML and XHTML output of libxml2 for the node, transcoded and written
+    /// to `io`.
     fn native_write_to(
         ruby: &Ruby,
         rb_self: &Self,
@@ -432,8 +435,8 @@ impl Node {
         rb_self.with_arena(ruby, html5::prepend_newline)
     }
 
-    /// The options are libxml2's parser options, which the HTML5 parser has
-    /// no use for; they are still converted as Nokogiri converts them.
+    /// The options are the parser options of libxml2. The HTML5 parser does
+    /// not use them, but they are still converted as Nokogiri converts them.
     fn in_context(
         ruby: &Ruby,
         rb_self: &Self,
@@ -464,7 +467,7 @@ impl Node {
         Ok(rb_self)
     }
 
-    /// `Node#[]=`'s native half: `nil`, and no change, unless an element.
+    /// `Node#[]=`, native half: `nil`, and no change, unless an element.
     fn set(ruby: &Ruby, rb_self: &Self, name: Value, value: Value) -> Result<Value, Error> {
         let is_element =
             rb_self.with_arena(ruby, |arena, id| arena.node_type(id) == NodeType::Element)?;
@@ -522,9 +525,9 @@ impl Node {
     }
 
     /// `initialize_copy_with_args(other, level, new_parent_doc)`, after
-    /// `Object#dup` or `#clone` has allocated the copy: `xmlDocCopyNode`,
-    /// then the object is cached and decorated. `nil` for nodes libxml2
-    /// doesn't copy, such as doctypes.
+    /// `Object#dup` or `#clone` has allocated the copy: `xmlDocCopyNode`. Then
+    /// the object is cached and decorated. `nil` for nodes that libxml2 does
+    /// not copy, such as doctypes.
     fn initialize_copy_with_args(
         ruby: &Ruby,
         rb_self: Obj<Self>,
@@ -537,8 +540,8 @@ impl Node {
             let message = format!("argument must be a kind of {}", node_class.inspect());
             return Err(Error::new(ruby.exception_type_error(), message));
         }
-        // `Object#dup` hands over a fresh object; repointing a live one
-        // would leave it in its old node's cache slot
+        // `Object#dup` hands over a fresh object. Repointing a live one would
+        // leave it in the cache slot of its old node.
         if rb_self.data_ptr_p() {
             return Err(Error::new(
                 ruby.exception_runtime_error(),
@@ -566,7 +569,6 @@ impl Node {
         Ok(Some(rb_self))
     }
 
-    /// [`Node::with_arena`] with a mutable borrow.
     pub fn with_arena_mut<R: Send>(
         &self,
         ruby: &Ruby,
@@ -577,11 +579,11 @@ impl Node {
     }
 }
 
-/// Nokogiri's `reparent_node_with`. A node that the core copied, because
-/// it is text or from another document, or merged into neighboring text,
-/// keeps its object, which is pointed at what went into the tree; that
-/// node gets an object of its own, which is decorated and returned. As in
-/// Nokogiri, a text node's original loses its cached object.
+/// Nokogiri's `reparent_node_with`. The core can copy a node because it is text
+/// or from another document, or merge it into neighboring text. That node keeps
+/// its object, which is pointed at what went into the tree. What went
+/// into the tree gets an object of its own, which is decorated and returned.
+/// As in Nokogiri, the original of a text node loses its cached object.
 fn reparent(ruby: &Ruby, pivot: &Node, node: Value, position: Position) -> Result<Value, Error> {
     let node_class = ruby.get_inner(&NODE);
     if !node.is_kind_of(node_class) || node.is_kind_of(ruby.get_inner(&document::DOCUMENT)) {
@@ -635,10 +637,10 @@ fn reparent(ruby: &Ruby, pivot: &Node, node: Value, position: Position) -> Resul
     Ok(reparented)
 }
 
-/// The output in the encoding libxml2 would transcode it into, with
-/// `&#NNN;` for characters the encoding lacks, as libxml2's encoder
-/// writes them. `None` for an encoding Ruby doesn't know, for which libxml2
-/// writes nothing.
+/// The output in the encoding that libxml2 would transcode it to, with `&#NNN;`
+/// for characters that the encoding lacks, as the encoder of libxml2 writes
+/// them. `None` for an encoding that Ruby does not know. libxml2 writes nothing
+/// for it.
 fn transcode(ruby: &Ruby, output: xml::Output) -> Result<Option<RString>, Error> {
     let string = utf8_string(ruby, output.bytes);
     let Some(label) = output.encoding else {
@@ -674,8 +676,8 @@ fn character_reference(
     Ok(format!("&#{character};"))
 }
 
-/// `noko_io_write`: the bytes tagged with the IO's external encoding, or as
-/// binary. If the write raises a StandardError, the output ends there.
+/// `noko_io_write`: the bytes tagged with the external encoding of the IO,
+/// or as binary. If the write raises a StandardError, the output ends there.
 fn write_to_io(ruby: &Ruby, io: Value, string: RString) -> Result<(), Error> {
     let external_encoding: Value = if io.respond_to("external_encoding", false)? {
         io.funcall("external_encoding", ())?
@@ -694,7 +696,6 @@ fn write_to_io(ruby: &Ruby, io: Value, string: RString) -> Result<(), Error> {
     }
 }
 
-/// A string argument as [`c_string`] reads it, or `None` for `nil`.
 fn optional_c_string(value: Value) -> Result<Option<Vec<u8>>, Error> {
     if value.is_nil() {
         Ok(None)
@@ -728,7 +729,6 @@ fn wrap_namespaces(
     Ok(array)
 }
 
-/// The node objects for `ids`, in an Array.
 pub fn wrap_all(ruby: &Ruby, document: Obj<Node>, ids: Vec<NodeId>) -> Result<RArray, Error> {
     let nodes = ruby.ary_new_capa(ids.len());
     for id in ids {
@@ -752,10 +752,10 @@ fn uninitialized(ruby: &Ruby) -> Error {
     Error::new(ruby.exception_runtime_error(), message)
 }
 
-/// The one Ruby object for a node, created on first use: Nokogiri's
-/// `noko_xml_node_wrap`. The class follows the node type unless `class` is
-/// given. A new object goes into the document's node cache and through
-/// `Document#decorate`; `initialize` is not called.
+/// The one Ruby object for a node, created on first use:
+/// the `noko_xml_node_wrap` of Nokogiri. The class follows the node type unless
+/// `class` is given. A new object goes into the node cache of the document
+/// and through `Document#decorate`. `initialize` is not called.
 pub fn wrap_as(
     ruby: &Ruby,
     document: Obj<Node>,
@@ -791,7 +791,8 @@ fn cache_index(id: NodeId) -> isize {
     isize::try_from(id.index()).expect("node ids fit in an isize")
 }
 
-/// Nokogiri's table from node type to class, for the types an HTML tree has.
+/// The table of Nokogiri from node type to class, for the types of an HTML
+/// tree.
 fn class_for(ruby: &Ruby, node_type: NodeType) -> RClass {
     match node_type {
         NodeType::Element => ruby.get_inner(&ELEMENT),
@@ -807,8 +808,8 @@ fn class_for(ruby: &Ruby, node_type: NodeType) -> RClass {
     }
 }
 
-/// The document a new node goes into. Passing another node instead is
-/// deprecated in Nokogiri and resolves to that node's document.
+/// The document that a new node goes into. Nokogiri deprecates passing another
+/// node instead. It resolves to the document of that node.
 pub fn document_for_new_node(
     ruby: &Ruby,
     document: Value,
@@ -821,7 +822,7 @@ pub fn document_for_new_node(
     <&Node>::try_convert(document)?.document(ruby)
 }
 
-/// Shared tail of Nokogiri's native constructors: wrap as the receiving
+/// Shared tail of the native constructors of Nokogiri: wrap as the receiving
 /// class, run `initialize` with the original arguments, then yield.
 pub fn finish_new(
     ruby: &Ruby,
@@ -852,7 +853,7 @@ fn new(ruby: &Ruby, class: RClass, args: &[Value]) -> Result<Value, Error> {
     )?;
     let name = element_name(ruby, c_string(args[0])?)?;
     let id = document::with_arena_mut(ruby, document, |arena| arena.create_element_named(&name))?;
-    // `Node.new` gives an Element, as libxml2's node type decides
+    // `Node.new` gives an Element, as the node type of libxml2 decides.
     let class = if class.equal(node_class)? {
         ruby.get_inner(&ELEMENT)
     } else {
@@ -861,8 +862,8 @@ fn new(ruby: &Ruby, class: RClass, args: &[Value]) -> Result<Value, Error> {
     finish_new(ruby, document, id, class, args)
 }
 
-/// Names are atoms shared with the parser and selector engine, so unlike
-/// Nokogiri's they must be UTF-8 (ARCHITECTURE.md, departures).
+/// Names are atoms that the parser and the selector engine share, so they must
+/// be UTF-8, unlike in Nokogiri (ARCHITECTURE.md, departures).
 fn element_name(ruby: &Ruby, name: Vec<u8>) -> Result<String, Error> {
     String::from_utf8(name)
         .map_err(|_| Error::new(ruby.exception_arg_error(), "invalid byte sequence in UTF-8"))

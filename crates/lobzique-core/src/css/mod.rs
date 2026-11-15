@@ -1,9 +1,9 @@
-//! Nokogiri's CSS dialect, compiled into the XPath that Nokogiri's visitor
-//! would write for it (ARCHITECTURE.md). The tokenizer, the parser's tables
-//! and the visitor are ported from Nokogiri, so a selector selects what it
-//! selects there, quirks and all: `a:first` is the first `a` among its
-//! siblings, `node.css("div p")` finds only `div`s inside `node`, and
-//! `[x^=""]` matches elements without `x`.
+//! Nokogiri's CSS dialect, compiled to the XPath that the visitor of Nokogiri
+//! would write for it (ARCHITECTURE.md). The tokenizer, the tables
+//! of the parser and the visitor are ported from Nokogiri. A selector thus
+//! selects what it selects there, quirks included: `a:first` is the first
+//! `a` among its siblings, `node.css("div p")` finds only `div`s inside `node`,
+//! and `[x^=""]` matches elements without `x`.
 
 mod parser;
 mod tables;
@@ -17,7 +17,6 @@ use crate::xpath::{self, Expr, Query};
 use std::fmt;
 use translate::{Failure, Translator};
 
-/// A CSS syntax error, Nokogiri's `CSS::SyntaxError`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SyntaxError(pub String);
 
@@ -29,24 +28,19 @@ impl fmt::Display for SyntaxError {
 
 impl std::error::Error for SyntaxError {}
 
-/// The XPath prefixes Nokogiri puts before a selector, the implied
+/// The XPath prefixes that Nokogiri puts before a selector: the implied
 /// contexts of each searchable class.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Prefix {
-    /// `//`, from a document
     Global,
-    /// `.//`, from a node
     Subtree,
-    /// `./`, for `Searchable#>`
     Current,
-    /// `/`
     Root,
-    /// `self::`, which node sets and fragments add to `.//`
+    /// `self::`, which node sets and fragments add to `.//`.
     Self_,
 }
 
 impl Prefix {
-    /// The prefix Nokogiri writes as `prefix`.
     pub fn parse(prefix: &str) -> Option<Prefix> {
         Some(match prefix {
             "//" => Prefix::Global,
@@ -59,16 +53,13 @@ impl Prefix {
     }
 }
 
-/// What Nokogiri's `XPathVisitor` is configured with.
 #[derive(Clone, Debug)]
 pub struct Options {
-    /// Names without a prefix match in any namespace, as for HTML5
-    /// documents.
+    /// Names without a prefix match in any namespace, as for HTML5 documents.
     pub html: bool,
-    /// Nokogiri's builtin `css-class` for classes.
     pub builtins: bool,
-    /// The namespace bindings have an `xmlns` key, a default namespace for
-    /// names without a prefix (outside HTML).
+    /// The namespace bindings have an `xmlns` key. It is the default namespace
+    /// for names without a prefix (outside HTML).
     pub default_namespace: bool,
     pub prefixes: Vec<Prefix>,
     /// Only the first selector of a list, as `Searchable#>` takes it. The
@@ -76,15 +67,13 @@ pub struct Options {
     pub first_only: bool,
 }
 
-/// A compiled selector list. `query` holds the error libxml2 would raise
-/// for the XPath Nokogiri builds, which surfaces only when it is evaluated.
+/// A compiled selector list. `query` holds the error that libxml2 would raise
+/// for the XPath that Nokogiri builds. It appears only on evaluation.
 #[derive(Debug)]
 pub struct Selector {
     pub query: Result<Query, xpath::Error>,
 }
 
-/// `CSS.xpath_for` with the visitor `options` describe, for every implied
-/// prefix, joined with `|`.
 pub fn compile(rule: &str, options: &Options) -> Result<Selector, SyntaxError> {
     if rule.is_empty() {
         return Err(SyntaxError("empty CSS selector".into()));
@@ -95,7 +84,7 @@ pub fn compile(rule: &str, options: &Options) -> Result<Selector, SyntaxError> {
     let mut invalid = false;
     for prefix in &options.prefixes {
         for (index, selector) in selectors.iter().enumerate() {
-            // `.first` comes after the visitor has translated every selector
+            // `.first` comes after the visitor has translated every selector.
             let kept = index == 0 || !options.first_only;
             match translator.selector(selector, *prefix) {
                 Ok(path) if kept => paths.push(path),
@@ -114,24 +103,18 @@ pub fn compile(rule: &str, options: &Options) -> Result<Selector, SyntaxError> {
     Ok(Selector { query })
 }
 
-/// What Nokogiri's `XPathVisitor` is configured with when it writes XPath
-/// for `CSS.xpath_for`.
 #[derive(Clone, Debug)]
 pub struct Visitor {
-    /// Nokogiri's builtin functions for classes and HTML5 names.
     pub builtins: bool,
-    /// Names without a prefix match in any namespace. Unlike
-    /// [`Options::html`], not for HTML4: Nokogiri's HTML4 documents have no
-    /// namespaces.
+    /// Names without a prefix match in any namespace. Unlike [`Options::html`],
+    /// not for HTML4: the HTML4 documents of Nokogiri have no namespaces.
     pub html5: bool,
-    /// The namespace bindings have an `xmlns` key.
     pub default_namespace: bool,
-    /// Pasted before each selector, whatever it is.
     pub prefix: String,
 }
 
 /// `CSS::Parser#xpath_for`: an XPath string for each selector of the list,
-/// as Nokogiri's visitor writes them.
+/// as the visitor of Nokogiri writes it.
 pub fn xpath_for(rule: &str, visitor: &Visitor) -> Result<Vec<String>, SyntaxError> {
     if rule.is_empty() {
         return Err(SyntaxError("empty CSS selector".into()));

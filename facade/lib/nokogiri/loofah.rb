@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-# lobzique's own (plan.md phase 5): on the facade, Loofah's scrub! runs
-# unpatched, so it would leave raw text in a <select> as html5ever keeps it.
-# This adds the step Lobzique::Sanitizer's scrub! ends with
-# (lobzique/sanitizer/escape_raw_text_in_select.rb).
+# lobzique's own (plan.md phase 5). On the facade, the scrub! of Loofah runs
+# unpatched, so it would leave raw text in a <select> as html5ever keeps
+# it. This adds the step that the scrub! of Lobzique::Sanitizer ends
+# with (lobzique/sanitizer/escape_raw_text_in_select.rb).
 
 require "lobzique/sanitizer/escape_raw_text_in_select"
 
@@ -18,7 +18,7 @@ module Nokogiri
         end
       end
 
-      # Opens Loofah's module ahead of Loofah, which reopens it to define
+      # Opens the module of Loofah ahead of Loofah, which reopens it to define
       # scrub!.
       def self.patch
         node = %i[ScrubBehavior Node].inject(::Loofah) do |mod, name|
@@ -27,8 +27,8 @@ module Nokogiri
         node.prepend(ScrubBehaviorNode)
       end
 
-      # Loofah requires nokogiri before it defines anything, so the patch
-      # waits for the Loofah constant. The hook is gone once it has run.
+      # Loofah requires nokogiri before it defines anything, so the patch waits
+      # for the Loofah constant. The hook is removed after it runs.
       module WhenLoofahIsDefined
         def const_added(name)
           super

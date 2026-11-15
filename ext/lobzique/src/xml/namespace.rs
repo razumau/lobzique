@@ -1,5 +1,3 @@
-//! `XML::Namespace`: a node's namespace, as libxml2 records it.
-
 use super::node::utf8_string;
 use crate::XML;
 use magnus::{
@@ -14,7 +12,7 @@ pub static NAMESPACE: Lazy<RClass> = Lazy::new(|ruby| {
 });
 
 /// A copy of the prefix and URI. libxml2 shares one `xmlNs` among the nodes
-/// that use it, and Nokogiri one object; here each call makes a new one
+/// that use it, and Nokogiri one object. Here each call makes a new one
 /// (ARCHITECTURE.md, departures).
 #[derive(TypedData)]
 #[magnus(class = "Lobzique::XML::Namespace", free_immediately)]
@@ -38,7 +36,6 @@ impl Namespace {
     }
 }
 
-/// `noko_xml_namespace_wrap` for a namespace in `document`.
 pub fn wrap(
     ruby: &Ruby,
     document: Value,

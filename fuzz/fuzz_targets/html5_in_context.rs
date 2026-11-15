@@ -1,9 +1,9 @@
 #![no_main]
 
-//! Parsing pieces of input in context, one after another in one document,
-//! must leave a consistent tree: each parse returns unlinked nodes and adds
-//! nothing to the document but them, and a parse that fails adds nothing.
-//! The first byte picks the context; NUL bytes split the rest into pieces.
+//! Pieces of input parsed in context, one after another in one document, must
+//! leave a consistent tree. Each parse returns unlinked nodes and adds nothing
+//! else to the document. A failed parse adds nothing. The first byte picks
+//! the context. NUL bytes split the rest into pieces.
 
 use libfuzzer_sys::fuzz_target;
 use lobzique_core::dom::{Document, DocumentKind};
@@ -28,7 +28,7 @@ fuzz_target!(|data: &[u8]| {
         max_errors: Some(100),
         max_tree_depth: Some(400),
         parse_noscript_content_as_text: false,
-        // as Node#in_context parses
+        // As Node#in_context parses.
         keep_bom: true,
     };
     let (namespace, name) = CONTEXTS[usize::from(selector) % CONTEXTS.len()];

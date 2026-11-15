@@ -1,5 +1,3 @@
-//! `XML::Attr`: attributes are nodes, as in libxml2.
-
 use super::node::{Node, NODE};
 use crate::support::c_string;
 use crate::XML;
@@ -11,7 +9,7 @@ pub static ATTR: Lazy<RClass> = Lazy::new(|ruby| {
         .unwrap()
 });
 
-/// `Attr#value=`; `nil` empties the value.
+/// `Attr#value=`. `nil` empties the value.
 fn set_value(ruby: &Ruby, rb_self: &Node, content: Value) -> Result<Value, Error> {
     let value = if content.is_nil() {
         Vec::new()

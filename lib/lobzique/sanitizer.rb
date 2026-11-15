@@ -6,9 +6,9 @@
 #   config.action_view.sanitizer_vendor = Lobzique::Sanitizer
 #   config.action_text.sanitizer_vendor = Lobzique::Sanitizer
 #
-# Loofah's and Rails' scrubbers run on lobzique nodes unchanged; only
-# Loofah's documents, scrub! and the scrubbers that build Nokogiri nodes are
-# ported.
+# The scrubbers of Loofah and Rails run unchanged on lobzique nodes. Only
+# the documents and scrub! of Loofah, and the scrubbers that build Nokogiri
+# nodes, are ported.
 
 require "lobzique"
 require "loofah"
@@ -16,8 +16,8 @@ require "rails-html-sanitizer"
 
 module Lobzique
   module Sanitizer
-    # The vendor classes include rails-html-sanitizer's concerns, which are
-    # its internals, so only the versions the tests ran on are accepted.
+    # The vendor classes include the concerns of rails-html-sanitizer,
+    # which are internals. Only the versions that the tests ran on are accepted.
     RAILS_HTML_SANITIZER_REQUIREMENT = Gem::Requirement.new(">= 1.7.1", "< 1.8")
 
     unless RAILS_HTML_SANITIZER_REQUIREMENT.satisfied_by?(Gem::Version.new(Rails::HTML::Sanitizer::VERSION))
@@ -35,8 +35,8 @@ require_relative "sanitizer/document_fragment"
 
 module Lobzique
   module Sanitizer
-    # Rails::HTML::Concern::Parser::HTML5, with lobzique's fragment in place
-    # of Loofah's.
+    # Rails::HTML::Concern::Parser::HTML5, with the fragment of lobzique
+    # in place of the fragment of Loofah.
     module Parser
       def parse_fragment(html)
         DocumentFragment.parse(html)
@@ -44,8 +44,8 @@ module Lobzique
     end
 
     # The vendor stands in for Rails::HTML5, so its safe list sanitizer reads
-    # and writes that one's lists: apps and gems edit them on Rails' class
-    # by name.
+    # and writes the lists of Rails::HTML5. Apps and gems edit them on the class
+    # of Rails by name.
     module RailsAllowedLists
       %i[allowed_tags allowed_tags= allowed_attributes allowed_attributes=].each do |name|
         define_method(name) { |*args| Rails::HTML5::SafeListSanitizer.public_send(name, *args) }
@@ -74,7 +74,6 @@ module Lobzique
       singleton_class.prepend(RailsAllowedLists)
     end
 
-    # The vendor interface, as Rails::HTML5::Sanitizer has it.
     class << self
       def full_sanitizer
         FullSanitizer

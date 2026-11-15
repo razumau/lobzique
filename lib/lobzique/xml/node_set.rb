@@ -11,13 +11,13 @@ module Lobzique
 
       attr_accessor :document
 
-      # lobzique: Nokogiri implements the methods from here to #initialize in
-      # C over libxml2's xmlNodeSet. Here they work on an Array, which Ruby's
-      # GC already marks.
+      # lobzique: Nokogiri implements the methods from here to #initialize in C
+      # over the xmlNodeSet of libxml2. Here they work on an Array, which the GC
+      # of Ruby already marks.
 
-      # Nokogiri's C noko_xml_node_set_wrap: a decorated set of +nodes+,
-      # which must be distinct, without #initialize or a duplicate check per
-      # node. Native search results come through here.
+      # Port of the C noko_xml_node_set_wrap of Nokogiri: a decorated set
+      # of +nodes+, which must be distinct, without #initialize or a duplicate
+      # check for each node. Native search results come through here.
       def self.wrap(document, nodes) # :nodoc:
         allocate.send(:adopt, document, nodes)
       end
@@ -151,7 +151,7 @@ module Lobzique
         find_all { |node| node.matches?(expr) }
       end
 
-      # lobzique: native in Nokogiri, which also calls each node's #unlink
+      # lobzique: native in Nokogiri, which also calls the #unlink of each node.
       def unlink
         each { |node| node.unlink unless node.is_a?(XML::Namespace) }
         self

@@ -15,7 +15,7 @@ use crate::XML;
 use magnus::{value::Lazy, Error, Module, RClass, Ruby};
 use node::NODE;
 
-// Nokogiri defines these two in nokogiri.c, with no native methods
+// Nokogiri defines these two in nokogiri.c, with no native methods.
 pub static ELEMENT: Lazy<RClass> = Lazy::new(|ruby| {
     ruby.get_inner(&XML)
         .define_class("Element", ruby.get_inner(&NODE))

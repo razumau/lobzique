@@ -3,12 +3,13 @@ use html5ever::ns;
 
 impl Document {
     /// Verifies that every link in the arena agrees with its counterpart.
-    /// For tests and fuzz targets; linear in the size of the arena.
+    /// For tests and fuzz targets. Linear in the size of the arena.
     pub fn check_invariants(&self) -> Result<(), String> {
         if self.parent(NodeId::DOCUMENT).is_some() {
             return Err("the document node has a parent".into());
         }
-        // Set when a node is reached from its parent's children or attributes
+        // Set when a node is reached from the children or attributes
+        // of its parent.
         let mut listed = vec![false; self.nodes.len()];
         for id in self.node_ids() {
             if id != NodeId::DOCUMENT && matches!(self.node_kind(id), NodeKind::Document) {
@@ -34,8 +35,8 @@ impl Document {
     }
 
     /// An element in no namespace, in libxml2's terms, is in the namespace
-    /// that stands for none in this kind of document, and a name with a
-    /// prefix has a local part.
+    /// that stands for none in this kind of document. A name with a prefix has
+    /// a local part.
     fn check_names(&self) -> Result<(), String> {
         let default_namespace = self.default_namespace();
         for id in self.node_ids() {
@@ -61,7 +62,8 @@ impl Document {
         Ok(())
     }
 
-    /// Document order numbered by comparisons is what numbering now gives.
+    /// The document order that comparisons numbered is the one that numbering
+    /// gives now.
     fn check_order(&self) -> Result<(), String> {
         let Some(order) = self.order.get() else {
             return Ok(());
@@ -83,7 +85,7 @@ impl Document {
         let mut previous = None;
         let mut next = self.first_child(id);
         while let Some(child) = next {
-            // Also ends a sibling list that loops back on itself
+            // Also ends a sibling list that loops back on itself.
             if std::mem::replace(&mut listed[child.index()], true) {
                 return Err(format!("{child:?} is listed twice"));
             }
@@ -125,8 +127,8 @@ impl Document {
         Ok(())
     }
 
-    /// Follows parent links from every node, remembering which nodes are
-    /// known to reach a root, so each link is followed once.
+    /// Follows the parent links from every node. It remembers which nodes reach
+    /// a root, so each link is followed once.
     fn check_acyclic(&self) -> Result<(), String> {
         #[derive(Clone, Copy, PartialEq)]
         enum Walk {

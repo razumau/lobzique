@@ -1,17 +1,16 @@
 #![no_main]
 
-//! Parsing any bytes as XPath must return a query or an error, and
-//! evaluating a query must return a value, with each node of a node set
-//! once and in document order, or an error. The input is the expression, a
-//! NUL, and markup to search. Custom calls get answers of every type.
+//! Any bytes parsed as XPath must return a query or an error. Evaluating
+//! a query must return a value or an error. Each node of a node set must appear
+//! once, in document order. The input is the expression, a NUL, and markup
+//! to search. Custom calls get answers of every type.
 //!
-//! Nested predicates cost the document's size to the power of their depth,
-//! as in libxml2, so expressions nested deeper than SHALLOW are evaluated
-//! only on tiny documents, whose node count to that power stays within
-//! BUDGET. A `following` or `preceding` step from many nodes costs about
-//! the square of the document's size, and so do the string functions on the
-//! document's string value, so the more steps and calls, the smaller the
-//! document.
+//! Nested predicates cost the size of the document to the power of their depth,
+//! as in libxml2. Expressions nested deeper than SHALLOW are evaluated only
+//! on tiny documents, whose node count to that power stays within BUDGET.
+//! A `following` or `preceding` step from many nodes costs about the square
+//! of the size of the document. So do the string functions on the string value
+//! of the document. The more steps and calls, the smaller the document.
 
 use libfuzzer_sys::fuzz_target;
 use lobzique_core::dom::{Document, NodeId};
@@ -94,7 +93,6 @@ fuzz_target!(|data: &[u8]| {
     }
 });
 
-/// How deep the expression's brackets go.
 fn nesting(expression: &[u8]) -> usize {
     let (mut depth, mut deepest) = (0usize, 0);
     for b in expression {

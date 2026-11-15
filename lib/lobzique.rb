@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 # Adapted from Nokogiri 1.19.7, lib/nokogiri.rb (MIT, see LICENSE-NOKOGIRI.md).
-# The extension defines the native classes first; these files reopen them.
+# The extension defines the native classes first. These files reopen them.
 
 require "lobzique/lobzique"
 

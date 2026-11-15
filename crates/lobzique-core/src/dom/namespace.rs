@@ -1,12 +1,11 @@
-//! Namespaces as libxml2 records them for Nokogiri: an element or attribute
-//! is in at most one, and elements carry the definitions that bring
+//! Namespaces as libxml2 records them for Nokogiri. An element or attribute
+//! is in at most one namespace. Elements carry the definitions that bring
 //! prefixes into scope (libxml2's `nsDef`).
 
 use super::{Document, NodeId, NodeKind};
 use html5ever::{ns, Namespace, Prefix};
 use std::iter;
 
-/// A namespace as libxml2 records it on a node: Nokogiri's `XML::Namespace`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NamespaceRef<'a> {
     pub prefix: Option<&'a str>,
@@ -29,21 +28,21 @@ impl<'a> From<&'a NamespaceDefinition> for NamespaceRef<'a> {
 }
 
 /// `prefix:local` split at the first colon, as libxml2's `xmlSplitQName2`
-/// splits it: `None` when either side would be empty.
+/// splits it. `None` when either side would be empty.
 pub(super) fn split_qualified_name(name: &str) -> Option<(&str, &str)> {
     name.split_once(':')
         .filter(|(prefix, local)| !prefix.is_empty() && !local.is_empty())
 }
 
-/// libxml2 binds the `xml` prefix in every document, with no definition.
 const XML: NamespaceRef<'static> = NamespaceRef {
     prefix: Some("xml"),
     href: "http://www.w3.org/XML/1998/namespace",
 };
 
 impl Document {
-    /// The node's namespace as Nokogiri shows it after an HTML5 parse: none
-    /// for HTML elements, and the prefix gumbo gives each foreign namespace.
+    /// The namespace of the node as Nokogiri shows it after an HTML5 parse:
+    /// none for HTML elements, and the prefix that gumbo gives each foreign
+    /// namespace.
     pub fn namespace(&self, id: NodeId) -> Option<NamespaceRef<'_>> {
         let (name, prefixes): (_, &[(Namespace, &str)]) = match self.node_kind(id) {
             NodeKind::Element(element) => {
@@ -73,7 +72,6 @@ impl Document {
         })
     }
 
-    /// The namespaces defined on an element, in the order they were added.
     pub fn namespace_definitions(&self, id: NodeId) -> &[NamespaceDefinition] {
         match self.node_kind(id) {
             NodeKind::Element(element) => &element.namespace_definitions,
@@ -107,9 +105,9 @@ impl Document {
         scopes
     }
 
-    /// The namespace `prefix` refers to at the node: libxml2's
-    /// `xmlSearchNs`, which also accepts the namespace of an ancestor
-    /// element that has no definition in scope.
+    /// The namespace that `prefix` refers to at the node: libxml2's
+    /// `xmlSearchNs`. It also accepts the namespace of an ancestor element
+    /// that has no definition in scope.
     pub fn search_namespace(&self, id: NodeId, prefix: &[u8]) -> Option<NamespaceRef<'_>> {
         if prefix == b"xml" {
             return Some(XML);

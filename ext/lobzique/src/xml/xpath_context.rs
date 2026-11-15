@@ -1,6 +1,6 @@
 //! `XML::XPathContext`: a context node, namespace and variable bindings,
-//! and `evaluate`. It evaluates the selectors `Searchable` compiles CSS
-//! into, and XPath strings (plan.md decision 2).
+//! and `evaluate`. It evaluates the selectors that `Searchable` compiles
+//! from CSS, and XPath strings (plan.md decision 2).
 
 use super::document;
 use super::node::{utf8_string, Node, NODE};
@@ -29,7 +29,7 @@ pub static XPATH_CONTEXT: Lazy<RClass> = Lazy::new(|ruby| {
 #[derive(TypedData)]
 #[magnus(class = "Lobzique::XML::XPathContext", mark, compact, free_immediately)]
 pub struct XPathContext {
-    /// The context node's object, which follows the node across documents.
+    /// The object of the context node. It follows the node across documents.
     node: Cell<Opaque<Value>>,
     namespaces: RefCell<HashMap<String, String>>,
     variables: RefCell<HashMap<String, Vec<u8>>>,
@@ -45,7 +45,6 @@ impl DataTypeFunctions for XPathContext {
     }
 }
 
-/// `XPathContext.new(node)`
 fn new(ruby: &Ruby, node: Value) -> Result<XPathContext, Error> {
     expect_node(ruby, node)?;
     Ok(XPathContext {
@@ -75,7 +74,7 @@ impl XPathContext {
         Ok(node)
     }
 
-    /// `register_ns(prefix, uri)`; a `nil` URI unbinds the prefix.
+    /// `register_ns(prefix, uri)`. A `nil` URI unbinds the prefix.
     fn register_ns(rb_self: Obj<Self>, prefix: Value, uri: Value) -> Result<Obj<Self>, Error> {
         let prefix = String::from_utf8_lossy(&c_string(prefix)?).into_owned();
         let mut namespaces = rb_self.namespaces.borrow_mut();
@@ -89,8 +88,7 @@ impl XPathContext {
         Ok(rb_self)
     }
 
-    /// `register_variable(name, value)`: a string variable, or none for
-    /// `nil`.
+    /// `register_variable(name, value)`: a string variable, or none for `nil`.
     fn register_variable(
         rb_self: Obj<Self>,
         name: Value,
@@ -107,10 +105,10 @@ impl XPathContext {
         Ok(rb_self)
     }
 
-    /// `evaluate(expression, handler = nil)`. Custom functions are the
-    /// handler's methods, called with the arguments libxml2 would pass, but
-    /// between evaluations rather than during one: each evaluation notes
-    /// the calls it has no answer for, and runs again once they are made
+    /// `evaluate(expression, handler = nil)`. Custom functions are methods
+    /// of the handler, called with the arguments that libxml2 would pass. They
+    /// run between evaluations, not during one: each evaluation records
+    /// the calls that it has no result for, and runs again after they are made
     /// (ARCHITECTURE.md, departures).
     fn evaluate(ruby: &Ruby, rb_self: &Self, args: &[Value]) -> Result<Value, Error> {
         ruby.check_arity(args.len(), 1..=2)?;
@@ -164,14 +162,14 @@ impl XPathContext {
     }
 }
 
-/// The object custom functions are methods of, and the call sites it has
-/// warned about.
+/// The object whose methods are the custom functions, and the call sites
+/// that it has warned about.
 struct Handler<'a> {
     object: Value,
     warned: &'a mut HashSet<usize>,
 }
 
-/// Nokogiri's `_noko_xml_xpath_context_handler_lookup`, then
+/// `_noko_xml_xpath_context_handler_lookup` of Nokogiri, then
 /// `Nokogiri_marshal_xpath_funcall_and_return_values`.
 fn call_handler(
     ruby: &Ruby,
@@ -182,11 +180,11 @@ fn call_handler(
 ) -> Result<Answer, Error> {
     let function = query.function(call.site);
     let name = function.local.as_str();
-    // libxml2 raises this only if it reaches the call
+    // libxml2 raises this only if it reaches the call.
     if handler.object.is_nil() || !handler.object.respond_to(name, false)? {
         return Ok(Err(xpath::Error::UnregisteredFunction));
     }
-    // libxml2 looks a function up once per call site
+    // libxml2 looks up a function once for each call site.
     if function.prefix.is_none() && handler.warned.insert(call.site) {
         warn_deprecated(&format!(
             "A custom XPath or CSS handler function named '{name}' is being invoked without a namespace. \
@@ -226,7 +224,7 @@ fn call_handler(
     let mut ids = Vec::with_capacity(members.len());
     for member in members {
         let Ok(node) = <&Node>::try_convert(member) else {
-            continue; // a Namespace
+            continue; // A Namespace.
         };
         if node.document(ruby)?.as_raw() != document.as_raw() {
             return Err(Error::new(
@@ -244,7 +242,6 @@ fn call_handler(
     Ok(Ok(xpath::Value::NodeSet(ids)))
 }
 
-/// Nokogiri's `_noko_xml_xpath_context__xpath2ruby`.
 fn to_ruby(ruby: &Ruby, document: Obj<Node>, value: xpath::Value<'static>) -> Result<Value, Error> {
     Ok(match value {
         xpath::Value::NodeSet(ids) => node_set::wrap(ruby, document, ids)?,
@@ -254,15 +251,16 @@ fn to_ruby(ruby: &Ruby, document: Obj<Node>, value: xpath::Value<'static>) -> Re
     })
 }
 
-/// An `XPath::SyntaxError` as Nokogiri makes one from libxml2's error:
+/// An `XPath::SyntaxError` as Nokogiri makes it from the error of libxml2:
 /// level ERROR, domain XPath, the expression in `str1`. For CSS, lobzique
-/// quotes the rule, where Nokogiri quotes the XPath it became.
+/// quotes the rule, where Nokogiri quotes the XPath that it became.
 fn xpath_error(ruby: &Ruby, error: xpath::Error, rule: &[u8]) -> Error {
     syntax_error(ruby, "SyntaxError", error.message(), error.code(), rule)
 }
 
-/// `XPath::UnsupportedError`: valid XPath that lobzique leaves out, raised
-/// as libxml2 would raise an invalid expression, naming the construct.
+/// `XPath::UnsupportedError`: valid XPath that lobzique leaves out.
+/// It is raised as libxml2 would raise an invalid expression, and names
+/// the construct.
 fn unsupported_error(ruby: &Ruby, construct: &str, expression: &[u8]) -> Error {
     let message = format!("Unsupported XPath: {construct}");
     let code = xpath::Error::InvalidExpression.code();

@@ -1,8 +1,8 @@
 use super::{NamespaceDefinition, NodeId, QualName};
 use std::mem::size_of;
 
-/// Node types numbered as libxml2 numbers them, which is what Nokogiri's
-/// `Node#type` and `Node::*_NODE` constants expose.
+/// Node types numbered as libxml2 numbers them. Nokogiri's `Node#type`
+/// and `Node::*_NODE` constants expose them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum NodeType {
@@ -32,8 +32,8 @@ pub enum NodeKind {
 }
 
 impl NodeKind {
-    /// The type of every kind but `Document`, whose type depends on the
-    /// document's [`super::DocumentKind`].
+    /// The type of every kind except `Document`. The type of a `Document`
+    /// depends on its [`super::DocumentKind`].
     pub(super) fn node_type(&self) -> NodeType {
         match self {
             NodeKind::Document => NodeType::Document,
@@ -48,7 +48,7 @@ impl NodeKind {
         }
     }
 
-    /// Interned names belong to html5ever's atom table, not to the node.
+    /// Interned names belong to the atom table of html5ever, not to the node.
     pub(super) fn heap_size(&self) -> usize {
         match self {
             NodeKind::Document | NodeKind::DocumentFragment => 0,
@@ -80,8 +80,8 @@ impl NodeKind {
 #[derive(Clone, Debug)]
 pub struct Element {
     pub name: QualName,
-    /// Attribute nodes in source order. Each one's parent is this element,
-    /// but it is not among the element's children.
+    /// Attribute nodes in source order. The parent of each is this element,
+    /// but it is not one of the children of the element.
     pub attributes: Vec<NodeId>,
     pub namespace_definitions: Vec<NamespaceDefinition>,
 }

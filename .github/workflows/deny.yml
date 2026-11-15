@@ -1,7 +1,7 @@
 name: cargo-deny
 
-# RustSec advisories, licenses, duplicate crates and sources (deny.toml).
-# Daily too, since an advisory can appear without a push.
+# RustSec advisories, licenses, duplicate crates and sources (deny.toml). Also
+# daily, because an advisory can appear without a push.
 
 on:
   push:

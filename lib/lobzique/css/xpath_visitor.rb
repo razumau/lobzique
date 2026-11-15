@@ -5,13 +5,13 @@
 module Lobzique
   module CSS
     # lobzique: the configuration only. The visit_* methods are in the core
-    # (crates/lobzique-core/src/css/write.rs), which CSS::Parser#xpath_for
-    # runs with this configuration, so a subclass can't override them.
+    # (crates/lobzique-core/src/css/write.rs). CSS::Parser#xpath_for runs them
+    # with this configuration, so a subclass cannot override them.
     class XPathVisitor
       module BuiltinsConfig
         NEVER = :never
         ALWAYS = :always
-        # lobzique: the same as ALWAYS, as in Nokogiri on libxml2
+        # lobzique: the same as ALWAYS, as in Nokogiri on libxml2.
         OPTIMAL = :optimal
 
         VALUES = [NEVER, ALWAYS, OPTIMAL]

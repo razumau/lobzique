@@ -17,12 +17,12 @@ module Lobzique
       attr_accessor :errors
       attr_accessor :namespace_inheritance
 
-      # lobzique: native in Nokogiri (libxml2's URL). The HTML parsers keep
-      # it in @url, as Nokogiri's HTML5 parser does.
+      # lobzique: native in Nokogiri (URL of libxml2). The HTML parsers keep
+      # it in @url, as the HTML5 parser of Nokogiri does.
       attr_reader :url
 
-      # Every way of making a document runs this, parsing included, so
-      # subclasses (Loofah's) can extend it with `super`.
+      # Every way of making a document runs this, parsing included,
+      # so that subclasses (the ones of Loofah) can extend it with `super`.
       def initialize(*args) # rubocop:disable Lint/MissingSuper
         @errors = []
         @decorators = nil
@@ -50,9 +50,9 @@ module Lobzique
             arg.each do |k, v|
               key = k.to_s
               if NCNAME_RE.match?(key)
-                # lobzique: Nokogiri adds a namespace definition here, and
-                # makes an unprefixed one the element's namespace; adding
-                # definitions is out of scope
+                # lobzique: Nokogiri adds a namespace definition here, and makes
+                # an unprefixed one the namespace of the element. Adding
+                # definitions is out of scope.
                 raise NotImplementedError, "namespace definitions can't be added"
               else
                 elm[k.to_s] = v.to_s
@@ -109,8 +109,8 @@ module Lobzique
       end
 
       # lobzique: Nokogiri also undefines default_namespace=,
-      # add_namespace_definition, line and add_namespace, which aren't
-      # defined
+      # add_namespace_definition, line and add_namespace, which are not defined
+      # here.
       undef_method :swap, :parent, :namespace, :attributes, :namespace_definitions
 
       def add_child(node_or_tags)
@@ -128,7 +128,7 @@ module Lobzique
       alias_method :<<, :add_child
 
       # lobzique: Nokogiri returns CSS::XPathVisitor::DoctypeConfig::XML,
-      # which is this symbol; CSS::Selector takes it
+      # which is this symbol. CSS::Selector takes it.
       def xpath_doctype
         :xml
       end

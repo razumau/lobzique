@@ -1,10 +1,11 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Runs api.rb with coverage of the Ruby code it loads after this point
-# feeding libFuzzer, next to the extension's own. The dependencies load
-# first, so their branches don't crowd Ruzzy's counters. Executable, since
-# libFuzzer's -fork runs its workers by this script's path.
+# Runs api.rb with coverage of the Ruby code that it loads after this point.
+# The coverage feeds libFuzzer, next to the coverage of the extension.
+# The dependencies load first, so their branches do not crowd the counters
+# of Ruzzy. The file is executable, because the -fork of libFuzzer runs
+# its workers by the path of this script.
 
 $LOAD_PATH.unshift(File.expand_path("../../lib", __dir__))
 

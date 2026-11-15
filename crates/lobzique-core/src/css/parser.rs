@@ -1,16 +1,16 @@
-//! Nokogiri's CSS parser: racc's parse loop over the tables generated from
-//! Nokogiri's grammar (`tables.rs`), with the grammar's actions
-//! (lib/nokogiri/css/parser.y) building a typed tree instead of
-//! `Nokogiri::CSS::Node`s. Chains that the grammar builds right-recursively,
-//! `a b c` and `.a.b.c`, are kept flat, so long selectors cost no stack.
+//! Nokogiri's CSS parser: the racc parse loop over tables generated
+//! from Nokogiri's grammar (`tables.rs`). The grammar actions (parser.y) build
+//! a typed tree, not `Nokogiri::CSS::Node`s. Chains such as `a b c`
+//! and `.a.b.c` stay flat, although the grammar makes them right-recursive.
+//! Long selectors then use no extra stack.
 
 use super::tables::{self as t, N};
 use super::tokenizer::{Token, Tokenizer};
 use super::SyntaxError;
 
-/// Parentheses nest at most this deep, which bounds the stack the parsed
-/// tree takes to translate, evaluate and drop: about 4 KB a level in a
-/// release build. Nokogiri sets no limit.
+/// Maximum nesting of parentheses. It limits the stack that translation,
+/// evaluation and drop of the tree use: about 4 KB a level in a release build.
+/// Nokogiri has no limit.
 pub const MAX_NESTING: usize = 32;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,11 +21,9 @@ pub enum Combinator {
     Following,
 }
 
-/// One selector of a comma-separated list, the node Nokogiri calls
-/// `to_xpath` on.
 #[derive(Debug)]
 pub struct Selector {
-    /// `> p`: a combinator with nothing before it.
+    /// A combinator with nothing before it: `> p`.
     pub leading: Option<Combinator>,
     pub first: Simple,
     pub rest: Vec<(Combinator, Simple)>,
@@ -33,18 +31,16 @@ pub struct Selector {
 
 #[derive(Debug)]
 pub enum Simple {
-    /// `p.a`, or `.a` with `*` implied. Nokogiri's `CONDITIONAL_SELECTOR`
-    /// when there are conditions.
+    /// `p.a`, or `.a` with an implied `*`.
     Element {
         name: ElementName,
         conditions: Vec<Condition>,
     },
-    /// `text()`, `comment()`, `has(…)`, with at most one condition.
+    /// `text()`, `comment()`, `has(…)`. Has at most one condition.
     Function {
         function: Function,
         condition: Option<Condition>,
     },
-    /// `@href`
     Attribute(AttributeName),
 }
 
@@ -53,11 +49,11 @@ pub struct ElementName {
     /// `None` for `name`, `Some(None)` for `|name`, `Some(Some(ns))` for
     /// `ns|name`. Unescaped.
     pub prefix: Option<Option<String>>,
-    /// `*` for the universal selector. Unescaped, so never `*` otherwise.
+    /// `*` for the universal selector. Unescaped, so `*` means only that.
     pub local: String,
 }
 
-/// `[name]`, `[ns|name]`, `[@name]`, unescaped. `[|name]` has no prefix.
+/// Unescaped. `[|name]` has no prefix.
 #[derive(Debug)]
 pub struct AttributeName {
     pub prefix: Option<String>,
@@ -66,9 +62,8 @@ pub struct AttributeName {
 
 #[derive(Debug)]
 pub enum Condition {
-    /// The `#id` token, unescaped, `#` included.
+    /// The `#id` token, unescaped, with the `#`.
     Id(String),
-    /// Unescaped.
     Class(String),
     Attribute {
         subject: AttributeSubject,
@@ -81,7 +76,6 @@ pub enum Condition {
 #[derive(Debug)]
 pub enum AttributeSubject {
     Name(AttributeName),
-    /// `[text()]` and the like
     Function(Function),
 }
 
@@ -102,8 +96,8 @@ pub enum Pseudo {
     Function(Function),
 }
 
-/// `:not(…)`. The grammar drops the conditions after an element name, so
-/// `:not(a.b)` is `:not(a)`.
+/// The grammar drops the conditions after an element name: `:not(a.b)`
+/// is `:not(a)`.
 #[derive(Debug)]
 pub enum Negation {
     Element(ElementName),
@@ -112,27 +106,26 @@ pub enum Negation {
 
 #[derive(Debug)]
 pub struct Function {
-    /// The name with its `(`, as the visitor matches it: `nth-child(`.
+    /// The name with its `(`, as the visitor matches it, for example
+    /// `nth-child(`.
     pub name: String,
     pub arguments: Vec<Argument>,
 }
 
 #[derive(Debug)]
 pub enum Argument {
-    /// A token as written, escapes and quotes included: the visitor pastes
-    /// these into XPath, or quotes a string's unescaped text.
+    /// Tokens as written, with escapes and quotes. The visitor pastes them
+    /// into XPath, or quotes the unescaped text of a string.
     Number(String),
     String(String),
     Ident(String),
     Nth(Nth),
-    /// `@name`
     Attribute(AttributeName),
-    /// The selectors of `has(…)`.
     Selector(Selector),
 }
 
-/// `an+b`, as the four strings Nokogiri's `NTH` node holds: `a`, `n`, the
-/// operator and `b`.
+/// `an+b` as the four strings of Nokogiri's `NTH` node: `a`, `n`, the operator
+/// and `b`.
 #[derive(Debug)]
 pub struct Nth {
     pub a: String,
@@ -140,19 +133,18 @@ pub struct Nth {
     pub b: String,
 }
 
-/// What racc keeps on its value stack.
 enum Value<'a> {
     Nil,
     Token(&'a str),
     Combinator(Combinator),
     Selectors(Vec<Selector>),
-    /// `simple_selector_1toN`, its rest in reverse.
+    /// `simple_selector_1toN`. The rest is in reverse order.
     Chain(Simple, Vec<(Combinator, Simple)>),
     Simple(Simple),
     ElementName(ElementName),
     AttributeName(AttributeName),
     Function(Function),
-    /// `hcap_1toN`, in reverse.
+    /// `hcap_1toN`, in reverse order.
     Conditions(Vec<Condition>),
     Condition(Condition),
     AttributeTest(AttributeOperator, String),
@@ -162,11 +154,9 @@ enum Value<'a> {
     Negation(Negation),
 }
 
-/// Parses a selector list, as `Nokogiri::CSS::Parser#parse` does.
 pub fn parse(input: &str) -> Result<Vec<Selector>, SyntaxError> {
     let mut tokens = Tokenizer::new(input);
     let mut states: Vec<i16> = vec![0];
-    // Values with the source they span, for error messages
     let mut values: Vec<(Value<'_>, &str)> = Vec::new();
     let mut lookahead: Option<Token<'_>> = None;
     let mut read_next = true;
@@ -226,8 +216,7 @@ pub fn parse(input: &str) -> Result<Vec<Selector>, SyntaxError> {
                 _ => unreachable!("the start rule reduces to a selector list"),
             };
         } else {
-            // Nokogiri's on_error: "unexpected '#{error_value}' after
-            // '#{value_stack.compact.last}'"
+            // Same message as Nokogiri's on_error.
             let unexpected = lookahead.map_or("$", |token| token.text);
             let after = values
                 .iter()
@@ -249,14 +238,12 @@ fn index(value: i16) -> usize {
     usize::try_from(value).expect("racc indexes are positive")
 }
 
-/// `table[i]` if `check[i]` says it belongs to `owner`.
 fn lookup(table: &[i16], check: &[i16], i: i16, owner: i16) -> Option<i16> {
     let i = usize::try_from(i).ok()?;
     let value = *table.get(i)?;
     (value != N && check.get(i) == Some(&owner)).then_some(value)
 }
 
-/// The source text that adjacent slices of `input` cover together.
 fn span<'a>(input: &'a str, mut parts: impl Iterator<Item = &'a str>) -> &'a str {
     let offset = |part: &str| part.as_ptr() as usize - input.as_ptr() as usize;
     let parts: Vec<&str> = parts
@@ -280,8 +267,8 @@ impl Combinator {
     }
 }
 
-/// The rules `reduce` handles, as racc numbers parser.y's and
-/// `tables::GRAMMAR` names them; a test keeps the two equal.
+/// Numbers of the rules that `reduce` handles. They are the racc numbers
+/// of parser.y. A test checks them against `tables::GRAMMAR`.
 #[cfg(test)]
 pub const REDUCED_RULES: [&str; 82] = [
     "",
@@ -613,7 +600,7 @@ fn reduce(rule: usize, values: Vec<Value<'_>>) -> Result<Value<'_>, SyntaxError>
             match n {
                 "n" => nth("1", plus, b),
                 "-n" => nth("-1", plus, b),
-                // Nokogiri names the operator here, not the identifier
+                // Nokogiri reports the operator, not the identifier.
                 _ => return Err(parse_error(plus)),
             }
         }
@@ -742,29 +729,25 @@ fn nth<'a>(a: &str, operator: &str, b: &str) -> Value<'a> {
     })
 }
 
-/// Racc::ParseError in Nokogiri, which isn't a CSS::SyntaxError.
+/// Nokogiri raises Racc::ParseError here. It is not a CSS::SyntaxError.
 fn parse_error(text: &str) -> SyntaxError {
     SyntaxError(format!("parse error on IDENT '{text}'"))
 }
 
-/// Ruby's `String#strip`: whitespace and NUL.
 fn ruby_strip(text: &str) -> &str {
     text.trim_matches(|c: char| c == '\0' || c.is_ascii_whitespace() || c == '\x0b')
 }
 
-/// Nokogiri's `unescape_css_identifier`.
 pub fn unescape_identifier(text: &str) -> String {
     unescape(text, false)
 }
 
-/// Nokogiri's `unescape_css_string`, of a string without its quotes: an
-/// escaped newline is dropped.
+/// Input is a string without its quotes.
 pub fn unescape_string(text: &str) -> String {
     unescape(text, true)
 }
 
-/// `unescape_css_element_name`: a name that decodes to `*` would be the
-/// universal selector.
+/// A name that decodes to `*` would become the universal selector.
 fn unescape_element_name(text: &str) -> Result<String, SyntaxError> {
     let name = unescape_identifier(text);
     if name == "*" {
@@ -773,10 +756,10 @@ fn unescape_element_name(text: &str) -> Result<String, SyntaxError> {
     Ok(name)
 }
 
-/// `gsub(/\\(?:([^0-9a-fA-F])|([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?)/)`: a
-/// code point from up to six hex digits and one optional whitespace, or
-/// the escaped character itself. In strings an escaped `\r\n`, `\n`, `\r`
-/// or `\f` is dropped.
+/// Port of Nokogiri's `gsub(/\\(?:([^0-9a-fA-F])|([0-9a-fA-F]{1,6})(?:\r\n|[
+/// \t\n\r\f])?)/)`. A hex escape has up to six digits and one optional
+/// whitespace. Other escapes give the escaped character. In strings, an escaped
+/// newline is dropped.
 fn unescape(text: &str, in_string: bool) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -795,7 +778,6 @@ fn unescape(text: &str, in_string: bool) -> String {
                 .take_while(u8::is_ascii_hexdigit)
                 .count();
             let code = u32::from_str_radix(&after[..digits], 16).expect("hex digits");
-            // https://www.w3.org/TR/css-syntax-3/#consume-escaped-code-point
             let c = char::from_u32(code)
                 .filter(|&c| c != '\0')
                 .unwrap_or('\u{FFFD}');

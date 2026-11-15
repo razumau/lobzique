@@ -1,7 +1,7 @@
-//! `CSS::Selector`: a selector list compiled into the query Nokogiri's
-//! `XPathVisitor` would write as an XPath string. Nokogiri has no such
-//! class; `Searchable` makes one where it would make that string, and
-//! `XPathContext#evaluate` runs it (ARCHITECTURE.md).
+//! `CSS::Selector`: a selector list compiled to the query
+//! that the `XPathVisitor` of Nokogiri would write as an XPath string. Nokogiri
+//! has no such class. `Searchable` makes one where it would make that string,
+//! and `XPathContext#evaluate` runs it (ARCHITECTURE.md).
 
 use crate::CSS;
 use lobzique_core::css::{self, Options, Prefix};
@@ -20,16 +20,16 @@ pub static SELECTOR: Lazy<RClass> = Lazy::new(|ruby| {
 #[magnus(class = "Lobzique::CSS::Selector", free_immediately)]
 pub struct Selector {
     pub compiled: css::Selector,
-    /// The selector as written, which XPath errors quote.
+    /// The selector as written. XPath errors quote it.
     pub rule: String,
 }
 
 impl magnus::DataTypeFunctions for Selector {}
 
-/// `CSS::Selector.new(rule, prefixes:, doctype:, namespaces: nil,
-/// builtins: true, first: false)`, the arguments of Nokogiri's
-/// `XPathVisitor.new` and `CSS.xpath_for`. `doctype:` is what
-/// `Document#xpath_doctype` returns.
+/// `CSS::Selector.new(rule, prefixes:, doctype:, namespaces: nil, builtins:
+/// true, first: false)`: the arguments of `XPathVisitor.new`
+/// and `CSS.xpath_for` in Nokogiri. `doctype:` is what `Document#xpath_doctype`
+/// returns.
 fn new(ruby: &Ruby, args: &[Value]) -> Result<Selector, Error> {
     let args = scan_args::<(RString,), (), (), (), RHash, ()>(args)?;
     let keywords =
@@ -54,8 +54,8 @@ fn new(ruby: &Ruby, args: &[Value]) -> Result<Selector, Error> {
             })
         })
         .collect::<Result<Vec<_>, Error>>()?;
-    // HTML4 documents parse as HTML5 (plan.md decision 3), so their names
-    // have HTML5's namespaces to ignore
+    // HTML4 documents parse as HTML5 (plan.md decision 3), so their names have
+    // the namespaces of HTML5, which CSS queries ignore.
     let html = match doctype.name()?.as_ref() {
         "xml" => false,
         "html4" | "html5" => true,

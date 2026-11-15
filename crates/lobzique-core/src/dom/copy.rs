@@ -1,13 +1,13 @@
-//! Copying nodes as libxml2's `xmlDocCopyNode` and `xmlCopyDoc` do, for
-//! Nokogiri's `dup` and for nodes that move between documents or are
-//! reparented as text.
+//! Copies nodes as libxml2's `xmlDocCopyNode` and `xmlCopyDoc` do. Used
+//! for Nokogiri's `dup`, for nodes that move between documents, and for nodes
+//! that are reparented as text.
 
 use super::{Document, DocumentKind, NodeId, NodeKind, QualName};
 use html5ever::{ns, LocalName, Namespace, Prefix};
 use std::iter;
 
-/// How much of a node a copy takes: Nokogiri's `dup(level)`, which libxml2
-/// reads as 0, 2, or anything else.
+/// How much of a node a copy takes: Nokogiri's `dup(level)`. libxml2 reads
+/// the level as 0, 2, or anything else.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CopyDepth {
     /// The node alone. An element loses its attributes, namespace
@@ -15,7 +15,6 @@ pub enum CopyDepth {
     Shallow,
     /// The node with its attributes and namespace definitions.
     Attributes,
-    /// The whole subtree.
     Deep,
 }
 
@@ -31,18 +30,17 @@ impl CopyDepth {
 
 impl Document {
     /// A detached copy of a node of this document. Documents and doctypes
-    /// aren't copied as nodes, so for them there is none.
+    /// are not copied as nodes, so there is no copy for them.
     pub fn copy(&mut self, id: NodeId, depth: CopyDepth) -> Option<NodeId> {
         self.copy_from(None, id, depth)
     }
 
-    /// A detached copy, in this document, of a node of `source`.
     pub fn import(&mut self, source: &Document, id: NodeId, depth: CopyDepth) -> Option<NodeId> {
         self.copy_from(Some(source), id, depth)
     }
 
-    /// `xmlCopyDoc`: the encoding and version, and with `deep` the whole
-    /// tree. Unlinked nodes stay behind.
+    /// `xmlCopyDoc`: the encoding and version. With `deep`, the whole tree.
+    /// Unlinked nodes stay behind.
     pub fn copy_document(&self, deep: bool) -> Document {
         let mut copy = Document::new(self.kind);
         copy.encoding.clone_from(&self.encoding);
@@ -63,9 +61,9 @@ impl Document {
         copy
     }
 
-    /// Walks the source subtree by its links, as `descendants` does, so
-    /// depth costs no stack and no borrow of a same-document source is
-    /// held while copies are made.
+    /// Walks the source subtree by its links, as `descendants` does. Depth then
+    /// uses no stack, and no borrow of a same-document source is held
+    /// while copies are made.
     fn copy_from(
         &mut self,
         source: Option<&Document>,
@@ -76,7 +74,7 @@ impl Document {
         if depth != CopyDepth::Deep {
             return Some(root);
         }
-        // Each source node whose children are being copied, with its copy
+        // Each source node whose children are being copied, with its copy.
         let mut open = vec![(id, root)];
         let mut next = source.unwrap_or(self).first_child(id);
         while let Some(node) = next {
@@ -103,9 +101,9 @@ impl Document {
         Some(root)
     }
 
-    /// Copies one node with its attributes and appends it to `parent`, the
-    /// first of `placement`; the second is the root of the copy, where
-    /// namespaces the copy needs are defined.
+    /// Copies one node with its attributes and appends it to `parent`,
+    /// the first of `placement`. The second is the root of the copy,
+    /// where the namespaces that the copy needs are defined.
     fn copy_node(
         &mut self,
         source: Option<&Document>,
@@ -163,9 +161,9 @@ impl Document {
         Some(copy)
     }
 
-    /// A copied element or attribute whose namespace prefix has no
-    /// definition in the copy gets one on the copy's root, as libxml2
-    /// defines it when copying. Only an element root can take one.
+    /// A copied element or attribute whose namespace prefix has no definition
+    /// in the copy gets one on the root of the copy, as libxml2 defines
+    /// it when it copies. Only an element root can take one.
     fn reconcile_namespace(&mut self, id: NodeId, root: NodeId) {
         let Some(namespace) = self.namespace(id) else {
             return;
@@ -189,8 +187,8 @@ impl Document {
         }
     }
 
-    /// The namespace of an element with none in libxml2's terms: HTML in
-    /// HTML documents, as for `Node.new`.
+    /// The namespace of an element with none in libxml2's terms: HTML in HTML
+    /// documents, as for `Node.new`.
     pub(super) fn default_namespace(&self) -> Namespace {
         no_namespace(self.kind)
     }
@@ -203,7 +201,6 @@ impl Document {
         }
     }
 
-    /// The local name of an element or attribute, if it has one.
     pub(super) fn local_name(&self, id: NodeId) -> Option<&LocalName> {
         match self.node_kind(id) {
             NodeKind::Element(element) => Some(&element.name.local),
@@ -213,7 +210,7 @@ impl Document {
     }
 }
 
-/// What stands for no namespace in libxml2's terms in a kind of document.
+/// What stands for no namespace, in libxml2's terms, in a kind of document.
 fn no_namespace(kind: DocumentKind) -> Namespace {
     match kind {
         DocumentKind::Html => ns!(html),

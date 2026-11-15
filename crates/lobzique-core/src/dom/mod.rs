@@ -1,12 +1,12 @@
-//! The arena DOM. A [`Document`] owns every node created for it, and frees
-//! none of them before it is dropped itself: unlinked nodes stay valid, the
-//! way they do in a libxml2 document that Nokogiri keeps them pinned to.
+//! The arena DOM. A [`Document`] owns every node created for it. It frees none
+//! of them before it is dropped. Unlinked nodes stay valid, as in a libxml2
+//! document that Nokogiri keeps them pinned to.
 //!
-//! Element and attribute names follow the HTML standard, so HTML elements are
-//! in the HTML namespace; the bindings show that namespace as `nil`, as
-//! Nokogiri does. Names are UTF-8 atoms shared with the parser and selector
-//! engine. Everything else (text, attribute values, doctype fields) is bytes
-//! kept exactly as given, as libxml2 keeps what Nokogiri passes it.
+//! Element and attribute names follow the HTML standard, so HTML elements
+//! are in the HTML namespace. The bindings show that namespace as `nil`,
+//! as Nokogiri does. Names are UTF-8 atoms that the parser and the selector
+//! engine share. Everything else (text, attribute values, doctype fields)
+//! is bytes kept exactly as given, as libxml2 keeps what Nokogiri passes it.
 
 mod attribute;
 mod check;
@@ -33,15 +33,12 @@ use std::cell::{Cell, OnceCell};
 use std::mem::size_of;
 use std::num::NonZeroU32;
 
-/// A node's index in its document's arena.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeId(NonZeroU32);
 
 impl NodeId {
-    /// The document node, the first one in every arena.
     pub const DOCUMENT: NodeId = NodeId(NonZeroU32::MIN);
 
-    /// Zero-based position in the arena, for side tables indexed by node.
     pub fn index(self) -> usize {
         self.0.get() as usize - 1
     }
@@ -55,8 +52,8 @@ impl NodeId {
     }
 }
 
-/// Whether a document came from the HTML or the XML side, which decides its
-/// node type, as libxml2's `htmlDocPtr` and `xmlDocPtr` do.
+/// Whether a document came from the HTML or the XML side. This decides its node
+/// type, as libxml2's `htmlDocPtr` and `xmlDocPtr` do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DocumentKind {
     Html,
@@ -69,11 +66,11 @@ pub struct Document {
     nodes: Vec<Node>,
     /// libxml2's `doc->encoding`: a label, kept as given.
     encoding: Option<Vec<u8>>,
-    /// libxml2's `doc->version`, which only XML documents have.
+    /// libxml2's `doc->version`. Only XML documents have it.
     version: Option<Vec<u8>>,
-    /// Each node's tree root and position in that tree, built once
-    /// comparisons have walked as many links as there are nodes, and
-    /// dropped when the tree changes (`tree::document_order`).
+    /// The tree root and position in that tree of each node. Built
+    /// when comparisons have walked as many links as there are nodes. Dropped
+    /// when the tree changes (`tree::document_order`).
     order: OnceCell<Vec<(NodeId, u32)>>,
     order_walked: Cell<usize>,
 }
@@ -90,8 +87,8 @@ impl Document {
         }
     }
 
-    /// An HTML document with the doctype libxml2's `htmlNewDoc` gives it,
-    /// which `HTML4::Document.new` and so `HTML5::Document.new` start with.
+    /// An HTML document with the doctype that libxml2's `htmlNewDoc` gives
+    /// it. `HTML4::Document.new`, and so `HTML5::Document.new`, start with it.
     pub fn new_html4(system_id: Option<Vec<u8>>, public_id: Option<Vec<u8>>) -> Document {
         let mut document = Document::new(DocumentKind::Html);
         let doctype = if system_id.is_none() && public_id.is_none() {
@@ -134,7 +131,6 @@ impl Document {
         self.version = version;
     }
 
-    /// Every node in the arena, linked or not, in creation order.
     pub fn node_ids(&self) -> impl ExactSizeIterator<Item = NodeId> {
         (0..self.nodes.len()).map(NodeId::from_index)
     }
@@ -153,7 +149,6 @@ impl Document {
         }
     }
 
-    /// libxml2's `node->name`: what Nokogiri's native `node_name` returns.
     pub fn node_name(&self, id: NodeId) -> Option<&[u8]> {
         match self.node_kind(id) {
             NodeKind::Element(element) => Some(element.name.local.as_bytes()),
@@ -166,9 +161,9 @@ impl Document {
         }
     }
 
-    /// libxml2's `xmlNodeSetName`: renames an element or attribute,
-    /// keeping its namespace, or a doctype or processing instruction.
-    /// Other nodes keep their fixed names.
+    /// libxml2's `xmlNodeSetName`: renames an element or attribute and keeps
+    /// its namespace, or renames a doctype or processing instruction. Other
+    /// nodes keep their fixed names.
     pub fn set_name(&mut self, id: NodeId, name: &str) {
         match &mut self.node_mut(id).kind {
             NodeKind::Element(Element {
@@ -191,21 +186,21 @@ impl Document {
         }))
     }
 
-    /// An element as `Node.new` makes one: the name taken as is, in the HTML
-    /// namespace in HTML documents and in none in XML ones.
+    /// An element as `Node.new` makes it: the name is taken
+    /// as is. It is in the HTML namespace in HTML documents and in none in XML
+    /// documents.
     pub fn create_element_named(&mut self, name: &str) -> NodeId {
         let namespace = self.default_namespace();
         self.create_element(QualName::new(None, namespace, LocalName::from(name)))
     }
 
-    /// The document's doctype, libxml2's internal subset.
     pub fn doctype(&self) -> Option<NodeId> {
         self.children(NodeId::DOCUMENT)
             .find(|&child| matches!(self.node_kind(child), NodeKind::Doctype(_)))
     }
 
     /// `Document#root=`, libxml2's `xmlDocSetRootElement`: the root element
-    /// is unlinked, and the new one, if any, appended to the document.
+    /// is unlinked and the new one, if any, is appended to the document.
     pub fn set_root(&mut self, root: Option<NodeId>) -> Result<(), HierarchyError> {
         if root.is_some_and(|root| !matches!(self.node_kind(root), NodeKind::Element(_))) {
             return Err(HierarchyError::NotAnElement);
@@ -218,7 +213,8 @@ impl Document {
     }
 
     /// libxml2's `xmlCreateIntSubset`: first in an HTML document, before
-    /// the root element in an XML one. `None` if there is a doctype already.
+    /// the root element in an XML document. `None` if there is a doctype
+    /// already.
     pub fn create_internal_subset(&mut self, doctype: Doctype) -> Option<NodeId> {
         if self.doctype().is_some() {
             return None;
@@ -267,7 +263,7 @@ impl Document {
         }))
     }
 
-    /// Bytes the arena holds on the heap, for `ObjectSpace.memsize_of`.
+    /// Bytes that the arena holds on the heap, for `ObjectSpace.memsize_of`.
     /// Walks every node.
     pub fn heap_size(&self) -> usize {
         self.nodes.capacity() * size_of::<Node>()

@@ -1,5 +1,5 @@
-//! The character classes libxml2's XPath parser and functions use, which
-//! the CSS front end shares because its names become XPath names.
+//! The character classes that the XPath parser and functions of libxml2 use.
+//! The CSS front end shares them, because its names become XPath names.
 
 /// libxml2's `IS_BLANK_CH`
 pub(crate) fn is_blank(byte: u8) -> bool {
@@ -11,8 +11,8 @@ pub(crate) fn is_xml_char(c: char) -> bool {
     matches!(c, '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}')
 }
 
-/// libxml2's XPath names start with `Letter | '_'`, XML 1.0 (fourth
-/// edition) letters, as `xmlXPathParseNameComplex` reads them
+/// The XPath names of libxml2 start with `Letter | '_'`: the letters of XML 1.0
+/// (fourth edition), as `xmlXPathParseNameComplex` reads them.
 pub(crate) fn is_name_start(c: char) -> bool {
     c == '_' || is_letter(c)
 }
@@ -35,8 +35,7 @@ fn is_letter(c: char) -> bool {
     ) || matches!(c, '\u{4E00}'..='\u{9FA5}' | '\u{3007}' | '\u{3021}'..='\u{3029}')
 }
 
-/// chvalid.h's `xmlIs*Q`: a check of its own below U+0100, the ranges
-/// above it.
+/// chvalid.h's `xmlIs*Q`: a check of its own below U+0100, the ranges above it.
 fn is_in(c: char, ranges: &[(u16, u16)], latin1: impl Fn(char) -> bool) -> bool {
     if u32::from(c) < 0x100 {
         return latin1(c);

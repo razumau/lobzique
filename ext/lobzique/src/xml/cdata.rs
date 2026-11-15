@@ -1,5 +1,3 @@
-//! `XML::CDATA`.
-
 use super::document;
 use super::node::{document_for_new_node, finish_new};
 use super::text::{expect_document_or_node, TEXT};

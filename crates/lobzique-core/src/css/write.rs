@@ -1,7 +1,7 @@
-//! Nokogiri's `CSS::XPathVisitor` (lib/nokogiri/css/xpath_visitor.rb)
-//! writing XPath strings, for `CSS.xpath_for`. [`super::translate`] builds
-//! what libxml2 would read from these strings; this pastes tokens as the
-//! visitor does, into valid XPath or not.
+//! Nokogiri's `CSS::XPathVisitor` (lib/nokogiri/css/xpath_visitor.rb) writes
+//! XPath strings for `CSS.xpath_for`. [`super::translate`] builds what libxml2
+//! would read from these strings. This module pastes tokens as the visitor
+//! does, into valid XPath or not.
 
 use super::parser::{
     unescape_string, Argument, AttributeName, AttributeOperator, AttributeSubject, Combinator,
@@ -12,8 +12,8 @@ use super::{SyntaxError, Visitor};
 
 type Result<T> = std::result::Result<T, SyntaxError>;
 
-/// What `"#{node}"` pastes for a `CSS::Node`, where Nokogiri's has the
-/// object's address too.
+/// What `"#{node}"` pastes for a `CSS::Node`. The Nokogiri text also has
+/// the address of the object.
 const NODE_TO_S: &str = "#<Nokogiri::CSS::Node>";
 
 pub struct Writer<'a> {
@@ -25,8 +25,6 @@ impl<'a> Writer<'a> {
         Writer { visitor }
     }
 
-    /// `Node#to_xpath`: the prefix, or `.` for a leading `>`, `+` or `~`,
-    /// then the selector.
     pub fn selector(&self, selector: &Selector) -> Result<String> {
         let mut xpath = match selector.leading {
             Some(Combinator::Child | Combinator::DirectAdjacent | Combinator::Following) => {
@@ -50,7 +48,6 @@ impl<'a> Writer<'a> {
         Ok(())
     }
 
-    /// `visit_conditional_selector`, or the bare name, function or attribute.
     fn simple(&self, xpath: &mut String, simple: &Simple) -> Result<()> {
         match simple {
             Simple::Element { name, conditions } => {
@@ -77,8 +74,6 @@ impl<'a> Writer<'a> {
         Ok(())
     }
 
-    /// `visit_combinator`, over the chain the grammar nests to the right:
-    /// ` and ` between conditions, `][` before a final `*-of-type`.
     fn conditions(&self, xpath: &mut String, conditions: &[Condition]) -> Result<()> {
         for (index, condition) in conditions.iter().enumerate() {
             if index > 0 {
@@ -120,7 +115,6 @@ impl<'a> Writer<'a> {
         Ok(())
     }
 
-    /// `visit_attribute_condition`
     fn attribute_condition(
         &self,
         xpath: &mut String,
@@ -208,14 +202,14 @@ impl<'a> Writer<'a> {
         Ok(())
     }
 
-    /// `has(…)`: `.//` and the first selector, or `.` and the selector when
-    /// the visitor finds nothing before its combinator. The rest are
-    /// ignored.
+    /// `has(…)`: `.//` and the first selector. Or `.` and the selector,
+    /// when the visitor finds nothing before its combinator. The rest
+    /// are ignored.
     fn has(&self, xpath: &mut String, argument: Option<&Argument>) -> Result<()> {
         let Some(Argument::Selector(selector)) = argument else {
             return Err(SyntaxError("has() takes a selector".into()));
         };
-        // The visitor checks `value[0].nil?`, which `|name` also passes
+        // The visitor checks `value[0].nil?`, which `|name` also passes.
         let bare_no_namespace = selector.rest.is_empty()
             && matches!(
                 &selector.first,
@@ -229,11 +223,10 @@ impl<'a> Writer<'a> {
         self.chain(xpath, selector)
     }
 
-    /// `visit_element_name`
     fn element_name(&self, name: &ElementName) -> Result<String> {
         let local = name.local.as_str();
         if self.visitor.html5 && name.prefix.is_none() && local != "*" {
-            // HTML5 has namespaces that CSS queries ignore
+            // HTML5 has namespaces that CSS queries ignore.
             return Ok(if !self.visitor.builtins {
                 format!("*[local-name()={}]", literal(local))
             } else if xpath_name(local) {
@@ -254,7 +247,6 @@ impl<'a> Writer<'a> {
         })
     }
 
-    /// `css_class`: the builtin, or the plain XPath 1.0.
     fn css_class(&self, haystack: &str, needle: &str) -> String {
         if self.visitor.builtins {
             format!("nokogiri-builtin:css-class({haystack},{})", literal(needle))
@@ -265,7 +257,7 @@ impl<'a> Writer<'a> {
     }
 }
 
-/// What the visitor's combinator methods put between two selectors.
+/// What the combinator methods of the visitor put between two selectors.
 fn separator(combinator: Combinator) -> &'static str {
     match combinator {
         Combinator::DirectAdjacent => "/following-sibling::*[1]/self::",
@@ -275,7 +267,6 @@ fn separator(combinator: Combinator) -> &'static str {
     }
 }
 
-/// `visit_pseudo_class` for a name without parentheses.
 fn pseudo_class(name: &str) -> Result<String> {
     Ok(match name {
         "first" | "first-of-type" => "position()=1",
@@ -295,8 +286,8 @@ fn pseudo_class(name: &str) -> Result<String> {
     .into())
 }
 
-/// `visit_attrib_name`: `@name`, `@prefix:name`, or for a name XPath can't
-/// write, a test of `name()`.
+/// `visit_attrib_name`: `@name`, `@prefix:name`, or, for a name that XPath
+/// cannot write, a test of `name()`.
 fn attribute_name(name: &AttributeName) -> Result<String> {
     let local = name.local.as_str();
     Ok(match &name.prefix {
@@ -317,8 +308,8 @@ fn validate_function_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// `nth`: the position along the axis, or among element siblings for the
-/// `*-child` forms, against `an+b`.
+/// `nth`: compares `an+b` with the position along the axis, or among
+/// the element siblings for the `*-child` forms.
 fn nth(nth: &Nth, child: bool, last: bool) -> Result<String> {
     let (a, b) = read_a_and_positive_b(nth)?;
     let position = match (child, last) {
@@ -342,8 +333,8 @@ fn nth(nth: &Nth, child: bool, last: bool) -> Result<String> {
     })
 }
 
-/// A function's first argument as `"#{node.value[1]}"` pastes it: the token
-/// as written, or nothing.
+/// The first argument of a function as `"#{node.value[1]}"` pastes
+/// it: the token as written, or nothing.
 fn pasted(argument: Option<&Argument>) -> &str {
     match argument {
         Some(Argument::Number(token) | Argument::String(token) | Argument::Ident(token)) => token,
@@ -352,20 +343,19 @@ fn pasted(argument: Option<&Argument>) -> &str {
     }
 }
 
-/// `xpath_function_argument`: a string's unescaped text as a literal, an
-/// `@name`, the rest as written.
+/// `xpath_function_argument`: the unescaped text of a string as a literal,
+/// an `@name`, or any other token as written.
 fn function_argument(argument: Option<&Argument>) -> Result<String> {
     Ok(match argument {
         Some(Argument::String(string)) => literal(&unescape_string(&string[1..string.len() - 1])),
         Some(Argument::Attribute(name)) => attribute_name(name)?,
-        // The visitor has no `visit_nth`
         Some(Argument::Nth(_)) => return Err(SyntaxError("undefined method 'visit_nth'".into())),
         argument => pasted(argument).into(),
     })
 }
 
-/// `xpath_string_literal`: XPath strings have no escapes, so one with both
-/// quotes is put together with `concat()`.
+/// `xpath_string_literal`: XPath strings have no escapes, so `concat()` joins
+/// a string that has both quotes.
 fn literal(text: &str) -> String {
     if !text.contains('\'') {
         format!("'{text}'")

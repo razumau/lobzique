@@ -1,6 +1,6 @@
-//! Linking and walking nodes. These operations keep the tree well formed and
-//! nothing more; Nokogiri's rules for where a node may go, and the copying
-//! and text merging that come with them, sit on top.
+//! Linking and walking nodes. These operations keep the tree well formed and do
+//! nothing else. The rules of Nokogiri for where a node can go, and the copying
+//! and text merging that come with them, are in other modules.
 
 use super::{Document, NodeId, NodeKind};
 use std::cmp::Ordering;
@@ -57,7 +57,6 @@ impl Document {
         self.node(id).previous_sibling
     }
 
-    /// An element's attribute nodes; empty for every other node.
     pub fn attributes(&self, id: NodeId) -> &[NodeId] {
         match self.node_kind(id) {
             NodeKind::Element(element) => &element.attributes,
@@ -72,7 +71,6 @@ impl Document {
         }
     }
 
-    /// Parent, grandparent and so on, up to the root of the node's tree.
     pub fn ancestors(&self, id: NodeId) -> Ancestors<'_> {
         Ancestors {
             document: self,
@@ -80,8 +78,8 @@ impl Document {
         }
     }
 
-    /// The node's descendants in document order, without the node itself.
-    /// Walks the links rather than recursing, so depth costs no stack.
+    /// The descendants of the node in document order, without the node.
+    /// It follows the links and does not recurse, so depth uses no stack.
     pub fn descendants(&self, id: NodeId) -> Descendants<'_> {
         Descendants {
             document: self,
@@ -90,8 +88,8 @@ impl Document {
         }
     }
 
-    /// libxml2's `node->next`: the next sibling, or for an attribute the
-    /// next attribute of its element.
+    /// libxml2's `node->next`: the next sibling. For an attribute, the next
+    /// attribute of its element.
     pub fn next_in_parent(&self, id: NodeId) -> Option<NodeId> {
         self.next_sibling(id)
             .or_else(|| self.attribute_sibling(id, |index| index.checked_add(1)))
@@ -135,13 +133,13 @@ impl Document {
     }
 
     /// Where `a` is relative to `b` in document order, as libxml2's
-    /// `xmlXPathCmpNodes` decides it: an attribute comes after its element
-    /// and before the element's children, attributes in their element's
-    /// order. `None` for nodes in different trees.
+    /// `xmlXPathCmpNodes` decides it. An attribute comes after its element
+    /// and before the children of the element. Attributes keep the order
+    /// of their element. `None` for nodes in different trees.
     ///
-    /// Comparisons walk the tree until they have cost as much as numbering
-    /// every node once, and then use those numbers until the tree changes,
-    /// so sorting n nodes stays O(n log n) however wide the tree is.
+    /// A comparison walks the tree until it has cost as much as numbering
+    /// every node once. Then it uses those numbers until the tree changes.
+    /// Sorting n nodes thus stays O(n log n) in any tree.
     pub fn document_order(&self, a: NodeId, b: NodeId) -> Option<Ordering> {
         if a == b {
             return Some(Ordering::Equal);
@@ -160,9 +158,9 @@ impl Document {
         ordering
     }
 
-    /// Sorts nodes into document order and drops duplicates, as libxml2
-    /// keeps XPath node sets. Nodes of different trees go by their roots'
-    /// ids, so the order stays total.
+    /// Sorts nodes into document order and removes duplicates, as libxml2 keeps
+    /// XPath node sets. Nodes of different trees go by the ids of their roots,
+    /// so the order stays total.
     pub fn sort_in_document_order(&self, nodes: &mut Vec<NodeId>) {
         let root = |id: NodeId| self.ancestors(id).last().unwrap_or(id);
         let mut keyed: Vec<(NodeId, NodeId)> = nodes.iter().map(|&id| (root(id), id)).collect();
@@ -175,10 +173,10 @@ impl Document {
         *nodes = keyed.into_iter().map(|(_, id)| id).collect();
     }
 
-    /// [`Document::document_order`] by following links, with the number of
-    /// links followed.
+    /// [`Document::document_order`] by following links. Also gives the number
+    /// of links followed.
     pub(super) fn walk_order(&self, a: NodeId, b: NodeId) -> (Option<Ordering>, usize) {
-        // Each node as its tree node, and for an attribute its index there
+        // Each node as its tree node. For an attribute, also its index there.
         let key = |id: NodeId| match (self.node_kind(id), self.parent(id)) {
             (NodeKind::Attribute(_), Some(element)) => {
                 let index = self.attributes(element).iter().position(|&a| a == id);
@@ -201,7 +199,7 @@ impl Document {
         a = lift(a, a_depth.saturating_sub(b_depth));
         b = lift(b, b_depth.saturating_sub(a_depth));
         if a == b {
-            // One is an ancestor of the other, and comes first
+            // One is an ancestor of the other, and comes first.
             return (Some(a_depth.cmp(&b_depth)), cost);
         }
         loop {
@@ -222,11 +220,10 @@ impl Document {
         (Some(Ordering::Greater), cost)
     }
 
-    /// Every node's tree root and position in that tree, in document order.
     pub(super) fn number_nodes(&self) -> Vec<(NodeId, u32)> {
         let mut order = vec![(NodeId::DOCUMENT, 0); self.nodes.len()];
         for root in self.node_ids().filter(|&id| self.parent(id).is_none()) {
-            // No more than the arena's node count, which fits in a u32
+            // At most the node count of the arena, which fits in a u32.
             let mut position = 0;
             for node in std::iter::once(root).chain(self.descendants(root)) {
                 for &id in std::iter::once(&node).chain(self.attributes(node)) {
@@ -246,7 +243,6 @@ impl Document {
         Ok(())
     }
 
-    /// Inserts `node` as the sibling right before `reference`.
     pub fn insert_before(&mut self, reference: NodeId, node: NodeId) -> Result<(), HierarchyError> {
         let parent = self.parent_for_insertion(reference, node)?;
         self.detach(node);
@@ -255,7 +251,6 @@ impl Document {
         Ok(())
     }
 
-    /// Inserts `node` as the sibling right after `reference`.
     pub fn insert_after(&mut self, reference: NodeId, node: NodeId) -> Result<(), HierarchyError> {
         let parent = self.parent_for_insertion(reference, node)?;
         self.detach(node);
@@ -312,7 +307,6 @@ impl Document {
         }
     }
 
-    /// Drops the document order that comparisons built.
     fn tree_changed(&mut self) {
         self.order.take();
         *self.order_walked.get_mut() = 0;
@@ -352,7 +346,8 @@ impl Document {
         if !self.node_kind(parent).can_have_children() {
             return Err(HierarchyError::NoChildren);
         }
-        // A childless node can't be an ancestor, so appending leaves stays O(1)
+        // A childless node cannot be an ancestor, so appending leaves stays
+        // O(1).
         let may_be_ancestor = self.first_child(child).is_some();
         if parent == child || may_be_ancestor && self.ancestors(parent).any(|a| a == child) {
             return Err(HierarchyError::Cycle);
@@ -376,7 +371,6 @@ impl Document {
         Ok(parent)
     }
 
-    /// Links a detached node between two adjacent children of `parent`.
     fn link(&mut self, id: NodeId, parent: NodeId, previous: Option<NodeId>, next: Option<NodeId>) {
         self.tree_changed();
         let node = self.node_mut(id);

@@ -1,16 +1,16 @@
 #![no_main]
 
-//! Compiling any selector must return a selector or a syntax error, and
-//! evaluating it must find each node once, in document order, answering
-//! custom calls until none are left. The input is the selector, a NUL, and
-//! markup to search; the first byte picks the options.
+//! A selector must compile to a selector or a syntax error. Evaluation must
+//! find each node once, in document order, and answer custom calls until none
+//! remain. The input is the selector, a NUL, and markup to search. The first
+//! byte picks the options.
 //!
-//! Writing the selector as XPath (`CSS.xpath_for`) must return strings or a
-//! syntax error. With one prefix, the strings parsed as XPath must find
+//! Writing the selector as XPath (`CSS.xpath_for`) must return strings
+//! or a syntax error. With one prefix, the strings parsed as XPath must find
 //! what the compiled selector finds, and fail where it fails.
 //!
-//! Nested `:has(…)` costs the document's size to the power of its depth, as
-//! in Nokogiri, so selectors nested deeper than SHALLOW are evaluated only
+//! Nested `:has(…)` costs the size of the document to the power of its depth,
+//! as in Nokogiri. Selectors nested deeper than SHALLOW are evaluated only
 //! on tiny documents, whose node count to that power stays within BUDGET.
 
 use libfuzzer_sys::fuzz_target;
@@ -63,8 +63,8 @@ fuzz_target!(|data: &[u8]| {
     let Ok(compiled) = compile(selector, &options) else {
         return;
     };
-    // Without builtins the visitor writes HTML names as predicates, which
-    // changes what positions count
+    // Without builtins the visitor writes HTML names as predicates.
+    // This changes which positions count.
     let comparable = prefixes.len() == 1 && !options.first_only && (options.builtins || !options.html);
     let written = match written {
         Ok(paths) if comparable => Some(xpath::parse(paths.join("|").as_bytes())),
@@ -158,7 +158,6 @@ fuzz_target!(|data: &[u8]| {
     }
 });
 
-/// How deep the selector's parentheses go.
 fn nesting(selector: &str) -> usize {
     let (mut depth, mut deepest) = (0usize, 0);
     for c in selector.chars() {

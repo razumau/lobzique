@@ -1,5 +1,5 @@
-//! html5ever's tree builder writing into the arena, with the limits and
-//! output of Nokogiri's gumbo binding (`ext/nokogiri/gumbo.c`).
+//! html5ever's tree builder writes into the arena. Limits and output follow
+//! Nokogiri's gumbo binding (`ext/nokogiri/gumbo.c`).
 
 use super::{is_html, VOID_ELEMENTS};
 use crate::dom::{CopyDepth, Doctype, Document, DocumentKind, NodeId, NodeKind, QualName};
@@ -16,20 +16,19 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::fmt;
 
-/// Limits as Nokogiri passes them to gumbo; `None` is no limit.
+/// Limits as Nokogiri passes them to gumbo. `None` means no limit.
 #[derive(Clone, Debug, Default)]
 pub struct Options {
     pub max_attributes: Option<usize>,
     pub max_errors: Option<usize>,
     pub max_tree_depth: Option<usize>,
     pub parse_noscript_content_as_text: bool,
-    /// Keeps a U+FEFF at the start of the input, which gumbo drops.
-    /// libxml2's parses keep it: its decoder takes off the byte order mark
-    /// itself, and an in-context parse takes none.
+    /// Keeps a U+FEFF at the start of the input. Gumbo drops it. libxml2 keeps
+    /// it, because its decoder removes the byte order mark itself.
+    /// An in-context parse removes none.
     pub keep_bom: bool,
 }
 
-/// Numbered as Nokogiri's `HTML5::QuirksMode`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum QuirksMode {
@@ -60,8 +59,8 @@ impl From<QuirksMode> for html5ever::tree_builder::QuirksMode {
     }
 }
 
-/// A limit was exceeded; gumbo then returns no tree. Displays as gumbo's
-/// status string, which Nokogiri raises as an `ArgumentError`.
+/// A limit was exceeded. Gumbo then returns no tree. It displays as the status
+/// string of gumbo, which Nokogiri raises as an `ArgumentError`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LimitError {
     TooManyAttributes,
@@ -91,14 +90,13 @@ pub struct Parsed {
     pub errors: Vec<ParseError>,
 }
 
-/// Parses a document. Input that isn't UTF-8 is decoded lossily, as gumbo
-/// decodes it.
+/// Input that is not UTF-8 is decoded lossily, as gumbo does.
 pub fn parse_document(input: &[u8], options: &Options) -> Result<(Document, Parsed), LimitError> {
     DocumentParser::new(input.to_vec(), options).finish()
 }
 
-/// A document parse that can be run a chunk of input at a time, so that a
-/// caller can do something else between chunks.
+/// A document parse that runs one chunk of input at a time, so that the caller
+/// can do other work between chunks.
 pub struct DocumentParser(Run);
 
 impl DocumentParser {
@@ -108,13 +106,12 @@ impl DocumentParser {
         DocumentParser(Run::new(builder, input, options, None))
     }
 
-    /// Parses the next chunk of input; false once there is none left or a
-    /// limit was exceeded.
+    /// Parses the next chunk. Returns false when no input remains or a limit
+    /// was exceeded.
     pub fn step(&mut self) -> bool {
         self.0.step()
     }
 
-    /// Parses the rest of the input.
     pub fn finish(self) -> Result<(Document, Parsed), LimitError> {
         let (mut document, parsed) = self.0.finish()?;
         let roots: Vec<_> = document.element_children(NodeId::DOCUMENT).collect();
@@ -125,12 +122,11 @@ impl DocumentParser {
     }
 }
 
-/// The context a fragment is parsed in, as Nokogiri's `Gumbo.fragment`
-/// works it out from its `context` argument.
+/// The context of a fragment parse, as Nokogiri's `Gumbo.fragment` finds
+/// it from its `context` argument.
 #[derive(Clone, Debug)]
 pub struct Context {
     name: QualName,
-    /// The `encoding` attribute of a MathML `annotation-xml` context.
     encoding: Option<Vec<u8>>,
     has_form_ancestor: bool,
     quirks_mode: QuirksMode,
@@ -144,8 +140,8 @@ pub enum ContextNamespace {
 }
 
 impl Context {
-    /// Gumbo looks context names up without regard to case, so they are
-    /// matched here in the case html5ever expects.
+    /// Gumbo looks up context names without case. They are matched here
+    /// in the case that html5ever expects.
     pub fn new(namespace: ContextNamespace, name: &str) -> Context {
         let lower = name.to_ascii_lowercase();
         let (namespace, local) = match namespace {
@@ -179,10 +175,11 @@ impl Context {
         self
     }
 
-    /// `Gumbo.fragment`'s context for a node, whatever its kind: its name
-    /// and namespace, an `annotation-xml`'s `encoding`, and whether it or
-    /// an element above it is a `form`. The quirks mode is left to the
-    /// caller, since `Gumbo.fragment` takes it from the fragment's document.
+    /// The context that `Gumbo.fragment` uses for a node of any kind: its name
+    /// and namespace, the `encoding` of an `annotation-xml`,
+    /// and whether the node or an element above it is a `form`. The caller sets
+    /// the quirks mode, because `Gumbo.fragment` takes it from the document
+    /// of the fragment.
     pub fn of_node(document: &Document, node: NodeId) -> Result<Context, ContextError> {
         let name = document.node_name(node).ok_or(ContextError::NoName)?;
         let namespace = context_namespace(document, node).ok_or_else(|| {
@@ -199,19 +196,19 @@ impl Context {
             .with_form_ancestor(has_form_ancestor(document, node)))
     }
 
-    /// The context `Node#in_context` parses in: the nearest element at or
-    /// above `node`, or `body` where there is none or it is in a namespace
-    /// the parser has no rules for. The quirks mode is the doctype's if
-    /// the document was `parsed`, as for `Gumbo.fragment` with a node.
+    /// The context that `Node#in_context` parses in: the nearest element
+    /// at or above `node`. It is `body` when there is none, or when the element
+    /// is in a namespace that the parser has no rules for. If the document was
+    /// `parsed`, the quirks mode is the one of the doctype,
+    /// as for `Gumbo.fragment` with a node.
     pub fn for_node(document: &Document, node: NodeId, parsed: bool) -> Context {
         let element = std::iter::once(node)
             .chain(document.ancestors(node))
             .find(|&id| matches!(document.node_kind(id), NodeKind::Element(_)));
         let body = Context::new(ContextNamespace::Html, "body");
         let context = match element {
-            Some(element) => Context::of_node(document, element).unwrap_or_else(|_| {
-                body.with_form_ancestor(has_form_ancestor(document, element))
-            }),
+            Some(element) => Context::of_node(document, element)
+                .unwrap_or_else(|_| body.with_form_ancestor(has_form_ancestor(document, element))),
             None => body,
         };
         let quirks_mode = if parsed {
@@ -223,17 +220,17 @@ impl Context {
     }
 }
 
-/// Why `Context::of_node` refuses a node, as `Gumbo.fragment` does.
+/// Why `Context::of_node` refuses a node. `Gumbo.fragment` refuses the same.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ContextError {
-    /// A document, fragment or CDATA section, whose `name` is nil.
+    /// A document, fragment or CDATA section. Its `name` is nil.
     NoName,
-    /// A namespace the parser has no rules for, by its href.
+    /// A namespace that the parser has no rules for, given by its href.
     UnknownNamespace(String),
 }
 
-/// The quirks mode of a fragment parsed in the context of a node of the
-/// parsed `document`: the one its doctype selects, or quirks without one.
+/// The quirks mode of a fragment parsed in the context of a node of the parsed
+/// `document`: the mode of its doctype, or quirks without a doctype.
 pub fn doctype_quirks_mode(document: &Document) -> QuirksMode {
     let doctype = document
         .doctype()
@@ -251,8 +248,8 @@ pub fn doctype_quirks_mode(document: &Document) -> QuirksMode {
     }
 }
 
-/// gumbo.c's `lookup_namespace` for an element; `None` for a namespace the
-/// parser has no rules for.
+/// Port of `lookup_namespace` of gumbo.c. `None` for a namespace
+/// that the parser has no rules for.
 fn context_namespace(document: &Document, element: NodeId) -> Option<ContextNamespace> {
     let Some(namespace) = document.namespace(element) else {
         return Some(ContextNamespace::Html);
@@ -265,7 +262,6 @@ fn context_namespace(document: &Document, element: NodeId) -> Option<ContextName
     }
 }
 
-/// Whether `node` or an element above it is an HTML `form`.
 fn has_form_ancestor(document: &Document, node: NodeId) -> bool {
     let is_form = |id| {
         matches!(document.node_kind(id), NodeKind::Element(element)
@@ -276,7 +272,6 @@ fn has_form_ancestor(document: &Document, node: NodeId) -> bool {
         .any(|id| is_form(id) && context_namespace(document, id) == Some(ContextNamespace::Html))
 }
 
-/// Parses a fragment in `context` and appends what it makes to `fragment`.
 pub fn parse_fragment(
     document: &mut Document,
     fragment: NodeId,
@@ -288,8 +283,8 @@ pub fn parse_fragment(
     Ok(parsed.append_to(document, fragment))
 }
 
-/// Parses a fragment in `context` and returns its top-level nodes, each
-/// unlinked from its parent and siblings.
+/// Parses a fragment in `context`. Returns its top-level nodes, each unlinked
+/// from its parent and siblings.
 pub fn parse_in_context(
     document: &mut Document,
     input: &[u8],
@@ -300,18 +295,18 @@ pub fn parse_in_context(
     Ok(parsed.import(document))
 }
 
-/// A fragment parse that can be run a chunk of input at a time, like
-/// [`DocumentParser`]. It builds in a scratch document of its own, so the
-/// parser's scaffolding (an html root, the context and form elements) and
-/// the nodes of a parse that fails never reach the document they are for.
+/// A fragment parse that runs one chunk of input at a time, like
+/// [`DocumentParser`]. It builds in its own scratch document. The scaffolding
+/// of the parser (an html root, the context and form elements) and the nodes
+/// of a failed parse never reach the target document.
 pub struct FragmentParser(Run);
 
 impl FragmentParser {
     pub fn new(input: Vec<u8>, context: &Context, options: &Options) -> FragmentParser {
-        // The tree has an html element above the fragment's nodes, as gumbo's does
+        // The tree has an html element above the fragment nodes, as in gumbo.
         let max_tree_depth = options.max_tree_depth.map(|depth| depth.saturating_add(1));
         let sink = Sink::new(options, max_tree_depth);
-        // The tree builder starts in this mode and never sets it in a fragment
+        // The tree builder starts in this mode and never sets it in a fragment.
         sink.quirks_mode.set(context.quirks_mode);
 
         let mut attributes = Vec::new();
@@ -337,28 +332,26 @@ impl FragmentParser {
         FragmentParser(Run::new(builder, input, options, Some(initial_state)))
     }
 
-    /// Parses the next chunk of input; false once there is none left or a
-    /// limit was exceeded.
+    /// Parses the next chunk. Returns false when no input remains or a limit
+    /// was exceeded.
     pub fn step(&mut self) -> bool {
         self.0.step()
     }
 
-    /// Parses the rest of the input.
     pub fn finish(self) -> Result<ParsedFragment, LimitError> {
         let (scratch, parsed) = self.0.finish()?;
         Ok(ParsedFragment { scratch, parsed })
     }
 }
 
-/// A fragment's nodes, still in the parser's scratch document.
 pub struct ParsedFragment {
     scratch: Document,
     parsed: Parsed,
 }
 
 impl ParsedFragment {
-    /// Copies the top-level nodes into `document`, unlinked. The copies get
-    /// the names and namespace definitions `document` writes.
+    /// Copies the top-level nodes into `document`, unlinked. The copies use
+    /// the names and namespace definitions that `document` writes.
     pub fn import(self, document: &mut Document) -> (Vec<NodeId>, Parsed) {
         let scratch = &self.scratch;
         let root = scratch.first_child(NodeId::DOCUMENT);
@@ -370,8 +363,6 @@ impl ParsedFragment {
         (nodes, self.parsed)
     }
 
-    /// Copies the top-level nodes into `document` and appends them to
-    /// `fragment`.
     pub fn append_to(self, document: &mut Document, fragment: NodeId) -> Parsed {
         let (nodes, parsed) = self.import(document);
         for node in nodes {
@@ -383,9 +374,9 @@ impl ParsedFragment {
     }
 }
 
-/// Gumbo's binding defines the foreign namespaces a top-level element and
-/// its descendants use on that element, so they are in scope as libxml2
-/// needs them to be.
+/// The binding of gumbo defines the foreign namespaces of a top-level element
+/// and its descendants on that element. This puts them in scope as libxml2
+/// needs.
 fn define_namespaces(document: &mut Document, root: NodeId) {
     let mut used = Vec::new();
     for element in std::iter::once(root).chain(document.descendants(root)) {
@@ -394,7 +385,7 @@ fn define_namespaces(document: &mut Document, root: NodeId) {
             let Some(namespace) = document.namespace(node) else {
                 continue;
             };
-            // libxml2 binds `xml` without a definition
+            // libxml2 binds `xml` without a definition.
             let Some(prefix) = namespace.prefix.filter(|&prefix| prefix != "xml") else {
                 continue;
             };
@@ -411,8 +402,8 @@ fn define_namespaces(document: &mut Document, root: NodeId) {
     }
 }
 
-/// The quirks mode a doctype selects, which Nokogiri computes for a
-/// fragment parsed in the context of a node of a parsed document.
+/// The quirks mode of a doctype. Nokogiri computes it for a fragment parsed
+/// in the context of a node of a parsed document.
 pub fn quirks_mode_for_doctype(
     name: Option<&[u8]>,
     public_id: Option<&[u8]>,
@@ -427,8 +418,8 @@ pub fn quirks_mode_for_doctype(
         system_id: tendril(system_id),
         force_quirks: false,
     };
-    // A tree builder in its initial mode decides the quirks mode from the
-    // doctype token, with the same table it uses for documents
+    // A tree builder in its initial mode decides the quirks mode
+    // from the doctype token, with the same table as for documents.
     let options = Options::default();
     let sink = Sink::new(&options, None);
     let builder = TreeBuilder::new(sink, tree_builder_options(&options, QuirksMode::NoQuirks));
@@ -438,19 +429,18 @@ pub fn quirks_mode_for_doctype(
 
 fn tree_builder_options(options: &Options, quirks_mode: QuirksMode) -> TreeBuilderOpts {
     TreeBuilderOpts {
-        // Gumbo parses noscript content as markup unless asked not to
+        // Gumbo parses noscript content as markup, unless told not to.
         scripting_enabled: options.parse_noscript_content_as_text,
         quirks_mode: quirks_mode.into(),
         ..TreeBuilderOpts::default()
     }
 }
 
-/// Input goes to the tokenizer in pieces, so parsing stops soon after a
-/// limit is exceeded and no tendril outgrows its 32-bit length. Smaller
-/// under Miri, so tests can cross chunks in reasonable time.
+/// Input goes to the tokenizer in pieces. Parsing then stops soon after a limit
+/// is exceeded, and no tendril grows past its 32-bit length. The chunk
+/// is smaller under Miri, so that tests can cross chunks quickly.
 pub(super) const CHUNK: usize = if cfg!(miri) { 1 << 8 } else { 1 << 16 };
 
-/// The tokenizer, the tree builder it feeds, and the input not fed yet.
 struct Run {
     tokenizer: Tokenizer<Tokens>,
     queue: BufferQueue,
@@ -519,9 +509,9 @@ impl Run {
     }
 }
 
-/// Passes tokens to the tree builder, counting attributes on the way.
-/// Gumbo's tokenizer refuses a tag with more distinct attributes than the
-/// limit, and html5ever's has already dropped the duplicates.
+/// Passes tokens to the tree builder and counts the attributes. Gumbo's
+/// tokenizer refuses a tag with more distinct attributes than the limit.
+/// The tokenizer of html5ever has already dropped the duplicates.
 struct Tokens {
     builder: TreeBuilder<NodeId, Sink>,
     max_attributes: Option<usize>,
@@ -557,15 +547,15 @@ impl TokenSink for Tokens {
         self.builder.end();
     }
 
-    /// The tokenizer asks this at `<![`, and opens a CDATA section if the
-    /// answer is yes and `CDATA[` follows.
+    /// The tokenizer asks this at `<![`. If the answer is yes and `CDATA[`
+    /// follows, it opens a CDATA section.
     fn adjusted_current_node_present_but_not_in_html_namespace(&self) -> bool {
         self.builder
             .adjusted_current_node_present_but_not_in_html_namespace()
     }
 }
 
-/// Builds the tree in the arena. A template's contents are its children,
+/// Builds the tree in the arena. The contents of a template are its children,
 /// as Nokogiri builds them.
 struct Sink {
     document: RefCell<Document>,
@@ -575,7 +565,6 @@ struct Sink {
     max_errors: Option<usize>,
     max_tree_depth: Option<usize>,
     too_deep: Cell<bool>,
-    /// MathML `annotation-xml` elements whose content parses as HTML.
     integration_points: RefCell<HashSet<NodeId>>,
 }
 
@@ -593,11 +582,11 @@ impl Sink {
         }
     }
 
-    /// Gumbo's limit is on its stack of open elements, which html5ever
-    /// doesn't expose. Its depth is that of the element last pushed, so an
-    /// element is measured where it is inserted. Void elements are never
-    /// pushed. Elements the adoption agency moves are measured again, which
-    /// gumbo doesn't do.
+    /// Gumbo limits its stack of open elements, which html5ever does
+    /// not expose. The depth here is the depth of the element pushed last,
+    /// so an element is measured where it is inserted. Void elements are never
+    /// pushed. Elements that the adoption agency moves are measured again.
+    /// Gumbo does not do that.
     fn check_depth(&self, document: &Document, parent: NodeId, child: NodeId) {
         let Some(max) = self.max_tree_depth else {
             return;
@@ -622,7 +611,6 @@ impl Sink {
         }
     }
 
-    /// Inserts a node or text into `parent`, before `before` or at the end.
     fn insert(&self, parent: NodeId, before: Option<NodeId>, child: NodeOrText<NodeId>) {
         let mut document = self.document.borrow_mut();
         let node = match child {
@@ -637,18 +625,17 @@ impl Sink {
                 }
             }
         };
-        // html5ever only asks for insertions the DOM allows
+        // html5ever asks only for insertions that the DOM allows.
         let _ = match before {
             Some(sibling) => document.insert_before(sibling, node),
             None => document.append_child(parent, node),
         };
     }
 
-    /// Adjacent character tokens make one text node. A CDATA section's
-    /// characters are text too, as in the HTML standard: gumbo makes a
-    /// CDATA node of them and of the text around them, which is serialized
-    /// raw. Returns a new node to insert, or `None` if the text went into
-    /// the node next to it.
+    /// Adjacent character tokens make one text node. The characters of a CDATA
+    /// section are text too, as in the HTML standard. Gumbo makes one CDATA
+    /// node of them and the text around them, and serializes it raw. Returns
+    /// a new node to insert, or `None` if the text went into the adjacent node.
     fn insert_text(
         &self,
         document: &mut Document,
@@ -677,7 +664,6 @@ impl Sink {
     }
 }
 
-/// An element's name, copied out of the arena so no borrow outlives the call.
 #[derive(Debug)]
 struct Name(QualName);
 
@@ -772,8 +758,8 @@ impl TreeSink for Sink {
         }
     }
 
-    /// libxml2 makes the doctype the document's first child, wherever it was
-    /// in the input.
+    /// libxml2 makes the doctype the first child of the document, wherever
+    /// it was in the input.
     fn append_doctype_to_document(
         &self,
         name: StrTendril,

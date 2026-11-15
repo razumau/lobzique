@@ -1,16 +1,16 @@
 # frozen_string_literal: true
 
-# Adapted from Nokogiri 1.19.7, lib/nokogiri/html4/document.rb (MIT, see LICENSE-NOKOGIRI.md).
-# lobzique: the HTML4 names parse with the HTML5 parser, after decoding the
-# input as libxml2 does (plan.md decision 3).
+# Adapted from Nokogiri 1.19.7, lib/nokogiri/html4/document.rb (MIT, see
+# LICENSE-NOKOGIRI.md). lobzique: the HTML4 names parse with the HTML5 parser,
+# after the input is decoded as libxml2 decodes it (plan.md decision 3).
 
 require "pathname"
 
 module Lobzique
   module HTML4
     class Document < XML::Document
-      # lobzique: libxml2's first read from an IO, the chunk EncodingReader
-      # looks for an encoding in
+      # lobzique: the first read of libxml2 from an IO. EncodingReader looks
+      # for an encoding in this chunk.
       IO_CHUNK = 4000
       private_constant :IO_CHUNK
 
@@ -139,9 +139,9 @@ module Lobzique
       ####
       # Create a Nokogiri::XML::DocumentFragment from +tags+
       def fragment(tags = nil)
-        # lobzique: no context. Nokogiri passes the root, and the HTML5
-        # parser in the context of <html> would put the input in a <body>
-        # of the fragment's own (plan.md decision 3)
+        # lobzique: no context. Nokogiri passes the root, and the HTML5 parser
+        # in the context of <html> would put the input in a <body>
+        # of the fragment's own (plan.md decision 3).
         DocumentFragment.new(self, tags)
       end
 
@@ -196,17 +196,16 @@ module Lobzique
           read_memory(input, url, encoding, options.to_i)
         end
 
-        # lobzique: native in Nokogiri (libxml2's htmlReadMemory). The
-        # options are ignored: the HTML5 parser always recovers, and keeps
-        # its own errors, at most 100 as for Node#parse.
+        # lobzique: native in Nokogiri (htmlReadMemory of libxml2). The options
+        # are ignored: the HTML5 parser always recovers and keeps its own
+        # errors, at most 100 as for Node#parse.
         def read_memory(string, url, encoding, options)
           html, encoding, errors = EncodingReader.decode(string, encoding)
           parse_decoded(html, url, encoding, errors)
         end
 
-        # lobzique: native in Nokogiri (libxml2's htmlReadIO), which reads
-        # the IO as libxml2 asks for it, so EncodingReader sees the same
-        # first chunk.
+        # lobzique: native in Nokogiri (htmlReadIO of libxml2). It reads the IO
+        # as libxml2 asks for it, so EncodingReader sees the same first chunk.
         def read_io(io, url, encoding, options)
           input = +""
           while (chunk = io.read(IO_CHUNK))

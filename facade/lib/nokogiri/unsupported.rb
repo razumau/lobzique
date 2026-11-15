@@ -1,10 +1,11 @@
 # frozen_string_literal: true
 
-# lobzique's own: Nokogiri's entry points to what lobzique leaves out
-# (plan.md, "Out"). Absent, they fail with NoMethodError or an uninitialized
-# constant, and on the facade nothing before that says Nokogiri isn't there:
-# Bundler, VERSION and uses_libxml? all answer as Nokogiri. These raise
-# NotImplementedError, and the constants NameError, saying so.
+# lobzique's own: the entry points of Nokogiri to what lobzique leaves out
+# (plan.md, "Out"). Without this file they fail with NoMethodError
+# or an uninitialized constant. On the facade, nothing before that says Nokogiri
+# is not there: Bundler, VERSION and uses_libxml? all answer as Nokogiri.
+# These methods raise NotImplementedError, and the constants raise NameError,
+# with a message that says so.
 
 module Nokogiri
   module Facade
@@ -16,14 +17,14 @@ module Nokogiri
 
       def self.stub_methods(feature, mod, *names)
         names.each do |name|
-          # self is the receiver, so a subclass names itself
+          # self is the receiver, so a subclass names itself.
           mod.define_singleton_method(name) do |*|
             raise NotImplementedError, Unsupported.message("#{self}.#{name}", feature)
           end
         end
       end
 
-      # const_missing rather than placeholder classes: defined? stays false
+      # const_missing, not placeholder classes: defined? stays false
       # and NameError stays the error.
       def self.stub_constants(feature, mod, *names)
         hook = Module.new do

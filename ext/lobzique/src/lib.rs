@@ -1,11 +1,11 @@
-//! Ruby bindings: the native classes and methods Nokogiri's C extension
-//! defines, with the same names, each a thin call into lobzique-core. Files
-//! mirror `lib/lobzique/`; see ARCHITECTURE.md.
+//! Ruby bindings: the native classes and methods that the C extension
+//! of Nokogiri defines, with the same names. Each is a thin call
+//! into lobzique-core. Files mirror `lib/lobzique/`. See ARCHITECTURE.md.
 //!
-//! Code borrowing an arena must not reach Ruby (ARCHITECTURE.md, "Memory
-//! model"). The borrow closures must be `Send`; the lints here and in
-//! `clippy.toml` close the known ways around that: `unsafe` only in
-//! `support`, and no magnus API that fetches a Ruby handle itself.
+//! Code that borrows an arena must not reach Ruby (ARCHITECTURE.md, "Memory
+//! model"). The borrow closures must be `Send`. The lints here
+//! and in `clippy.toml` close the known ways around that: `unsafe` only
+//! in `support`, and no magnus API that fetches a Ruby handle itself.
 #![deny(unsafe_code, deprecated)]
 
 mod css;
@@ -36,7 +36,6 @@ pub static HTML5EVER: Lazy<RModule> = Lazy::new(|ruby| {
 
 #[magnus::init]
 fn init(ruby: &Ruby) -> Result<(), Error> {
-    // Parents before children, as in Nokogiri's Init_nokogiri
     xml::init(ruby)?;
     html4::init(ruby)?;
     html5::init(ruby)?;

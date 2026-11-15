@@ -27,14 +27,14 @@ run = "bundle exec rake test:gc_stress"
 
 [tasks.miri]
 description = "Run the core crate's tests under Miri"
-# tendril (html5ever's strings) casts integers to pointers
+# tendril (the strings of html5ever) casts integers to pointers.
 env = { MIRIFLAGS = "-Zmiri-permissive-provenance" }
 run = "cargo +nightly miri test -p lobzique-core"
 
 [tasks.asan]
 description = "Run the core crate's tests under AddressSanitizer"
 env = { RUSTFLAGS = "-Zsanitizer=address" }
-# An explicit target keeps ASan out of build scripts and proc macros
+# An explicit target keeps ASan out of build scripts and proc macros.
 run = 'cargo +nightly test -Zbuild-std --target "$(rustc -vV | sed -n "s/^host: //p")" -p lobzique-core'
 
 [tasks.fuzz]
@@ -71,7 +71,7 @@ description = "Run public apps' suites on lobzique's seams and on the nokogiri f
 usage = '''
 arg "[args]..." help="App names from script/apps/run.rb, default all; --mode seam|facade for one mode" var=#true
 '''
-# Campfire needs Ruby >= 3.4.5; the script leaves a 4.0 build in lib/
+# Campfire needs Ruby >= 3.4.5. The script leaves a 4.0 build in lib/.
 tools = { ruby = "4.0" }
 run = "ruby script/apps/run.rb {{usage.args | default(value=[]) | join(sep=' ')}}"
 

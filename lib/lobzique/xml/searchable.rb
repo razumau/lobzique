@@ -4,9 +4,9 @@
 
 module Lobzique
   module XML
-    # The search methods shared by Node and NodeSet. CSS selectors compile
-    # into CSS::Selector where Nokogiri translates them into XPath strings,
-    # and go through #xpath the same way (ARCHITECTURE.md).
+    # The search methods that Node and NodeSet share. CSS selectors compile
+    # to CSS::Selector where Nokogiri translates them to XPath strings. They go
+    # through #xpath in the same way (ARCHITECTURE.md).
     module Searchable
       LOOKS_LIKE_XPATH = %r{^(\./|/|\.\.|\.$)}
 
@@ -62,7 +62,7 @@ module Lobzique
 
       def extract_params(params) # :nodoc:
         handler = params.find do |param|
-          # lobzique: compiled CSS is a query too, where Nokogiri has a String
+          # lobzique: compiled CSS is a query too, where Nokogiri has a String.
           ![Hash, String, Symbol, CSS::Selector].include?(param.class)
         end
         params -= [handler] if handler
@@ -88,7 +88,7 @@ module Lobzique
       end
 
       # lobzique: one CSS::Selector for every implied context, where Nokogiri
-      # joins an XPath string per context with " | "
+      # joins an XPath string for each context with " | ".
       def xpath_query_from_css_rule(rule, ns)
         CSS::Selector.new(
           rule.to_s, prefixes: self.class::IMPLIED_XPATH_CONTEXTS, doctype: document.xpath_doctype,

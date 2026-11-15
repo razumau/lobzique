@@ -10,7 +10,7 @@
 #                                                        choose a new sample and rewrite crawl.yml
 #
 # Each range starts at the beginning of a WARC file and ends on a record
-# boundary. Stdlib only; nothing downloaded is evaluated.
+# boundary. Standard library only. Nothing that is downloaded is evaluated.
 
 require "digest"
 require "fileutils"

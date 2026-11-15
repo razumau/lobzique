@@ -43,21 +43,22 @@ APPS = {
     setup: %w[bin/rails db:prepare],
     suite: %w[bin/rails test]
   },
-  # Calls Nokogiri directly and no sanitizer vendor, so seam mode changes nothing.
+  # This app calls Nokogiri directly and sets no sanitizer vendor, so seam mode
+  # changes nothing.
   "lobsters" => {
     repo: "lobsters/lobsters",
     ruby: ">= 4.0.9",
     modes: %w[facade],
     runner: :rspec,
     copy: {".github/workflows/check/." => "config", "config/database.yml.sample" => "config/database.yml"},
-    # the suite leaves rows that schema:load trips on
+    # The suite leaves rows that schema:load trips on.
     setup: %w[bin/rails db:drop db:create db:schema:load db:migrate],
-    # css_widely_available_spec downloads browser data when it loads
+    # css_widely_available_spec downloads browser data when it loads.
     suite: %w[bundle exec rspec --exclude-pattern spec/css_widely_available_spec.rb]
   }
 }.freeze
 
-# Started with Docker, left running for the next run.
+# Started with Docker. Left running for the next run.
 SERVICES = {
   "postgres" => {
     run: %w[-p 5432:5432 -e POSTGRES_HOST_AUTH_METHOD=trust postgres:18],
@@ -72,7 +73,7 @@ CONFIG = <<~RUBY
   config.action_view.sanitizer_vendor = Lobzique::Sanitizer
   config.action_text.sanitizer_vendor = Lobzique::Sanitizer
 RUBY
-# Action Text sets its sanitizer once Action View loads.
+# Action Text sets its sanitizer when Action View loads.
 SEAM_CHECK = <<~RUBY
   ActionView::Base
   vendors = [ActionView::Helpers::SanitizeHelper.sanitizer_vendor, ActionText::ContentHelper.sanitizer.class]
@@ -87,7 +88,7 @@ RUBY
 root = File.expand_path("../..", __dir__)
 tmp = File.join(root, "tmp/apps")
 refs = File.readlines(File.join(root, "script/inventory/apps.tsv"), chomp: true).to_h { _1.split("\t") }
-# Apps' SSRF guards resolve hosts; see resolv_offline.rb.
+# The SSRF guards of apps resolve hosts. See resolv_offline.rb.
 env = {
   "LANG" => "C.UTF-8",
   "RAILS_ENV" => "test",
@@ -103,8 +104,8 @@ def use_seams(dir, root)
   File.write(application, source)
 end
 
-# Only a bare declaration is replaced: one with options would run the facade
-# under other conditions than the baseline.
+# Only a bare declaration is replaced. A declaration with options would run
+# the facade under other conditions than the baseline.
 def use_facade(dir, root)
   gemfile = File.join(dir, "Gemfile")
   source = File.read(gemfile).gsub(/^[ \t]*gem ["']nokogiri["'][ \t]*(?:#.*)?$/, "")
@@ -125,14 +126,15 @@ def start_service(name)
   abort "#{name} isn't ready"
 end
 
-# Both return {summary:, failed:}, with no summary for a suite that didn't finish.
+# Both return {summary:, failed:}, with no summary for a suite that did
+# not finish.
 def minitest_result(log)
   failed = SuiteRunner.read(log).scan(/^(\S+#test_.+?)(?: \[[^\]]+\])?:$/).flatten.uniq
   {summary: SuiteRunner.minitest_summary(log), failed:}
 end
 
-# Descriptions repeat within a file, ids don't. A file that fails to load
-# leaves its examples out of the report, so that run didn't finish either.
+# Descriptions repeat within a file. Ids do not. A file that fails to load
+# leaves its examples out of the report, so that run did not finish either.
 def rspec_result(json)
   report = JSON.parse(File.read(json))
   failed = report["examples"].select { _1["status"] == "failed" }.map { "#{_1["id"]} #{_1["full_description"]}" }
@@ -148,10 +150,11 @@ names = ARGV.empty? ? APPS.keys : ARGV
 names, skipped = names.partition { only.nil? || APPS.fetch(_1)[:modes].include?(only) }
 warn "no #{only} mode: #{skipped.join(", ")}" if skipped.any?
 exit if names.empty?
-# Left by apps that are no longer here.
+# Left by apps that are no longer listed.
 FileUtils.rm_rf(Dir.glob(File.join(tmp, "out/*")).reject { APPS.key?(File.basename(_1)) })
-# A path gem's extension isn't built by Bundler; lib/ holds whichever Ruby's
-# build ran last, and one built for another Ruby's ABI loads and misbehaves.
+# Bundler does not build the extension of a path gem. lib/ holds the build
+# of whichever Ruby ran last. A build for the ABI of another Ruby loads
+# and misbehaves.
 SuiteRunner.run(env.except("RAILS_ENV"), "bundle", "install", "--quiet", chdir: root)
 SuiteRunner.run(env.except("RAILS_ENV"), "bundle", "exec", "rake", "compile", chdir: root)
 results = names.map do |name|
@@ -165,7 +168,7 @@ results = names.map do |name|
   out = File.join(tmp, "out", name)
   FileUtils.mkdir_p(out)
   modes = app[:modes].select { only.nil? || _1 == only }
-  # Left by modes that are no longer here.
+  # Left by modes that are no longer listed.
   FileUtils.rm_f(Dir.children(out).reject { ["baseline", *app[:modes]].include?(File.basename(_1, ".*")) }.map { File.join(out, _1) })
   ["baseline", *modes].to_h do |mode|
     SuiteRunner.checkout(app_env, app[:repo], refs.fetch(app[:repo]), dir)

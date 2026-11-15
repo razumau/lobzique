@@ -1,9 +1,9 @@
-//! libxml2's `xmlSaveTree` (xmlsave.c 2.13) for Nokogiri's
-//! `native_write_to`: a node, the node included, as XML or XHTML.
+//! libxml2's `xmlSaveTree` (xmlsave.c 2.13) for the `native_write_to`
+//! of Nokogiri: a node, the node included, as XML or XHTML.
 //!
-//! libxml2 escapes as it writes and then transcodes the whole stream, with
-//! `&#NNN;` for characters the target encoding lacks. [`write`] does the
-//! first half and names the encoding for the second.
+//! libxml2 escapes while it writes, then transcodes the whole stream. It writes
+//! `&#NNN;` for characters that the target encoding lacks. [`write`] does
+//! the first half and names the encoding for the second.
 
 use crate::dom::{c_string, Doctype, Document, DocumentKind, NodeId, NodeKind};
 
@@ -20,21 +20,21 @@ pub mod save_options {
 
 use save_options::*;
 
-/// What [`write`] wrote, still UTF-8, and the encoding libxml2 would
-/// transcode it into, if any.
+/// What [`write`] wrote, still UTF-8, and the encoding that libxml2 would
+/// transcode it to, if any.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Output {
     pub bytes: Vec<u8>,
     pub encoding: Option<Vec<u8>>,
 }
 
-/// The options ask for libxml2's HTML serializer, which isn't ported
+/// The options ask for the HTML serializer of libxml2, which is not ported
 /// (plan.md decision 3).
 #[derive(Debug, PartialEq, Eq)]
 pub struct HtmlUnsupported;
 
-/// libxml2's `MAX_INDENT`: the indentation of the deepest levels is cut to
-/// as many copies of the indent string as fit in this many bytes.
+/// libxml2's `MAX_INDENT`: the indentation of the deepest levels is cut
+/// to as many copies of the indent string as fit in this number of bytes.
 const MAX_INDENT: usize = 60;
 
 const XHTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
@@ -50,7 +50,7 @@ pub fn write(
 ) -> Result<Output, HtmlUnsupported> {
     let is_document = matches!(document.node_kind(id), NodeKind::Document);
     let html = if options & AS_XHTML != 0 {
-        // checked by xmlDocContentDumpOutput only
+        // Only xmlDocContentDumpOutput checks this.
         is_document && options & AS_HTML != 0
     } else {
         options & AS_HTML != 0 || (document.kind() == DocumentKind::Html && options & AS_XML == 0)
@@ -87,15 +87,12 @@ pub fn write(
     })
 }
 
-/// libxml2's escaping function for text: `xmlEscapeEntities` with no
-/// encoding, else `xmlEscapeContent`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Escape {
     Entities,
     Content,
 }
 
-/// libxml2's `xmlSaveCtxt`.
 struct Saver<'a> {
     document: &'a Document,
     out: Vec<u8>,
@@ -107,18 +104,18 @@ struct Saver<'a> {
     indent: &'a [u8],
     indent_count: usize,
     escape: Escape,
-    /// `doc->encoding != NULL`, which keeps attribute values from being
-    /// written as character references.
+    /// `doc->encoding != NULL`. It stops attribute values from being written
+    /// as character references.
     has_encoding: bool,
 }
 
 impl Saver<'_> {
-    /// `xmlNodeDumpOutputInternal`, or `xhtmlNodeDumpOutput` with `xhtml`.
-    /// The two differ only where `xhtml` is read.
+    /// `xmlNodeDumpOutputInternal`, or `xhtmlNodeDumpOutput` with `xhtml`. They
+    /// differ only where `xhtml` is read.
     fn node(&mut self, root: NodeId, xhtml: bool) {
         let document = self.document;
         if xhtml {
-            // never restored: xhtmlNodeDumpOutput returns before it would be
+            // Never restored: xhtmlNodeDumpOutput returns before it would be.
             self.options |= AS_XHTML;
         }
         let format = self.format;
@@ -261,8 +258,6 @@ impl Saver<'_> {
         }
     }
 
-    /// `xmlDocContentDumpOutput`, for the XML declaration and the
-    /// document's children.
     fn document_content(&mut self) {
         let document = self.document;
         let had_encoding = self.has_encoding;
@@ -275,7 +270,8 @@ impl Saver<'_> {
         };
         if let (Some(encoding), None) = (encoding, self.encoding) {
             if self.options & NO_DECLARATION == 0 {
-                // xmlParseCharEncoding: only UTF-8 and no encoding go untranscoded
+                // xmlParseCharEncoding: only UTF-8 and no encoding stay
+                // untranscoded.
                 let utf8 = encoding.is_empty()
                     || encoding.eq_ignore_ascii_case(b"UTF-8")
                     || encoding.eq_ignore_ascii_case(b"UTF8");
@@ -292,7 +288,8 @@ impl Saver<'_> {
                 self.out.extend_from_slice(b" encoding=");
                 self.quoted(encoding);
             }
-            // htmlNewDocNoDtD makes HTML documents standalone, xmlNewDoc leaves it unset
+            // htmlNewDocNoDtD makes HTML documents standalone. xmlNewDoc leaves
+            // it unset.
             if document.kind() == DocumentKind::Html {
                 self.out.extend_from_slice(b" standalone=\"yes\"");
             }
@@ -314,7 +311,6 @@ impl Saver<'_> {
         self.has_encoding = had_encoding;
     }
 
-    /// `xmlDtdDumpOutput` for a doctype, which declares nothing.
     fn doctype(&mut self, doctype: &Doctype) {
         self.out.extend_from_slice(b"<!DOCTYPE ");
         self.out.extend_from_slice(c_string(&doctype.name));
@@ -330,7 +326,6 @@ impl Saver<'_> {
         self.out.push(b'>');
     }
 
-    /// `xmlAttrDumpOutput`.
     fn attribute(&mut self, id: NodeId) {
         let NodeKind::Attribute(attribute) = self.document.node_kind(id) else {
             return;
@@ -352,9 +347,9 @@ impl Saver<'_> {
         self.out.push(b'"');
     }
 
-    /// `xhtmlAttrListDumpOutput`: the attributes, then an `id` for a
-    /// `name` and the missing one of `lang` and `xml:lang` (XHTML 1.0
-    /// appendix C.8 and C.7).
+    /// `xhtmlAttrListDumpOutput`: the attributes, then an `id` for a `name`,
+    /// and the missing one of `lang` and `xml:lang` (XHTML 1.0 appendix C.8
+    /// and C.7).
     fn xhtml_attributes(&mut self, element: NodeId, attributes: &[NodeId]) {
         let document = self.document;
         let (mut id, mut name, mut lang, mut xml_lang) = (None, None, None, None);
@@ -401,8 +396,8 @@ impl Saver<'_> {
         }
     }
 
-    /// Whether a `head` that is the document's `html`'s child has no
-    /// Content-Type `meta`, which XHTML output then adds.
+    /// Whether a `head` that is a child of the `html` of the document has no
+    /// Content-Type `meta`. XHTML output then adds one.
     fn lacks_content_type(&self, head: NodeId, parent: Option<NodeId>) -> bool {
         let document = self.document;
         let named = |id: NodeId, name: &str| matches!(document.node_kind(id), NodeKind::Element(e) if &*e.name.local == name);
@@ -424,8 +419,8 @@ impl Saver<'_> {
             })
     }
 
-    /// The `meta` XHTML output adds to a `head`, which has children unless
-    /// `empty`.
+    /// The `meta` that XHTML output adds to a `head`. The `head` has children
+    /// unless `empty`.
     fn content_type_meta(&mut self, empty: bool) {
         if self.format {
             self.out.push(b'\n');
@@ -441,7 +436,7 @@ impl Saver<'_> {
         }
     }
 
-    /// `xhtmlIsEmpty`: an element XHTML output closes with ` />`.
+    /// `xhtmlIsEmpty`: an element that XHTML output closes with ` />`.
     fn is_empty_xhtml(&self, id: NodeId) -> bool {
         if self
             .document
@@ -460,7 +455,6 @@ impl Saver<'_> {
         )
     }
 
-    /// `xmlNsDumpOutput`.
     fn namespace_definition(&mut self, prefix: Option<&str>, href: &str) {
         match prefix {
             Some("xml") => return,
@@ -495,7 +489,6 @@ impl Saver<'_> {
         }
     }
 
-    /// `xmlOutputBufferWriteEscape` with the context's escaping function.
     fn text(&mut self, text: &[u8]) {
         crate::work::add(text.len());
         let mut index = 0;
@@ -535,8 +528,8 @@ impl Saver<'_> {
         }
     }
 
-    /// `xmlBufAttrSerializeTxtContent`. With no encoding in effect, other
-    /// than ASCII is written as character references, except a last byte.
+    /// `xmlBufAttrSerializeTxtContent`. With no encoding in effect, anything
+    /// other than ASCII is written as character references, except a last byte.
     fn attribute_value(&mut self, value: &[u8]) {
         crate::work::add(value.len());
         let mut index = 0;
@@ -567,7 +560,7 @@ impl Saver<'_> {
         }
     }
 
-    /// A CDATA section, split after each `]]` that a `>` follows.
+    /// A CDATA section, split after each `]]` that is followed by `>`.
     fn cdata(&mut self, text: &[u8]) {
         crate::work::add(text.len());
         if text.is_empty() {
@@ -593,7 +586,6 @@ impl Saver<'_> {
         }
     }
 
-    /// `xmlOutputBufferWriteQuotedString`.
     fn quoted(&mut self, string: &[u8]) {
         let string = c_string(string);
         if !string.contains(&b'"') {
@@ -618,7 +610,7 @@ impl Saver<'_> {
     }
 }
 
-/// `xmlIsXHTML`: whether a doctype names one of XHTML 1.0's DTDs.
+/// `xmlIsXHTML`: whether a doctype names one of the DTDs of XHTML 1.0.
 fn is_xhtml(doctype: &Doctype) -> bool {
     const PUBLIC_IDS: [&[u8]; 3] = [
         b"-//W3C//DTD XHTML 1.0 Strict//EN",
@@ -646,9 +638,9 @@ fn is_boolean_attribute(name: &str) -> bool {
     .any(|boolean| boolean.eq_ignore_ascii_case(name))
 }
 
-/// `xmlGetUTF8Char` on the bytes from a non-ASCII one: the character and
-/// how many bytes it took, or U+FFFD and one byte for a malformed sequence.
-/// Characters XML doesn't allow are U+FFFD too.
+/// `xmlGetUTF8Char` on the bytes from a non-ASCII one: the character
+/// and how many bytes it took. A malformed sequence gives U+FFFD and one byte.
+/// Characters that XML does not allow also give U+FFFD.
 fn decode_utf8(bytes: &[u8]) -> (u32, usize) {
     let length = match bytes[0] {
         0xC2..=0xDF => 2,

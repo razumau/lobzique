@@ -1,10 +1,10 @@
-//! `XML::SyntaxError` and its subclasses, made as Nokogiri's
-//! `noko_xml_syntax_error__wrap` makes them from libxml2's `xmlError`.
+//! `XML::SyntaxError` and its subclasses, made as `noko_xml_syntax_error__wrap`
+//! of Nokogiri makes them from the `xmlError` of libxml2.
 
 use super::node::utf8_string;
 use magnus::{prelude::*, Error, Exception, RClass, RObject, Ruby, Value};
 
-/// The parts of libxml2's `xmlError` that an error here has.
+/// The parts of the `xmlError` of libxml2 that an error here has.
 pub struct XmlError<'a> {
     pub domain: i32,
     pub code: i32,

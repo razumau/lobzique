@@ -22,8 +22,8 @@ module Lobzique
       attr_accessor :parse_noscript_content_as_text # :nodoc:
 
       class << self
-        # Parses with the HTML standard's algorithm. The block, if given,
-        # gets the options Hash; `url:` and `encoding:` can't be set there.
+        # Parses with the algorithm of the HTML standard. The block, if given,
+        # gets the options Hash. `url:` and `encoding:` cannot be set there.
         def parse(
           string_or_io,
           url_ = nil, encoding_ = nil,
@@ -64,7 +64,8 @@ module Lobzique
         def do_parse(string_or_io, url, encoding, **options)
           string = HTML5.read_and_encode(string_or_io, encoding)
 
-          # lobzique: Html5ever is Nokogiri's Gumbo, renamed after the engine
+          # lobzique: Html5ever is the Gumbo of Nokogiri, renamed after
+          # the engine.
           options[:max_attributes] ||= Html5ever::DEFAULT_MAX_ATTRIBUTES
           options[:max_errors] ||= options.delete(:max_parse_errors) || Html5ever::DEFAULT_MAX_ERRORS
           options[:max_tree_depth] ||= Html5ever::DEFAULT_MAX_TREE_DEPTH
@@ -96,7 +97,7 @@ module Lobzique
         XML::Node.instance_method(:to_xml).bind_call(self, options, &block)
       end
 
-      # lobzique: CSS::XPathVisitor::DoctypeConfig::HTML5 in Nokogiri
+      # lobzique: CSS::XPathVisitor::DoctypeConfig::HTML5 in Nokogiri.
       def xpath_doctype
         :html5
       end

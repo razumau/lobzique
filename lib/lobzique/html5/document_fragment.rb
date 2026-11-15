@@ -53,7 +53,8 @@ module Lobzique
 
         context = options.delete(:context) if options.key?(:context)
 
-        # lobzique: Html5ever is Nokogiri's Gumbo, renamed after the engine
+        # lobzique: Html5ever is the Gumbo of Nokogiri, renamed after
+        # the engine.
         options[:max_attributes] ||= Html5ever::DEFAULT_MAX_ATTRIBUTES
         options[:max_errors] ||= options.delete(:max_parse_errors) || Html5ever::DEFAULT_MAX_ERRORS
         options[:max_tree_depth] ||= Html5ever::DEFAULT_MAX_TREE_DEPTH
@@ -66,8 +67,8 @@ module Lobzique
       end
 
       private def noscript_parsing_mode(doc, options)
-        # lobzique: HTML4 documents reach here too, and serialize noscript
-        # content as markup
+        # lobzique: HTML4 documents reach here too. They serialize noscript
+        # content as markup.
         doc_mode = doc.is_a?(HTML5::Document) ? doc.parse_noscript_content_as_text : false
         mode = options.fetch(:parse_noscript_content_as_text, doc_mode) ? true : false
 

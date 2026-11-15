@@ -1,5 +1,5 @@
-//! `XML::DocumentFragment`. Ruby's `DocumentFragment.new` calls
-//! `native_new` and then `initialize`, so subclasses only override the latter.
+//! `XML::DocumentFragment`. `DocumentFragment.new` of Ruby calls `native_new`
+//! and then `initialize`, so subclasses override only the latter.
 
 use super::document;
 use super::node::{wrap_as, NODE};

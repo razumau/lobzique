@@ -1,9 +1,9 @@
 #![no_main]
 
-//! Parsing any input, as a document or as a fragment in one of several
-//! contexts, must leave a consistent tree that serializes and answers
-//! Nokogiri's read-only queries without panicking. The first byte picks how
-//! the rest is parsed.
+//! Input parsed as a document, or as a fragment in one of several contexts,
+//! must leave a consistent tree. The tree must serialize and answer
+//! the read-only queries of Nokogiri without a panic. The first byte picks
+//! how the rest is parsed.
 
 use libfuzzer_sys::fuzz_target;
 use lobzique_core::dom::{Document, DocumentKind, NodeId};
@@ -26,7 +26,7 @@ fuzz_target!(|data: &[u8]| {
     let Some((&selector, input)) = data.split_first() else {
         return;
     };
-    // Nokogiri's defaults; without a depth limit, deep input is quadratic
+    // Nokogiri's defaults. Without a depth limit, deep input is quadratic.
     let options = Options {
         max_attributes: Some(400),
         max_errors: Some(usize::from(selector & 1)),
@@ -65,8 +65,8 @@ fuzz_target!(|data: &[u8]| {
     query(&document, root);
 });
 
-/// A sample of nodes, since a path or a document order costs as much as the
-/// node's depth and its preceding siblings.
+/// A sample of nodes, because a path or a document order costs as much
+/// as the depth of the node and its preceding siblings.
 fn query(document: &Document, root: NodeId) {
     let ids: Vec<NodeId> = document.node_ids().collect();
     let sample: Vec<NodeId> = ids.iter().copied().step_by(ids.len() / 64 + 1).collect();

@@ -5,8 +5,8 @@
 module Lobzique
   module HTML4
     class DocumentFragment < XML::DocumentFragment
-      # Parse a fragment in a new HTML4::Document whose encoding is the
-      # input's, or UTF-8 for binary input.
+      # Parse a fragment in a new HTML4::Document whose encoding is the encoding
+      # of the input, or UTF-8 for binary input.
       def self.parse(
         input,
         encoding_ = nil, options_ = XML::ParseOptions::DEFAULT_HTML,
@@ -47,11 +47,11 @@ module Lobzique
         @parse_options = options
         yield options if block_given?
 
-        # lobzique: the HTML5 fragment parser, in <body> or in the context
-        # given (plan.md decision 3). Nokogiri parses the input in a document
-        # of its own, or as a <div>'s content in the context. The input is
-        # decoded as that document's parse would decode it, after markup, so
-        # a byte order mark is a character.
+        # lobzique: the HTML5 fragment parser, in <body> or in the given context
+        # (plan.md decision 3). Nokogiri parses the input in a document
+        # of its own, or as the content of a <div> in the context. The input
+        # is decoded as the parse of that document would decode it, after
+        # the markup, so a byte order mark is a character.
         input = input.to_str
         encoding = document.encoding
         encoding ||= input.encoding.name unless input.encoding == Encoding::ASCII_8BIT
@@ -65,7 +65,7 @@ module Lobzique
           max_tree_depth: Html5ever::DEFAULT_MAX_TREE_DEPTH,
           keep_bom: true
         )
-        # Html5ever.fragment keeps errors in @errors, as HTML5's fragments do
+        # Html5ever.fragment keeps errors in @errors, as HTML5 fragments do.
         parse_errors = instance_variable_defined?(:@errors) ? remove_instance_variable(:@errors) : []
         self.errors = errors + parse_errors
         children

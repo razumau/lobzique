@@ -1,9 +1,9 @@
-//! Nokogiri's `CSS::XPathVisitor` (lib/nokogiri/css/xpath_visitor.rb),
-//! building the XPath tree that the visitor writes as a string. Where the
-//! visitor pastes tokens into XPath as written, this follows how libxml2
-//! would read the result, down to strings that aren't valid XPath, which
-//! become [`crate::xpath::Error::InvalidExpression`] for evaluation to raise, as libxml2
-//! raises when Nokogiri evaluates them.
+//! Port of Nokogiri's `CSS::XPathVisitor` (lib/nokogiri/css/xpath_visitor.rb).
+//! It builds the XPath tree that the visitor writes as a string. The visitor
+//! pastes tokens into XPath as written. This code follows how libxml2 reads
+//! the result, including strings that are not valid XPath. Those become
+//! [`crate::xpath::Error::InvalidExpression`], which evaluation raises,
+//! as libxml2 does when Nokogiri evaluates them.
 
 use super::parser::{
     unescape_string, Argument, AttributeName, AttributeOperator, AttributeSubject, Combinator,
@@ -16,9 +16,9 @@ use crate::xpath::{
 };
 
 pub enum Failure {
-    /// Raised while translating, as Nokogiri raises from `xpath_for`.
+    /// Raised while translating, as Nokogiri raises it from `xpath_for`.
     Syntax(SyntaxError),
-    /// Translated into a string libxml2 can't parse.
+    /// Translates to a string that libxml2 cannot parse.
     Invalid,
 }
 
@@ -30,11 +30,11 @@ impl From<SyntaxError> for Failure {
 
 type Result<T> = std::result::Result<T, Failure>;
 
-/// What a function or simple selector translates to, which decides where
-/// the string can go.
+/// The translation of a function or simple selector. It decides
+/// where the string can go.
 enum Fragment {
-    /// A relative location path. `axis_free` when it is a bare node test,
-    /// which can follow an axis (`self::comment()`), unlike `child::text()`.
+    /// A relative location path. `axis_free` is true for a bare node test.
+    /// It can follow an axis (`self::comment()`), but `child::text()` cannot.
     Steps {
         steps: Vec<Step>,
         axis_free: bool,
@@ -51,15 +51,15 @@ impl Fragment {
     }
 }
 
-/// A condition's translation, `a or b` kept apart: the visitor joins
-/// conditions with a bare ` and `, which binds tighter.
+/// The translation of a condition. `a or b` stays separate, because the visitor
+/// joins conditions with a bare ` and `, which binds tighter.
 enum Term {
     One(Expr),
     Or(Expr, Expr),
 }
 
-/// Where the next simple selector's string is pasted: after `/` it starts a
-/// step of its own, after `::` it is the node test of a given axis.
+/// Where the string of the next simple selector goes. After `/` it starts
+/// a step of its own. After `::` it is the node test of a given axis.
 #[derive(Clone, Copy)]
 enum Join {
     Slash,
@@ -86,7 +86,7 @@ impl<'a> Translator<'a> {
             Some(Combinator::Child | Combinator::DirectAdjacent | Combinator::Following) => {
                 (Path::relative(Vec::new()), None)
             }
-            // `.////p` and the like
+            // Gives `.////p` and similar.
             Some(Combinator::Descendant) => return Err(Failure::Invalid),
             None => match prefix {
                 Prefix::Global => (descendants(true), Some(Join::Slash)),
@@ -111,7 +111,6 @@ impl<'a> Translator<'a> {
         Ok(path)
     }
 
-    /// The selector's simple selectors and combinators, appended to `path`.
     fn chain(&mut self, path: &mut Path, mut join: Join, selector: &Selector) -> Result<()> {
         self.simple(path, join, &selector.first)?;
         for (combinator, simple) in &selector.rest {
@@ -121,7 +120,6 @@ impl<'a> Translator<'a> {
         Ok(())
     }
 
-    /// A simple selector pasted after `join`.
     fn simple(&mut self, path: &mut Path, join: Join, simple: &Simple) -> Result<()> {
         let (steps, axis_free, predicates) = match simple {
             Simple::Element { name, conditions } => {
@@ -138,7 +136,7 @@ impl<'a> Translator<'a> {
                 condition,
             } => {
                 let Fragment::Steps { steps, axis_free } = self.function(function)? else {
-                    // `position()=1` and the like are no steps
+                    // `position()=1` and similar are not steps.
                     return Err(Failure::Invalid);
                 };
                 let predicates = match condition {
@@ -168,9 +166,9 @@ impl<'a> Translator<'a> {
     /// `visit_element_name`
     fn element_test(&self, name: &ElementName) -> Result<NodeTest> {
         if let (None, local) = (&name.prefix, name.local.as_str()) {
-            // HTML5 has namespaces that CSS queries ignore. The visitor
-            // writes `*:name`, or a `local-name()` test for what isn't an
-            // XPath name
+            // HTML5 has namespaces that CSS queries ignore. The visitor writes
+            // `*:name`, or a `local-name()` test for a name
+            // that is not an XPath name.
             if self.options.html && local != "*" {
                 if self.options.builtins && xpath_name(local) {
                     ncname(local)?;
@@ -202,10 +200,9 @@ impl<'a> Translator<'a> {
         Ok(test)
     }
 
-    /// The predicates a compound's conditions make: `visit_combinator`
-    /// joins them with ` and `, except that a final `*-of-type` gets
-    /// predicates of its own (`][`), so it counts only the nodes that pass
-    /// the conditions before it.
+    /// The predicates of the conditions of a compound. `visit_combinator` joins
+    /// them with ` and `. A final `*-of-type` gets its own predicates
+    /// (`][`), so it counts only the nodes that pass the conditions before it.
     fn conditions(&mut self, conditions: &[Condition]) -> Result<Vec<Expr>> {
         match conditions.split_last() {
             Some((last, init)) if !init.is_empty() && is_of_type(last) => Ok(vec![
@@ -216,7 +213,6 @@ impl<'a> Translator<'a> {
         }
     }
 
-    /// Conditions joined with ` and `, read as XPath reads them.
     fn terms(&mut self, conditions: &[Condition]) -> Result<Expr> {
         let mut disjuncts: Vec<Vec<Expr>> = vec![Vec::new()];
         for condition in conditions {
@@ -267,7 +263,7 @@ impl<'a> Translator<'a> {
             Condition::Not(Negation::Conditions(conditions)) => {
                 let predicates = self.conditions(conditions)?;
                 if predicates.len() > 1 {
-                    // `not(a][b)`
+                    // Gives `not(a][b)`.
                     return Err(Failure::Invalid);
                 }
                 Expr::Call(F::Not, predicates)
@@ -406,13 +402,13 @@ impl<'a> Translator<'a> {
         Ok(Fragment::Expr(expr))
     }
 
-    /// `has(…)`: `.//` and the first selector, or `.` and the selector when
-    /// it has nothing before its combinator. The rest are ignored.
+    /// `has(…)`: `.//` and the first selector. Or `.` and the selector,
+    /// when it has nothing before its combinator. The rest are ignored.
     fn has(&mut self, argument: Option<&Argument>) -> Result<Fragment> {
         let Some(Argument::Selector(selector)) = argument else {
             return Err(Failure::Invalid);
         };
-        // The visitor checks `value[0].nil?`, which `|name` also passes
+        // The visitor checks `value[0].nil?`, which `|name` also passes.
         let bare_no_namespace = selector.rest.is_empty()
             && matches!(
                 &selector.first,
@@ -421,7 +417,6 @@ impl<'a> Translator<'a> {
             );
         let mut path = Path::relative(vec![Step::new(Axis::Self_, NodeTest::Node)]);
         let join = match selector.leading {
-            // `.foo`
             None if bare_no_namespace => return Err(Failure::Invalid),
             None => {
                 path.steps
@@ -442,9 +437,7 @@ impl<'a> Translator<'a> {
         })
     }
 
-    /// `nokogiri:name(., arguments…)`
     fn custom(&mut self, name: &str, arguments: &[Argument]) -> Result<Expr> {
-        // validate_xpath_function_name
         if name.starts_with('-') {
             return Err(SyntaxError(format!("Invalid XPath function name '{name}'")).into());
         }
@@ -461,7 +454,7 @@ impl<'a> Translator<'a> {
         })
     }
 
-    /// `css_class`: the builtin, or the plain XPath 1.0 the visitor writes
+    /// `css_class`: the builtin, or the plain XPath 1.0 that the visitor writes
     /// without builtins.
     fn css_class(&self, haystack: Expr, needle: &str) -> Result<Expr> {
         if self.options.builtins {
@@ -486,7 +479,6 @@ impl<'a> Translator<'a> {
     }
 }
 
-/// The step a combinator adds, and where the next selector goes.
 fn combine(path: &mut Path, combinator: Combinator) -> Join {
     match combinator {
         Combinator::Child => Join::Slash,
@@ -495,7 +487,6 @@ fn combine(path: &mut Path, combinator: Combinator) -> Join {
                 .push(Step::new(Axis::DescendantOrSelf, NodeTest::Node));
             Join::Slash
         }
-        // `/following-sibling::*[1]/self::`
         Combinator::DirectAdjacent => {
             let mut sibling = Step::new(Axis::FollowingSibling, NodeTest::Any);
             sibling.predicates.push(Expr::Number(1.0));
@@ -506,7 +497,6 @@ fn combine(path: &mut Path, combinator: Combinator) -> Join {
     }
 }
 
-/// `//` or `.//` before the first step.
 fn descendants(absolute: bool) -> Path {
     Path {
         absolute,
@@ -530,8 +520,8 @@ pub(super) fn is_of_type(condition: &Condition) -> bool {
     .any(|of_type| name.contains(of_type))
 }
 
-/// `nth`: the position along the axis, or among element siblings for the
-/// `*-child` forms, against `an+b`.
+/// `nth`: compares `an+b` with the position along the axis, or among
+/// the element siblings for the `*-child` forms.
 fn nth(nth: &Nth, child: bool, last: bool) -> Result<Expr> {
     let (a, b) = read_a_and_positive_b(nth)?;
     let position = || match (child, last) {
@@ -594,7 +584,7 @@ pub(super) fn read_a_and_positive_b(nth: &Nth) -> std::result::Result<(i128, i12
     }
 }
 
-/// Ruby's `%` on integers, whose result takes the divisor's sign.
+/// Ruby's `%` on integers. The result takes the sign of the divisor.
 fn ruby_modulo(x: i128, divisor: i128) -> i128 {
     let remainder = x.wrapping_rem(divisor);
     if remainder != 0 && (remainder < 0) != (divisor < 0) {
@@ -604,9 +594,9 @@ fn ruby_modulo(x: i128, divisor: i128) -> i128 {
     }
 }
 
-/// Ruby's `String#to_i`: leading whitespace, a sign, then digits that
-/// single underscores may separate, and nothing for anything else. Past
-/// i128, where Ruby has bignums, it saturates.
+/// Ruby's `String#to_i`: leading whitespace, a sign, then digits. Single
+/// underscores can separate the digits. Anything else gives 0. Above i128,
+/// where Ruby has bignums, it saturates.
 fn ruby_to_i(text: &str) -> i128 {
     let text = text.trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r']);
     let (sign, digits) = match text.as_bytes().first() {
@@ -632,7 +622,6 @@ fn ruby_to_i(text: &str) -> i128 {
     sign * value
 }
 
-/// `.to_i` on a function's first argument, as `:nth-child(3)` takes it.
 pub(super) fn to_i(argument: Option<&Argument>) -> std::result::Result<i128, SyntaxError> {
     match argument {
         None => Ok(0),
@@ -643,19 +632,18 @@ pub(super) fn to_i(argument: Option<&Argument>) -> std::result::Result<i128, Syn
     }
 }
 
-/// `xpath_function_argument`, for `contains(…)` and custom pseudo-classes:
-/// a string's unescaped text as a literal, the rest as `token` pastes it.
+/// `xpath_function_argument`, for `contains(…)` and custom pseudo-classes.
+/// The unescaped text of a string becomes a literal. Other tokens are pasted
+/// as `token` gives them.
 fn function_argument(argument: Option<&Argument>) -> Result<Expr> {
     match argument {
         Some(Argument::String(string)) => literal(&unescape_string(&string[1..string.len() - 1])),
         Some(Argument::Attribute(name)) => attribute_path(name),
-        // The visitor has no `visit_nth`
         Some(Argument::Nth(_)) => Err(SyntaxError("undefined method 'visit_nth'".into()).into()),
         argument => token(argument),
     }
 }
 
-/// A function argument pasted into XPath as written.
 fn token(argument: Option<&Argument>) -> Result<Expr> {
     match argument {
         Some(Argument::Number(number)) => number
@@ -670,7 +658,7 @@ fn token(argument: Option<&Argument>) -> Result<Expr> {
             }
             literal(text)
         }
-        // A name is a child path; a leading `-` negates it
+        // A name is a child path. A leading `-` negates it.
         Some(Argument::Ident(ident)) => match ident.strip_prefix('-') {
             Some(name) => Ok(Expr::arithmetic(
                 Arithmetic::Subtract,
@@ -679,7 +667,7 @@ fn token(argument: Option<&Argument>) -> Result<Expr> {
             )),
             None => child_path(ident),
         },
-        // A node's #to_s, or nothing at all
+        // The visitor writes the `#to_s` of a node, or nothing.
         Some(Argument::Nth(_) | Argument::Attribute(_) | Argument::Selector(_)) | None => {
             Err(Failure::Invalid)
         }
@@ -697,8 +685,8 @@ fn attribute_path(name: &AttributeName) -> Result<Expr> {
     Ok(Expr::Path(Path::relative(vec![attribute_step(name)?])))
 }
 
-/// `visit_attrib_name`: `@name`, `@prefix:name`, or for a name XPath can't
-/// write, `@*[namespace-uri()='' and name()='…']`.
+/// `visit_attrib_name`: `@name`, `@prefix:name`, or, for a name that XPath
+/// cannot write, `@*[namespace-uri()='' and name()='…']`.
 fn attribute_step(name: &AttributeName) -> Result<Step> {
     let local = name.local.as_str();
     if let Some(prefix) = &name.prefix {
@@ -731,7 +719,6 @@ fn attribute_step(name: &AttributeName) -> Result<Step> {
     Ok(step)
 }
 
-/// `@name`, for names known to be valid.
 fn attribute(name: &str) -> Expr {
     Expr::Path(Path::relative(vec![Step::new(
         Axis::Attribute,
@@ -764,14 +751,13 @@ fn count_is(axis: Axis, n: f64) -> Expr {
     Expr::compare(Comparison::Equal, count(axis), Expr::Number(n))
 }
 
-/// `node()`
 fn children() -> Expr {
     Expr::Path(Path::relative(vec![Step::new(Axis::Child, NodeTest::Node)]))
 }
 
-/// `xpath_string_literal`: the text as an XPath string, through `concat()`
-/// when it holds both quotes. libxml2 rejects one with a character XML
-/// doesn't allow.
+/// `xpath_string_literal`: the text as an XPath string. It uses `concat()`
+/// when the text has both quotes. libxml2 rejects a character that XML does
+/// not allow.
 fn literal(text: &str) -> Result<Expr> {
     check_literal(text)?;
     Ok(Expr::Literal(text.as_bytes().to_vec()))
@@ -785,8 +771,8 @@ fn check_literal(text: &str) -> Result<()> {
     }
 }
 
-/// The visitor's `XPATH_NAME`: an NCName as far as ASCII goes, leaving
-/// other characters to the XPath parser.
+/// The `XPATH_NAME` of the visitor: an NCName as far as ASCII goes. The XPath
+/// parser handles other characters.
 pub(super) fn xpath_name(name: &str) -> bool {
     let mut chars = name.chars();
     chars
@@ -795,7 +781,6 @@ pub(super) fn xpath_name(name: &str) -> bool {
         && chars.all(|c| matches!(c, '_' | '.' | '-') || c.is_ascii_alphanumeric() || !c.is_ascii())
 }
 
-/// `prefix:local` or `local`, each part an NCName.
 fn qname(name: &str) -> Result<QName> {
     Ok(match name.split_once(':') {
         Some((prefix, local)) => QName {
@@ -809,7 +794,7 @@ fn qname(name: &str) -> Result<QName> {
     })
 }
 
-/// XML's NCName, as libxml2's XPath parser reads names.
+/// XML's NCName, as the XPath parser of libxml2 reads names.
 fn ncname(name: &str) -> Result<&str> {
     let mut chars = name.chars();
     let valid = chars.next().is_some_and(is_name_start) && chars.all(is_name_char);

@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-# Adapted from Nokogiri 1.19.7, lib/nokogiri/gumbo.rb (MIT, see LICENSE-NOKOGIRI.md).
-# lobzique: renamed from Gumbo after the engine it binds (ARCHITECTURE.md,
-# departures).
+# Adapted from Nokogiri 1.19.7, lib/nokogiri/gumbo.rb (MIT, see
+# LICENSE-NOKOGIRI.md). lobzique: renamed from Gumbo after the engine
+# that it binds (ARCHITECTURE.md, departures).
 
 module Lobzique
   module Html5ever

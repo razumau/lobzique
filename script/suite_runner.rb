@@ -8,10 +8,10 @@ require "rbconfig"
 module SuiteRunner
   module_function
 
-  # Drops the caller's Bundler setup (`bundle exec`, an exported BUNDLE_GEMFILE),
-  # which would make a checkout resolve our Gemfile. The Ruby running this
-  # script goes first in PATH, so checkouts' .ruby-version files don't switch
-  # Rubies under shims.
+  # Drops the Bundler setup of the caller (`bundle exec`, an exported
+  # BUNDLE_GEMFILE), which would make a checkout resolve our Gemfile. The Ruby
+  # that runs this script goes first in PATH, so the .ruby-version files
+  # of checkouts do not switch Rubies under shims.
   def env(vars)
     base = defined?(Bundler) ? Bundler.unbundled_env : ENV.to_h
     base.merge("PATH" => "#{RbConfig::CONFIG["bindir"]}:#{base["PATH"]}", **vars)
@@ -21,8 +21,8 @@ module SuiteRunner
     system(env(vars), *cmd, chdir:, unsetenv_others: true, exception: true)
   end
 
-  # The ref is fetched into refs/pinned/<ref>, so a checkout whose ref changed
-  # or whose fetch failed fetches again, and one that has it doesn't.
+  # The ref is fetched into refs/pinned/<ref>. A checkout whose ref changed
+  # or whose fetch failed fetches again. A checkout that has the ref does not.
   def checkout(vars, repo, ref, dir)
     pinned = "refs/pinned/#{ref}"
     FileUtils.mkdir_p(dir)
@@ -33,8 +33,8 @@ module SuiteRunner
     run(vars, "git", "checkout", "-q", "-f", pinned, chdir: dir)
   end
 
-  # Returns the exit status. Minitest and RSpec exit 1 when tests fail, so a
-  # crash shows as a missing summary instead.
+  # Returns the exit status. Minitest and RSpec exit 1 when tests fail,
+  # so a crash shows as a missing summary.
   def run_suite(vars, cmd, chdir:, log:)
     system(env(vars), *cmd, chdir:, out: log, err: [:child, :out], unsetenv_others: true)
     $?.exitstatus
@@ -44,7 +44,7 @@ module SuiteRunner
     File.read(log, encoding: "UTF-8").scrub
   end
 
-  # minitest-reporters prints "N tests" instead of "N runs".
+  # minitest-reporters prints "N tests", not "N runs".
   def minitest_summary(log)
     read(log).scan(/^\d+ (?:runs|tests), .*$/).last
   end
@@ -54,7 +54,7 @@ module SuiteRunner
     result[:summary] || "no summary (exit #{result[:status]}), see #{result[:log]}"
   end
 
-  # Failure lists of a suite that didn't finish are incomplete.
+  # The failure lists of a suite that did not finish are incomplete.
   def count(names, *results)
     (results.all? { _1[:summary] }) ? names.size : "?"
   end

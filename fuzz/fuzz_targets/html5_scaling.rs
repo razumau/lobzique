@@ -1,16 +1,16 @@
 #![no_main]
 
-//! Catches superlinear work too small for `-timeout` to notice. The input is
-//! repeated K, 2K and 4K times and the core counts each run's work
-//! (`lobzique_core::work`). Per byte of input and output, the second step
-//! may cost at most RATIO times the first: linear work keeps the ratio at 1,
-//! quadratic doubles it.
+//! Catches superlinear work that is too small for `-timeout` to notice.
+//! The input is repeated K, 2K and 4K times, and the core counts the work
+//! of each run (`lobzique_core::work`). Per byte of input and output,
+//! the second step can cost at most RATIO times the first. Linear work keeps
+//! the ratio at 1. Quadratic work doubles it.
 //!
-//! - Bytes, not copies: a copy's output varies, e.g. while reopened
+//! - Bytes, not copies: the output of a copy varies, for example while reopened
 //!   formatting elements accumulate up to the Noah's Ark cap.
-//! - K = 12: a token spanning copies (a quoted attribute value) makes work
-//!   arrive in steps, and the samples split them evenly only if K is a
-//!   multiple of the period, typically 2, 3, 4 or 6.
+//! - K = 12: a token that spans copies (a quoted attribute value) makes work
+//!   arrive in steps. The samples split the steps evenly only if K
+//!   is a multiple of the period, typically 2, 3, 4 or 6.
 //! - Each insertion walks up the tree, so the allowance grows with depth.
 //!
 //! The first byte picks the options, as in the html5 target.
@@ -25,15 +25,13 @@ use lobzique_core::xml::{self, save_options::*};
 
 const K: usize = 12;
 const MAX_UNIT: usize = 512;
-/// 3/2, as a numerator and denominator.
 const RATIO: (u128, u128) = (3, 2);
-/// For the parser's state settling over the first copies.
+/// For the state of the parser to settle over the first copies.
 const SLACK: u64 = 256;
 
 struct Run {
     work: u64,
     depth: u64,
-    /// Bytes of input and of serialized HTML.
     size: u64,
 }
 
@@ -55,8 +53,8 @@ fuzz_target!(|data: &[u8]| {
     let (first, first_size) = (delta(&a, &b, |r| r.work), size(&a, &b));
     let (second, second_size) = (delta(&b, &c, |r| r.work), size(&b, &c));
     let (numerator, denominator) = RATIO;
-    // second / second_size <= RATIO * first / first_size * (c.depth + 1) / (b.depth + 1),
-    // without division
+    // second / second_size <= RATIO * first / first_size * (c.depth + 1)
+    // / (b.depth + 1), written without division.
     let allowed = (numerator * first + denominator * u128::from(SLACK))
         * second_size
         * u128::from(c.depth.max(b.depth) + 1);
@@ -77,7 +75,7 @@ fuzz_target!(|data: &[u8]| {
     );
 });
 
-/// Parses and serializes `input`; `None` if it exceeds a parser limit.
+/// Parses and serializes `input`. `None` if it exceeds a parser limit.
 fn run(input: &[u8], flags: u8) -> Option<Run> {
     let options = Options {
         max_attributes: Some(400),
@@ -106,7 +104,6 @@ fn run(input: &[u8], flags: u8) -> Option<Run> {
     })
 }
 
-/// How many levels of nodes are below `root`.
 fn depth(document: &Document, root: NodeId) -> u64 {
     let mut deepest = 0;
     let mut levels = vec![(root, 0u64)];

@@ -11,7 +11,7 @@ module Lobzique
         def scrub(node)
           return CONTINUE if html5lib_sanitize(node) == CONTINUE
 
-          # lobzique: create_text_node, not Nokogiri::XML::Text.new
+          # lobzique: create_text_node, not Nokogiri::XML::Text.new.
           node.add_next_sibling(node.document.create_text_node(node.to_s))
           node.remove
           STOP
@@ -27,7 +27,7 @@ module Lobzique
           else
             "\n#{node.content}\n"
           end
-          # lobzique: create_text_node, not Nokogiri::XML::Text.new
+          # lobzique: create_text_node, not Nokogiri::XML::Text.new.
           node.add_next_sibling(node.document.create_text_node(replacement))
           node.remove
         end
@@ -39,7 +39,7 @@ module Lobzique
         newline_block_elements: NewlineBlockElements
       }.freeze
 
-      # The Loofah classes they port; their instances hold no state.
+      # The Loofah classes that they port. Their instances hold no state.
       PORTS = MAP.values.to_h { |port| [port.superclass, port] }.freeze
     end
   end

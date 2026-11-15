@@ -91,8 +91,8 @@ module FetchFixtures
     globs.any? { |g| File.fnmatch?(git_glob(g), path, flags) }
   end
 
-  # One sparse, blob-less, depth-1 checkout per (repo, commit), shared by all
-  # sources that point at it (the three wpt sources fetch wpt once).
+  # One sparse, blob-less, depth-1 checkout for each (repo, commit). All sources
+  # that point at it share it (the three wpt sources fetch wpt once).
   def checkout(repo_url, commit, sources, workdir)
     dir = File.join(workdir, Digest::SHA256.hexdigest("#{repo_url}@#{commit}")[0, 12])
     FileUtils.mkdir_p(dir)
@@ -107,8 +107,8 @@ module FetchFixtures
     git("checkout", "-q", "FETCH_HEAD", dir: dir)
     got = git("rev-parse", "HEAD", dir: dir).strip
     raise Error, "#{repo_url}: expected #{commit}, got #{got}" unless got == commit
-    # Paths are arbitrary bytes; ones that aren't valid UTF-8 can never match
-    # a pattern from sources.yml, so they are dropped rather than mangled.
+    # Paths are arbitrary bytes. A path that is not valid UTF-8 can never match
+    # a pattern from sources.yml, so it is dropped, not mangled.
     tree = git("ls-tree", "-r", "-z", "HEAD", dir: dir).b.split("\0".b).filter_map do |line|
       meta, path = line.split("\t".b, 2)
       path = path.force_encoding(Encoding::UTF_8)
@@ -163,10 +163,11 @@ module FetchFixtures
 
   # -------------------------------------------------------------- transforms
 
-  # DOMPurify ships its fixtures as `export default [ ...JSON... ];` with a
-  # trailing comma. Convert to strict JSON without evaluating any JavaScript:
-  # drop the wrapper, drop commas that precede ] or } outside strings, and
-  # refuse anything else that isn't JSON (quotes, comments, identifiers).
+  # DOMPurify ships its fixtures as `export default [ ...JSON...
+  # ];` with a trailing comma. The conversion to strict JSON does not evaluate
+  # any JavaScript: it drops the wrapper, drops commas that precede
+  # ] or } outside strings, and refuses anything else that is not JSON (quotes,
+  # comments, identifiers).
   def js_literal_to_json(text)
     body = text.sub(/\A\s*export\s+default\s*/, "").sub(/;\s*\z/, "")
     chars = body.chars
@@ -269,8 +270,9 @@ module FetchFixtures
     known = load_sources.map(&:name)
     manifest = load_manifest.slice(*known)
 
-    # Stage everything first; only replace fixture directories once every
-    # source has been fetched, so a failed run leaves the old state intact.
+    # Stage everything first. Replace the fixture directories only
+    # when every source is fetched, so that a failed run leaves the old state
+    # intact.
     Dir.mktmpdir("fixtures-") do |work|
       staging = File.join(work, "staging")
       staged = []
